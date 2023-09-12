@@ -33,6 +33,7 @@ class SamDetector(GeneralizedRCNN):
         self,
         fp16=False,
         sam=None,
+        mask_thr_binary=0.5,
         **kwargs
     ):
         """
@@ -49,11 +50,12 @@ class SamDetector(GeneralizedRCNN):
         super().__init__(**kwargs)
         assert self.proposal_generator is not None
         self.sam = sam
+        self.mask_thr_binary = mask_thr_binary
     
     @classmethod
     def from_config(cls, cfg):
         # ret = super().from_config(cfg)
-        sam = sam_model_registry[cfg.MODEL.BACKBONE.TYPE](cfg.MODEL.WEIGHTS)
+        sam = sam_model_registry[cfg.MODEL.BACKBONE.TYPE]()
         # sam_img_encoder = copy.deepcopy(sam.image_encoder)
 
         # the img_encoder and img_feat are not passes to buil_backbone
@@ -68,6 +70,7 @@ class SamDetector(GeneralizedRCNN):
             "pixel_std": cfg.MODEL.PIXEL_STD,
             "sam": sam
         })
+        ret.update(mask_thr_binary = cfg.TEST.MASK_THR_BINARY)
         return ret
 
     def inference(
@@ -80,19 +83,22 @@ class SamDetector(GeneralizedRCNN):
         assert detected_instances is None
         # normalize images
         images = self.preprocess_image(batched_inputs)
-        # the augmentation is not sure?
         img_embedding_feat, inter_feats = self.extract_feat(images.tensor)
 
         fpn_features = self.backbone(inter_feats)
         # proposal_generator need to be trained before testing
-        proposals, _ = self.proposal_generator(images, fpn_features, None)
-        
+        bz = len(images)
+        images_input_shape = [(self.sam.image_encoder.img_size, self.sam.image_encoder.img_size) for _ in range(bz)]
+        proposals, _ = self.proposal_generator(images_input_shape, fpn_features, None) #samFpn
         results, _ = self.roi_heads(self.sam, images, img_embedding_feat, fpn_features, proposals)
+        # batched_inputs have ori_image_sizes
+        # images.image_sizes have input_image_sizes
+        img_input_sizes = images.image_sizes
         if do_postprocess:
             assert not torch.jit.is_scripting(), \
                 "Scripting is not supported for postprocess."
             return self._postprocess(
-                results, batched_inputs, images.image_sizes)
+                instances=results, batched_inputs=batched_inputs, image_sizes=img_input_sizes)
         else:
             return results
         
@@ -113,9 +119,10 @@ class SamDetector(GeneralizedRCNN):
         else:
             fpn_features = self.backbone(inter_feats)
         # fpn_features: Dict{'feat0': Tuple[2*Tensor[256,32,32]], 'feat1': Tuple[2*Tensor[256,64,64]], ...}
-
+        bz = len(images)
+        images_input_shape = [(self.sam.image_encoder.img_size, self.sam.image_encoder.img_size) for _ in range(bz)]
         proposals, proposal_losses = self.proposal_generator(
-            images, fpn_features, gt_instances)
+            images_input_shape, fpn_features, gt_instances)
         # proposals: List[bz * Instance[1000 * Instances(num_instances, image_height, image_width, fields=[proposal_boxes: Boxes(tensor([1,4])), objectness_logits:tensor[1],])]]
         
         predictions, detector_losses = self.roi_heads(self.sam, images, img_embedding_feat, fpn_features, proposals, gt_instances, origin_size)
@@ -129,30 +136,32 @@ class SamDetector(GeneralizedRCNN):
         # feat: Tensor[bz, 256, 64, 64]  inter_feats: List[32*Tensor[bz,64,64,1280]]
         return feat, inter_features
     
-    @staticmethod
-    def _postprocess(self, instances, batched_inputs: List[Dict[str, torch.Tensor]], image_sizes):
+    def _postprocess(self, instances: List[Dict[str,Instances]], batched_inputs: List[Dict[str, torch.Tensor]], image_sizes: List[Tuple[int,int]]):
         """
+        instances: with instance(mask_preds, iou_preds)
         Rescale the output instances to the target size.
+        Return: processed_results: List[bz*Dict['instances':Instances('pred_boxes', 'scores', pred_classes', 'pred_masks', 'pred_ious')]]
+
         """
         # note: private function; subject to changes
-        import ipdb
-        ipdb.set_trace()
         sam_img_size = (self.sam.image_encoder.img_size, self.sam.image_encoder.img_size)
-        processed_results = []
         for results_per_img, input_per_img, img_size in zip(
             instances, batched_inputs, image_sizes
-        ):
+        ):  
+            mask_per_img = results_per_img["instances"].pred_masks.sigmoid()
             ori_height = input_per_img.get("height")
             ori_width = input_per_img.get("width")
             masks = F.interpolate(
-                results_per_img.mask_pred,
+                mask_per_img.unsqueeze(1),
                 sam_img_size,
                 mode="bilinear",
                 align_corners=False,
             )
             masks = masks[..., : img_size[0], : img_size[1]]
             masks = F.interpolate(masks, (ori_height, ori_width), mode="bilinear", align_corners=False) 
-            results_per_img.mask_pred = masks
-            processed_results.append({"instances": results_per_img})
-
-        return processed_results
+            if self.mask_thr_binary>=0:
+                masks = masks >= self.mask_thr_binary
+            else: 
+                masks = (masks * 255).to(dtype = torch.uint8)
+            results_per_img["instances"].pred_masks = masks.squeeze(1)
+        return instances

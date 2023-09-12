@@ -47,9 +47,6 @@ def build_custom_augmentation(cfg, is_train, scale=None, size=None, \
         augmentation = [ResizeLongestSizeFlip(size=size, pad_mask=pad_mask, mask_pad_val=mask_pad_val, training=is_train)]
     else:
         assert 0, cfg.INPUT.CUSTOM_AUG
-
-    # if is_train:
-    #     augmentation.append(T.RandomFlip())
     return augmentation
 
 

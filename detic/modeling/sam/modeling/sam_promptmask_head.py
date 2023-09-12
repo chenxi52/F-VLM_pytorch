@@ -6,6 +6,7 @@ from detectron2.config import configurable
 from einops import repeat
 from detectron2.structures import Instances, ImageList
 import torch.nn.functional as F
+
 @ROI_MASK_HEAD_REGISTRY.register()
 class samPromptMaskHead(nn.Module):
     @configurable
@@ -85,7 +86,7 @@ class samPromptMaskHead(nn.Module):
                 gt_boxes: Boxes(tensor([[214.0800, 907.2640, 235.6640, 963.2800]], device='cuda:0')), 
                 gt_masks: PolygonMasks(num_instances=1)])
         Returns:
-            A dict of losses in training. The predicted "instances" in inference.
+            A dict of losses in training. The predicted "instances" in inference(List[Dict['instances': Instances]]).
         """
 
         batch_size = roi_feature.shape[0]
@@ -111,9 +112,9 @@ class samPromptMaskHead(nn.Module):
             multimask_output=False,
             res_img_feat=res_img_feat,
         )
-
+        mask_preds = low_res_masks.squeeze(1)
         iou_predictions = iou_predictions.squeeze(1)
-        mask_result = dict(mask_preds = low_res_masks.squeeze(1), mask_iou = iou_predictions)
+        mask_result = dict(mask_preds = mask_preds, mask_iou = iou_predictions)
         # sample pos_ind from box_features, this has been done in the roi's _forward_mask
         if self.training:
             # gt_mask id [1024,1024]
@@ -131,41 +132,17 @@ class samPromptMaskHead(nn.Module):
             mask_result.update(loss_mask = mask_loss_and_target['loss_mask'])
             return mask_result
         else:
-            # return [256,256]
-            instances.update(mask_pred = low_res_masks, iou_pred = iou_predictions)
-            return instances
+            results_instances = []
+            start = end = 0
+            for freq, ins in zip(img_flag_freq, instances):
+                end += freq.cpu().numpy()
+                ins.pred_masks = mask_preds[start: end]
+                ins.pred_ious = iou_predictions[start: end]
+                start = end
+                results_instances.append({'instances':ins})
+            # then check the detector.inference.
+            return results_instances
             
-    def postprocess_masks(
-        self,
-        masks: torch.Tensor,
-        input_size: Tuple[int, ...],
-        original_size: Tuple[int, ...],
-    ) -> torch.Tensor:
-        """
-        Remove padding and upscale masks to the original image size.
-
-        Arguments:
-          masks (torch.Tensor): Batched masks from the mask_decoder,
-            in BxCxHxW format.
-          input_size (tuple(int, int)): The size of the image input to the
-            model, in (H, W) format. Used to remove padding.
-          original_size (tuple(int, int)): The original size of the image
-            before resizing for input to the model, in (H, W) format.
-
-        Returns:
-          (torch.Tensor): Batched masks in BxCxHxW format, where (H, W)
-            is given by original_size.
-        """
-        masks = F.interpolate(
-            masks,
-            (self.train_size, self.train_size),
-            mode="bilinear",
-            align_corners=False,
-        )
-        masks = masks[..., : input_size[0], : input_size[1]]
-        masks = F.interpolate(masks, original_size, mode="bilinear", align_corners=False)
-        return masks
-
 
     def loss_and_target(
             self,
@@ -217,7 +194,6 @@ class samPromptMaskHead(nn.Module):
         """
 
         pos_assigned_gt_inds = [res.gt_classes for res in instances]
-        print(instances)
         gt_masks = [res.gt_masks for res in instances]
         device = pos_assigned_gt_inds[0].device
 

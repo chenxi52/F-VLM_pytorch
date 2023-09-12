@@ -163,8 +163,10 @@ def add_rsprompter_config(cfg):
     _C.INPUT.PAD_MASK = True
     _C.INPUT.MASK_PAD_VAL = 0.0
 
-
     _C.FIND_UNUSED_PARAM = True
+
+    _C.TEST.MASK_THR_BINARY = 0.5
+
 
 
 

@@ -4,8 +4,6 @@ from detic.modeling.sam.build_sam import sam_model_registry
 import torch.nn as nn
 import einops
 import torch
-import math
-import copy
 
 class SAMAggregatorNeck(Backbone):
     def __init__(
@@ -202,7 +200,7 @@ class SAMAggregatorNeck(Backbone):
                 inner_state = x + inner_state
             x = inner_state + layer(inner_state)
         x = self.up_layers[0](x) + x
-        # FPN
+        # FPN TODO
         img_feats_0 = self.up_layers[1](x)
         img_feats_1 = self.up_sample_layers[0](img_feats_0) + self.up_sample_layers[1](img_feats_0)
         img_feats_2 = self.up_sample_layers[2](img_feats_1) + self.up_sample_layers[3](img_feats_1)
@@ -218,9 +216,9 @@ class SAMAggregatorNeck(Backbone):
     
     @property
     def output_shape(self):
-        return {'feat0': ShapeSpec(channels=self.out_channels, stride=self.anchor_stride[0]),
+        return {'feat0': ShapeSpec(channels=self.out_channels, stride=self.anchor_stride[2]),
                 'feat1': ShapeSpec(channels=self.out_channels, stride=self.anchor_stride[1]),
-                'feat2': ShapeSpec(channels=self.out_channels, stride=self.anchor_stride[2])}
+                'feat2': ShapeSpec(channels=self.out_channels, stride=self.anchor_stride[0])}
     
 @BACKBONE_REGISTRY.register()
 def build_sam_vit_fpn_backbone(cfg, input_shape=None):

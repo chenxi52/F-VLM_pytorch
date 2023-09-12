@@ -217,7 +217,6 @@ def main(args):
         samCheckpointer(model, save_dir=cfg.OUTPUT_DIR).resume_or_load(
             cfg.MODEL.WEIGHTS, resume=args.resume
         )
-
         return do_test(cfg, model)
 
     distributed = comm.get_world_size() > 1

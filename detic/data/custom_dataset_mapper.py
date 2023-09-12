@@ -2,7 +2,7 @@
 import copy
 import logging
 import numpy as np
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Tuple
 import torch
 import pycocotools.mask as mask_util
 
@@ -287,7 +287,7 @@ class SamDatasetMapper(DatasetMapper):
     @configurable
     def __init__(self, is_train: bool, **kwargs):
         super().__init__(is_train, **kwargs)
-    
+
     def __call__(self, dataset_dict):
         """
         Args:
@@ -311,7 +311,7 @@ class SamDatasetMapper(DatasetMapper):
         transforms = self.augmentations(aug_input)
         image, sem_seg_gt = aug_input.image, aug_input.sem_seg
 
-        image_shape = image.shape[:2]  # h, w
+        image_shape = image.shape[:2]  #h,w
         # Pytorch's dataloader is efficient on torch.Tensor due to shared-memory,
         # but not efficient on large generic data structures due to the use of pickle & mp.Queue.
         # Therefore it's important to use torch.Tensor.
@@ -364,15 +364,9 @@ class SamDatasetMapper(DatasetMapper):
         # the intersection of original bounding box and the cropping box.
         if self.recompute_boxes:
             instances.gt_boxes = instances.gt_masks.get_bounding_boxes()
-        dataset_dict["instances"] = utils.filter_empty_instances(instances)
-        if not dataset_dict["instances"]:
-        # TODO: check dataset format
-            boxes_xy = [0, 0, image_shape[1], image_shape[0]]
-            boxes = ([BoxMode.convert(boxes_xy, BoxMode.XYWH_REL, BoxMode.XYXY_ABS) ])
-            instances.gt_boxes = Boxes(boxes)
-            gt_mask = np.zeros(image_shape)
-            instances.gt_masks = BitMasks(torch.from_numpy(np.ascontiguousarray(gt_mask)))
-            # instances.gt_classes = 
+
+        instances = utils.filter_empty_instances(instances, by_mask=False)
+        dataset_dict["instances"] = utils.filter_empty_instances(instances, by_box=False)
         return dataset_dict
     
     def annotations_to_instances(self, annos, transforms, image_size, mask_format="polygon"):
@@ -457,4 +451,5 @@ class SamDatasetMapper(DatasetMapper):
         if len(annos) and "keypoints" in annos[0]:
             kpts = [obj.get("keypoints", []) for obj in annos]
             target.gt_keypoints = Keypoints(kpts)
+        
         return target
