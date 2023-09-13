@@ -166,7 +166,7 @@ def add_rsprompter_config(cfg):
     _C.FIND_UNUSED_PARAM = True
 
     _C.TEST.MASK_THR_BINARY = 0.5
-
+    _C.TEST.DO_POSTPROCESS = True
 
 
 

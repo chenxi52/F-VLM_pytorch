@@ -17,7 +17,7 @@ from PIL import Image
 
 import detectron2.data.transforms as T
 from detectron2.data.transforms import ResizeTransform
-from .custom_transform import EfficientDetResizeCropTransform, ResizeSegTransform, FlipPassTransform, NoopPassTransform
+from .custom_transform import EfficientDetResizeCropTransform, ResizeSegTransform, HFlipPassTransform, PadTransform
 from typing import Tuple
 __all__ = [
     "EfficientDetResizeCrop",
@@ -76,14 +76,7 @@ class ResizeLongestSizeFlip(T.Augmentation):
         width, height = img.shape[1], img.shape[0]
         target_size, img_scale = self.get_preprocess_shape(height, width, self.target_size[0])
         scaled_h, scaled_w = target_size
-        prob = np.random.uniform(0,1,[])
-        if self.training:
-            return T.TransformList([ResizeSegTransform(height, width, scaled_h, scaled_w,
-                    self.pad_mask, self.mask_pad_val, self.target_size, self.interp),
-                    FlipPassTransform(width) if prob<self.flip_prob else NoopPassTransform()])
-        else:
-            return ResizeSegTransform(height, width, scaled_h, scaled_w,
-                    self.pad_mask, self.mask_pad_val, self.target_size, self.interp)
+        return ResizeSegTransform(height, width, scaled_h, scaled_w, self.interp)
 
     @staticmethod
     def get_preprocess_shape(
@@ -98,3 +91,24 @@ class ResizeLongestSizeFlip(T.Augmentation):
         newh = int(newh + 0.5)
         return (newh, neww), scale
 
+class PadAug(T.Augmentation):
+    def __init__(self, target_size) -> None:
+        super().__init__()
+        self.target_size = target_size
+
+    def get_transform(self, img) -> Transform:
+        width, height = img.shape[1], img.shape[0]
+        return PadTransform(height, width, self.target_size)
+
+class HFlipMaskAug(T.RandomFlip):
+    def __init__(self, prob=0.5, *, horizontal=True, vertical=False):
+        super().__init__(prob, horizontal=horizontal, vertical=vertical)
+    
+    def get_transform(self, image):
+        h, w = image.shape[:2]
+        do = self._rand_range() < self.prob
+        if do:
+            return HFlipPassTransform(w)
+        else:
+            return NoOpTransform()
+            

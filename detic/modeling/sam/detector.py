@@ -1,11 +1,9 @@
 # Copyright (c) Facebook, Inc. and its affiliates.
-import copy
 import logging
 import numpy as np
 from typing import Dict, List, Optional, Tuple
 import torch
 from torch import nn
-import json
 from detectron2.utils.events import get_event_storage
 from detectron2.config import configurable
 from detectron2.structures import ImageList, Instances, Boxes
@@ -34,6 +32,7 @@ class SamDetector(GeneralizedRCNN):
         fp16=False,
         sam=None,
         mask_thr_binary=0.5,
+        do_postprocess=True,
         **kwargs
     ):
         """
@@ -51,7 +50,8 @@ class SamDetector(GeneralizedRCNN):
         assert self.proposal_generator is not None
         self.sam = sam
         self.mask_thr_binary = mask_thr_binary
-    
+        self.do_postprocess = do_postprocess
+
     @classmethod
     def from_config(cls, cfg):
         # ret = super().from_config(cfg)
@@ -68,7 +68,8 @@ class SamDetector(GeneralizedRCNN):
             'input_format': cfg.INPUT.FORMAT,
             "pixel_mean": cfg.MODEL.PIXEL_MEAN,
             "pixel_std": cfg.MODEL.PIXEL_STD,
-            "sam": sam
+            "sam": sam,
+            "do_postprocess": cfg.TEST.DO_POSTPROCESS
         })
         ret.update(mask_thr_binary = cfg.TEST.MASK_THR_BINARY)
         return ret
@@ -106,10 +107,9 @@ class SamDetector(GeneralizedRCNN):
         """
         """
         if not self.training:
-            return self.inference(batched_inputs)
+            return self.inference(batched_inputs, do_postprocess=self.do_postprocess)
         images = self.preprocess_image(batched_inputs)
         img_embedding_feat, inter_feats = self.extract_feat(images.tensor)
-        ann_type = 'bbox'
         gt_instances = [x["instances"].to(self.device) for x in batched_inputs] #instance have img_Size with longest-size = 1024
         origin_size = [(x['height'], x['width']) for x in batched_inputs]
         if self.fp16: # TODO (zhouxy): improve

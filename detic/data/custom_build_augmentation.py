@@ -8,7 +8,7 @@ from PIL import Image
 
 
 from detectron2.data import transforms as T
-from .transforms.custom_augmentation_impl import EfficientDetResizeCrop, ResizeLongestSizeFlip
+from .transforms.custom_augmentation_impl import EfficientDetResizeCrop, ResizeLongestSizeFlip, PadAug, HFlipMaskAug
 
 def build_custom_augmentation(cfg, is_train, scale=None, size=None, \
     min_size=None, max_size=None):
@@ -45,6 +45,9 @@ def build_custom_augmentation(cfg, is_train, scale=None, size=None, \
         pad_mask = cfg.INPUT.PAD_MASK
         mask_pad_val = cfg.INPUT.MASK_PAD_VAL
         augmentation = [ResizeLongestSizeFlip(size=size, pad_mask=pad_mask, mask_pad_val=mask_pad_val, training=is_train)]
+        if is_train:
+            augmentation.append(HFlipMaskAug(horizontal=True))
+        augmentation.append(PadAug(target_size=(size,size)))
     else:
         assert 0, cfg.INPUT.CUSTOM_AUG
     return augmentation
