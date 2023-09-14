@@ -145,7 +145,7 @@ def add_rsprompter_config(cfg):
     _C.MODEL.ROI_MASK_HEAD.MASK_LOSS_WEIGHT = 1.0
     _C.MODEL.ROI_MASK_HEAD.PER_QUERY_POINT = 4
 
-    _C.MODEL.FPN.SELECTED_CHANNELS = list(range(4, 32, 2))
+    _C.MODEL.FPN.SELECTED_CHANNELS = list(range(8, 32, 2))
 
     _C.MODEL.CONFIGS = CN()
     _C.MODEL.CONFIGS.ONLY_DECODER = False

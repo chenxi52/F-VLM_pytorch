@@ -94,7 +94,7 @@ class samPromptMaskHead(nn.Module):
         point_emd = point_emd.view(batch_size, self.per_query_point, -1)
         if self.with_sincos: 
             point_emd = torch.sin(point_emd[..., ::2] + point_emd[..., 1::2])
-        
+        #::2, 从 0 列开始+2 取列， 1::2, 从 1 列开始+2 取列
         nomask_dense_embeddings = sam.prompt_encoder.no_mask_embed.weight.reshape(1, -1, 1, 1).expand(
             point_emd.shape[0], -1, *features.shape[-2:]
         )
@@ -104,14 +104,15 @@ class samPromptMaskHead(nn.Module):
         img_pe = repeat(img_pe, 'b c h w -> (b n) c h w', n=img_embeddings.shape[0])
 
         res_img_feat = None
-        low_res_masks, iou_predictions = sam.mask_decoder.forward_batch(
-            image_embeddings=img_embeddings,
-            image_pe=img_pe,
-            sparse_prompt_embeddings=point_emd,
-            dense_prompt_embeddings=nomask_dense_embeddings,
-            multimask_output=False,
-            res_img_feat=res_img_feat,
-        )
+        with torch.no_grad():
+            low_res_masks, iou_predictions = sam.mask_decoder.forward_batch(
+                image_embeddings=img_embeddings,
+                image_pe=img_pe,
+                sparse_prompt_embeddings=point_emd,
+                dense_prompt_embeddings=nomask_dense_embeddings,
+                multimask_output=False,
+                res_img_feat=res_img_feat,
+            )
         mask_preds = low_res_masks.squeeze(1)
         iou_predictions = iou_predictions.squeeze(1)
         mask_result = dict(mask_preds = mask_preds, mask_iou = iou_predictions)
@@ -178,7 +179,7 @@ class samPromptMaskHead(nn.Module):
             else:
                 loss_mask = self.mask_loss(mask_preds, mask_targets, 
                                            mask_classes)
-        loss['loss_mask'] = loss_mask
+        loss['loss_mask'] = loss_mask[0]
         loss['mask_target'] = mask_targets
         return loss
 

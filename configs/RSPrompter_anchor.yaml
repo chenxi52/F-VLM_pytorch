@@ -1,13 +1,14 @@
 _BASE_: "Base_OVCOCO_C4_1x.yaml"
 MODEL:
-  META_ARCHITECTURE: "SamDetector" # 
+  META_ARCHITECTURE: "SamDetector" 
   BACKBONE:
     NAME: "build_sam_vit_fpn_backbone" #SAM vit_h
-    TYPE: "vit_h"
+    # TYPE: "vit_h"
+    TYPE: "vit_b"
+  WEIGHTS: "sam_vit_b_01ec64.pth"
   # WEIGHTS: "sam_vit_h_4b8939.pth"
-  WEIGHTS: "output/Detic-COCO/RSPrompter_anchor/model_final.pth"
+  # WEIGHTS: "output/Detic-COCO/RSPrompter_anchor/model_final.pth"
   FPN:
-    # IN_FEATURES: ["feat0", "feat1", "feat2"]
     OUT_CHANNELS: 256
     INNER_CHANNELS: 32
     UP_SAMPLE_SCALE: 4
@@ -15,6 +16,7 @@ MODEL:
   PIXEL_MEAN: [123.675, 116.280, 103.530]
   PIXEL_STD: [58.395, 57.12, 57.375]
   ANCHOR_GENERATOR:
+    NAME: "DefaultAnchorGenerator"
     SIZES: [[16,32,64,128,256,512],[32,64,128,256,512,1024],[64,128,256,512,1024,2048]]  # One size for each in feature map
     ASPECT_RATIOS: [[0.5, 1.0, 2.0]]  # Three aspect ratios (same for all in feature maps)
   PROPOSAL_GENERATOR:
@@ -35,7 +37,7 @@ MODEL:
   ROI_HEADS:
     NAME: "samAnchorPromptRoiHeads" 
     IN_FEATURES: ["feat2","feat1","feat0"]
-    SCORE_THRESH_TEST: 0.01
+    SCORE_THRESH_TEST: 0.05
     NUM_CLASSES: 80
     NMS_THRESH_TEST: 0.5
     BATCH_SIZE_PER_IMAGE: 256
@@ -72,17 +74,18 @@ DATASETS:
 DATALOADER:
   NUM_WORKERS: 2
 SOLVER:
-  IMS_PER_BATCH: 2
+  IMS_PER_BATCH: 24
   BASE_LR: 0.0005
   STEPS: (60000, 80000)
-  WARMUP_ITERS: 10
+  WARMUP_ITERS: 100
   WARMUP_METHOD : "linear"
   WARMUP_FACTOR: 0.0001
   LR_SCHEDULER_NAME: "WarmupCosineLR"
   WEIGHT_DECAY: 0.001
-  MAX_ITER: 200
-  CHECKPOINT_PERIOD: 100
+  MAX_ITER: 90000
+  CHECKPOINT_PERIOD: 5000
   USE_CUSTOM_SOLVER: True
+  OPTIMIZER: 'ADAMW'
 INPUT:
   TRAIN_SIZE: 1024
   TEST_SIZE: 1024 

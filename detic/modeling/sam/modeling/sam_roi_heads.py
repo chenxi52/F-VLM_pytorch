@@ -153,7 +153,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         del targets
         # pe map
         x = [item[1] for item in list(features.items())]
-        bs, _, h, w = x[0].shape
+        bs, _, h, w = x[-1].shape
         mask_pe = torch.zeros((bs, h, w), device=x[0].device, dtype=torch.bool)
         img_feat_pe = self.generator_pe(mask_pe)
 

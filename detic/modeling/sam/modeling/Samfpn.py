@@ -219,16 +219,20 @@ class SAMAggregatorNeck(Backbone):
         return {'feat0': ShapeSpec(channels=self.out_channels, stride=self.anchor_stride[2]),
                 'feat1': ShapeSpec(channels=self.out_channels, stride=self.anchor_stride[1]),
                 'feat2': ShapeSpec(channels=self.out_channels, stride=self.anchor_stride[0])}
-    
+
 @BACKBONE_REGISTRY.register()
 def build_sam_vit_fpn_backbone(cfg, input_shape=None):
     if cfg.MODEL.BACKBONE.TYPE=='vit_h':
         in_channels = [1280] * 32
+        selected_channels = list(range(8,32,2))
+    elif cfg.MODEL.BACKBONE.TYPE == 'vit_b':
+        in_channels = [768] * 12
+        selected_channels = list(range(4,12,2))
     backbone = SAMAggregatorNeck(
         in_channels=in_channels,
         inner_channels=cfg.MODEL.FPN.INNER_CHANNELS,
         out_channels=cfg.MODEL.FPN.OUT_CHANNELS,
-        selected_channels=cfg.MODEL.FPN.SELECTED_CHANNELS,
+        selected_channels=selected_channels,
         up_sample_scale=cfg.MODEL.FPN.UP_SAMPLE_SCALE,
         anchor_stride=cfg.MODEL.FPN.ANCHOR_STRIDE
     )

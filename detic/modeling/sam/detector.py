@@ -49,6 +49,7 @@ class SamDetector(GeneralizedRCNN):
         super().__init__(**kwargs)
         assert self.proposal_generator is not None
         self.sam = sam
+        
         self.mask_thr_binary = mask_thr_binary
         self.do_postprocess = do_postprocess
 
@@ -109,14 +110,15 @@ class SamDetector(GeneralizedRCNN):
         if not self.training:
             return self.inference(batched_inputs, do_postprocess=self.do_postprocess)
         images = self.preprocess_image(batched_inputs)
-        img_embedding_feat, inter_feats = self.extract_feat(images.tensor)
         gt_instances = [x["instances"].to(self.device) for x in batched_inputs] #instance have img_Size with longest-size = 1024
         origin_size = [(x['height'], x['width']) for x in batched_inputs]
         if self.fp16: # TODO (zhouxy): improve
             with autocast():
-                fpn_features = self.backbone([feat.half() for feat in inter_feats]) #Feature aggretor
+                img_embedding_feat, inter_feats = self.extract_feat(images.tensor.half())
+                fpn_features = self.backbone([feat for feat in inter_feats]) #Feature aggretor
             fpn_features = {k: v.float() for k, v in fpn_features.items()}
         else:
+            img_embedding_feat, inter_feats = self.extract_feat(images.tensor)
             fpn_features = self.backbone(inter_feats)
         # fpn_features: Dict{'feat0': Tuple[2*Tensor[256,32,32]], 'feat1': Tuple[2*Tensor[256,64,64]], ...}
         bz = len(images)
@@ -132,6 +134,7 @@ class SamDetector(GeneralizedRCNN):
     @torch.no_grad()
     def extract_feat(self, batched_inputs):
         # forward sam.image_encoder
+        
         feat, inter_features = self.sam.image_encoder(batched_inputs)
         # feat: Tensor[bz, 256, 64, 64]  inter_feats: List[32*Tensor[bz,64,64,1280]]
         return feat, inter_features
