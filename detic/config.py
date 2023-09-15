@@ -152,6 +152,7 @@ def add_rsprompter_config(cfg):
 
     _C.SOLVER.OPTIMIZER = 'SGD'
     _C.SOLVER.USE_CUSTOM_SOLVER = True
+    _C.SOLVER.LOGGER_FREQ = 20
 
     _C.INPUT.PROMPT_SIZE = (90,4)
     _C.INPUT.CUSTOM_AUG = ''
@@ -167,6 +168,7 @@ def add_rsprompter_config(cfg):
 
     _C.TEST.MASK_THR_BINARY = 0.5
     _C.TEST.DO_POSTPROCESS = True
+    _C.TEST.IMS_PER_BATCH = 2 #the batch_size of testing
 
 
 

@@ -44,6 +44,7 @@ from detic.custom_solver import build_custom_optimizer, build_sam_optimizer
 from detic.evaluation.oideval import OIDEvaluator
 from detic.evaluation.custom_coco_eval import CustomCOCOEvaluator
 from detic.modeling.utils import reset_cls_test
+from detic.data.build import custom_build_detection_test_loader
 
 from detic.config import add_rsprompter_config
 logger = logging.getLogger("detectron2")
@@ -54,7 +55,7 @@ def do_test(cfg, model):
         mapper = None if cfg.INPUT.TEST_INPUT_TYPE == 'default' \
             else SamDatasetMapper(
                 cfg, False, augmentations=build_custom_augmentation(cfg, False))
-        data_loader = build_detection_test_loader(cfg, dataset_name, mapper=mapper)
+        data_loader = custom_build_detection_test_loader(cfg, dataset_name, mapper=mapper)
         output_folder = os.path.join(
             cfg.OUTPUT_DIR, "inference_{}".format(dataset_name))
         evaluator_type = MetadataCatalog.get(dataset_name).evaluator_type
@@ -71,9 +72,10 @@ def do_test(cfg, model):
             evaluator = OIDEvaluator(dataset_name, cfg, True, output_folder)
         else:
             assert 0, evaluator_type
-            
-        results[dataset_name] = inference_on_dataset(
-            model, data_loader, evaluator)
+        if cfg.SOLVER.AMP.ENABLED:
+            with torch.cuda.amp.autocast():
+                results[dataset_name] = inference_on_dataset(
+                    model, data_loader, evaluator)
         if comm.is_main_process():
             logger.info("Evaluation results for {} in csv format:".format(
                 dataset_name))
@@ -84,6 +86,10 @@ def do_test(cfg, model):
 
 def do_train(cfg, model, resume=False):
     model.train()
+    if comm.get_world_size() > 1:
+        model.module.sam.eval()
+    else:
+        model.sam.eval()
     if cfg.SOLVER.USE_CUSTOM_SOLVER:
         optimizer = build_sam_optimizer(cfg, model)
     else:
@@ -105,14 +111,14 @@ def do_train(cfg, model, resume=False):
 
     periodic_checkpointer = PeriodicCheckpointer(
         checkpointer, period=cfg.SOLVER.CHECKPOINT_PERIOD, max_iter=max_iter,
-        max_to_keep=1
+        max_to_keep=2
     )
-
+    TIMESTAMP = "{0:%Y-%m-%dT%H-%M-%S/}".format(datetime.datetime.now())
     writers = (
         [
             CommonMetricPrinter(max_iter),
             JSONWriter(os.path.join(cfg.OUTPUT_DIR, "metrics.json")),
-            TensorboardXWriter(cfg.OUTPUT_DIR),
+            TensorboardXWriter(cfg.OUTPUT_DIR+f'/{TIMESTAMP}'),
         ]
         if comm.is_main_process()
         else []
@@ -141,7 +147,9 @@ def do_train(cfg, model, resume=False):
             step_timer.reset()
             iteration = iteration + 1
             storage.step()
-            loss_dict = model(data)
+            if cfg.SOLVER.AMP.ENABLED:
+                with torch.cuda.amp.autocast():
+                    loss_dict = model(data)
             losses = sum(
                 loss for k, loss in loss_dict.items())
             assert torch.isfinite(losses).all(), loss_dict
@@ -154,7 +162,7 @@ def do_train(cfg, model, resume=False):
                     total_loss=losses_reduced, **loss_dict_reduced)
 
             optimizer.zero_grad()
-            if cfg.FP16:
+            if cfg.SOLVER.AMP.ENABLED:
                 scaler.scale(losses).backward()
                 scaler.step(optimizer)
                 scaler.update()
@@ -177,7 +185,7 @@ def do_train(cfg, model, resume=False):
                 comm.synchronize()
 
             if iteration - start_iter > 5 and \
-                (iteration % 20 == 0 or iteration == max_iter):
+                (iteration % cfg.SOLVER.LOGGER_FREQ == 0 or iteration == max_iter):
                 for writer in writers:
                     writer.write()
             periodic_checkpointer.step(iteration)

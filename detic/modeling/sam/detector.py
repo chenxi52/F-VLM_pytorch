@@ -14,8 +14,7 @@ from detectron2.modeling.meta_arch.rcnn import GeneralizedRCNN
 from detic.modeling.sam.modeling.postprocess_sam_mask import detector_postprocess
 from detectron2.utils.visualizer import Visualizer, _create_text_labels
 from detectron2.data.detection_utils import convert_image_to_rgb
-from torch.cuda.amp import autocast
-from detectron2.modeling import build_backbone, build_proposal_generator, build_roi_heads
+from detectron2.modeling import build_backbone, build_proposal_generator, build_roi_heads, build_mask_head
 from detic.modeling.sam import sam_model_registry
 import copy
 import torch.nn.functional as F
@@ -58,9 +57,9 @@ class SamDetector(GeneralizedRCNN):
         # ret = super().from_config(cfg)
         sam = sam_model_registry[cfg.MODEL.BACKBONE.TYPE]()
         # sam_img_encoder = copy.deepcopy(sam.image_encoder)
-
         # the img_encoder and img_feat are not passes to buil_backbone
         backbone = build_backbone(cfg)# fpn+image_encoder
+        # roi_heads include box_heads, mask_heads
         ret=({
             'backbone':backbone,
             'proposal_generator':build_proposal_generator(cfg, backbone.output_shape),
@@ -112,14 +111,8 @@ class SamDetector(GeneralizedRCNN):
         images = self.preprocess_image(batched_inputs)
         gt_instances = [x["instances"].to(self.device) for x in batched_inputs] #instance have img_Size with longest-size = 1024
         origin_size = [(x['height'], x['width']) for x in batched_inputs]
-        if self.fp16: # TODO (zhouxy): improve
-            with autocast():
-                img_embedding_feat, inter_feats = self.extract_feat(images.tensor.half())
-                fpn_features = self.backbone([feat for feat in inter_feats]) #Feature aggretor
-            fpn_features = {k: v.float() for k, v in fpn_features.items()}
-        else:
-            img_embedding_feat, inter_feats = self.extract_feat(images.tensor)
-            fpn_features = self.backbone(inter_feats)
+        img_embedding_feat, inter_feats = self.extract_feat(images.tensor)
+        fpn_features = self.backbone(inter_feats)
         # fpn_features: Dict{'feat0': Tuple[2*Tensor[256,32,32]], 'feat1': Tuple[2*Tensor[256,64,64]], ...}
         bz = len(images)
         images_input_shape = [(self.sam.image_encoder.img_size, self.sam.image_encoder.img_size) for _ in range(bz)]

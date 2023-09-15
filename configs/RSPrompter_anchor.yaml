@@ -7,7 +7,7 @@ MODEL:
     TYPE: "vit_b"
   WEIGHTS: "sam_vit_b_01ec64.pth"
   # WEIGHTS: "sam_vit_h_4b8939.pth"
-  # WEIGHTS: "output/Detic-COCO/RSPrompter_anchor/model_final.pth"
+  # WEIGHTS: "output/Detic-COCO/RSPrompter_anchor/model_0049999.pth"
   FPN:
     OUT_CHANNELS: 256
     INNER_CHANNELS: 32
@@ -72,20 +72,23 @@ DATASETS:
   TRAIN: ("coco_2017_train",)
   TEST: ("coco_2017_val",)
 DATALOADER:
-  NUM_WORKERS: 2
+  NUM_WORKERS: 8 #num_workers == batchsize_per_gpu
 SOLVER:
-  IMS_PER_BATCH: 24
-  BASE_LR: 0.0005
-  STEPS: (60000, 80000)
-  WARMUP_ITERS: 100
+  IMS_PER_BATCH: 48 # change  # max 8 imgs per batch
+  BASE_LR: 0.001  # change
+  STEPS: (25000, 35000)  # change
+  WARMUP_ITERS: 100  
   WARMUP_METHOD : "linear"
-  WARMUP_FACTOR: 0.0001
-  LR_SCHEDULER_NAME: "WarmupCosineLR"
-  WEIGHT_DECAY: 0.001
-  MAX_ITER: 90000
-  CHECKPOINT_PERIOD: 5000
+  WARMUP_FACTOR: 0.0001  
+  LR_SCHEDULER_NAME: "WarmupCosineLR" 
+  WEIGHT_DECAY: 0.001 
+  MAX_ITER: 45000  # change
+  CHECKPOINT_PERIOD: 1000  # change
   USE_CUSTOM_SOLVER: True
   OPTIMIZER: 'ADAMW'
+  LOGGER_FREQ: 20  # the output freq of logger writer
+  AMP:
+    ENABLED: True
 INPUT:
   TRAIN_SIZE: 1024
   TEST_SIZE: 1024 
@@ -97,8 +100,10 @@ INPUT:
   MASK_PAD_VAL: 0.0
   MASK_FORMAT: bitmask
 TEST:
-  DETECTIONS_PER_IMAGE: 100
-  MASK_THR_BINARY: 0.5
+  DETECTIONS_PER_IMAGE: 100  
+  MASK_THR_BINARY: 0.5  
   DO_POSTPROCESS: True
+  EVAL_PERIOD: 1000  # change
+  IMS_PER_BATCH: 12 #every gpu has most 2 images  # change
 VERSION: 2
 FP16: True

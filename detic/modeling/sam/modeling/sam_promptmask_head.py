@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from typing import Tuple, List, Dict, Optional
-from detectron2.modeling import build_mask_head, BaseMaskRCNNHead, ROI_MASK_HEAD_REGISTRY
+from detectron2.modeling import BaseMaskRCNNHead, ROI_MASK_HEAD_REGISTRY
 from detectron2.config import configurable
 from einops import repeat
 from detectron2.structures import Instances, ImageList
