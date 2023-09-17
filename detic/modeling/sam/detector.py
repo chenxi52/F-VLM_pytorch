@@ -16,7 +16,6 @@ from detectron2.utils.visualizer import Visualizer, _create_text_labels
 from detectron2.data.detection_utils import convert_image_to_rgb
 from detectron2.modeling import build_backbone, build_proposal_generator, build_roi_heads, build_mask_head
 from detic.modeling.sam import sam_model_registry
-import copy
 import torch.nn.functional as F
 import ipdb
 

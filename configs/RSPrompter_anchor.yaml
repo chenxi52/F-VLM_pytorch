@@ -5,7 +5,7 @@ MODEL:
     NAME: "build_sam_vit_fpn_backbone" #SAM vit_h
     # TYPE: "vit_h"
     TYPE: "vit_b"
-  WEIGHTS: "sam_vit_b_01ec64.pth"
+  WEIGHTS: sam_vit_b_01ec64.pth"
   # WEIGHTS: "sam_vit_h_4b8939.pth"
   # WEIGHTS: "output/Detic-COCO/RSPrompter_anchor/model_0049999.pth"
   FPN:
@@ -75,14 +75,14 @@ DATALOADER:
   NUM_WORKERS: 8 #num_workers == batchsize_per_gpu
 SOLVER:
   IMS_PER_BATCH: 48 # change  # max 8 imgs per batch
-  BASE_LR: 0.001  # change
-  STEPS: (25000, 35000)  # change
-  WARMUP_ITERS: 100  
+  BASE_LR: 0.0001  # change
+  # STEPS: (15000, 25000)  # change
+  WARMUP_ITERS: 3000  
   WARMUP_METHOD : "linear"
   WARMUP_FACTOR: 0.0001  
   LR_SCHEDULER_NAME: "WarmupCosineLR" 
   WEIGHT_DECAY: 0.001 
-  MAX_ITER: 45000  # change
+  MAX_ITER: 30000  # change
   CHECKPOINT_PERIOD: 1000  # change
   USE_CUSTOM_SOLVER: True
   OPTIMIZER: 'ADAMW'
@@ -104,6 +104,6 @@ TEST:
   MASK_THR_BINARY: 0.5  
   DO_POSTPROCESS: True
   EVAL_PERIOD: 1000  # change
-  IMS_PER_BATCH: 12 #every gpu has most 2 images  # change
+  IMS_PER_BATCH: 6 #every gpu has most 1 images  # change
 VERSION: 2
 FP16: True
