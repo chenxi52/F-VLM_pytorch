@@ -70,7 +70,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         return ret
 
 
-    def _forward_mask(self, sam: nn.Module, img_features: torch.Tensor, features: List[torch.Tensor], 
+    def _forward_mask(self, sam: nn.Module, img_features: torch.Tensor, features: Dict[str, torch.Tensor], 
                       instances: List[Instances],origin_img_size: List[Tuple[int,int]]):
         """
         Forward logic of the mask prediction branch.
@@ -89,10 +89,10 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             instances, _ = select_foreground_proposals(instances, self.num_classes)
             # len(instances) = bz
         if self.mask_pooler is not None:
-            # x = [features[f] for f in self.mask_in_features]
             boxes = [i.proposal_boxes if self.training else i.pred_boxes for i in instances]
             # List[bz * List[19*Boxes, 3*Boxes]]
             img_flags_freq = [len(box) for box in boxes]
+            features = [features[f] for f in self.mask_in_features]
             features = self.mask_pooler(features, boxes)
             # len(Boxes)* Torch.tensor[256,14,14]
         else:
@@ -173,6 +173,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         else:
             #proposals=None
             pred_instances = self._forward_box(features, proposals)
+            # pred_boxes = Boxes(boxes)   result.scores = scores  pred_classes
             # During inference cascaded prediction is used: the mask and keypoints heads are only
             # applied to the top scoring box detections.
             pred_instances = self.forward_with_given_boxes(sam, img_features, features, pred_instances, origin_img_size)
@@ -189,7 +190,8 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         Test-time augmentation also uses this.
 
         Args:
-            features: same as in `forward()`
+            features: same as in `forward()` multi-level roi features
+            img_features: image features from image encoder
             instances (list[Instances]): instances to predict other outputs. Expect the keys
                 "pred_boxes" and "pred_classes" to exist.
 
@@ -200,7 +202,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         """
         assert not self.training
         assert instances[0].has("pred_boxes") and instances[0].has("pred_classes")
-        features = [item[1] for item in features.items()]
+        # features = [item[1] for item in features.items()]
         instances = self._forward_mask(sam, img_features, features, instances, origin_img_size)
         return instances
 

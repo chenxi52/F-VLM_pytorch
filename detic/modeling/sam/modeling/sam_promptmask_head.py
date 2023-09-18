@@ -78,7 +78,7 @@ class samPromptMaskHead(nn.Module):
         """
         firstly, inference, and then calculate losses
         Args:
-            roi_feature: features after maskroi
+            roi_feature: features after maskroi, multi-level
             features: features from image encoder
             instances: Instances(num_instances=1, image_height=1024, image_width=664,
                 fields=[proposal_boxes: Boxes(tensor([[214.0800, 907.2640, 235.6640, 963.2800]], device='cuda:0')), 

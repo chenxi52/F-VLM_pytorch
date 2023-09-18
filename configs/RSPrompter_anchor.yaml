@@ -5,9 +5,9 @@ MODEL:
     NAME: "build_sam_vit_fpn_backbone" #SAM vit_h
     # TYPE: "vit_h"
     TYPE: "vit_b"
-  WEIGHTS: sam_vit_b_01ec64.pth"
+  # WEIGHTS: sam_vit_b_01ec64.pth"
   # WEIGHTS: "sam_vit_h_4b8939.pth"
-  # WEIGHTS: "output/Detic-COCO/RSPrompter_anchor/model_0049999.pth"
+  WEIGHTS: "output/Detic-COCO/RSPrompter_anchor/model_0029999.pth"
   FPN:
     OUT_CHANNELS: 256
     INNER_CHANNELS: 32
@@ -34,6 +34,7 @@ MODEL:
     IOU_THRESHOLDS: [0.3, 0.7]
     BATCH_SIZE_PER_IMAGE: 512
     POSITIVE_FRACTION: 0.5
+    BBOX_REG_LOSS_TYPE: "smooth_l1"
   ROI_HEADS:
     NAME: "samAnchorPromptRoiHeads" 
     IN_FEATURES: ["feat2","feat1","feat0"]
@@ -72,9 +73,9 @@ DATASETS:
   TRAIN: ("coco_2017_train",)
   TEST: ("coco_2017_val",)
 DATALOADER:
-  NUM_WORKERS: 8 #num_workers == batchsize_per_gpu
+  NUM_WORKERS: 2 #num_workers == batchsize_per_gpu
 SOLVER:
-  IMS_PER_BATCH: 48 # change  # max 8 imgs per batch
+  IMS_PER_BATCH: 2 # change  # max 8 imgs per batch
   BASE_LR: 0.0001  # change
   # STEPS: (15000, 25000)  # change
   WARMUP_ITERS: 3000  
@@ -100,10 +101,10 @@ INPUT:
   MASK_PAD_VAL: 0.0
   MASK_FORMAT: bitmask
 TEST:
-  DETECTIONS_PER_IMAGE: 100  
+  DETECTIONS_PER_IMAGE: 10  #test_topk_per_image
   MASK_THR_BINARY: 0.5  
   DO_POSTPROCESS: True
   EVAL_PERIOD: 1000  # change
-  IMS_PER_BATCH: 6 #every gpu has most 1 images  # change
+  IMS_PER_BATCH: 2 #every gpu has most 1 images  # change
 VERSION: 2
 FP16: True

@@ -56,6 +56,9 @@ import numpy as np
 import cv2
 from detectron2.utils.visualizer import Visualizer
 from detectron2.evaluation.evaluator import inference_context
+from detic.data.custom_build_augmentation import build_custom_augmentation
+from detic.data.build import custom_build_detection_test_loader
+
 def create_instances(predictions, image_size):
     # for train_dataset
     ret = Instances(image_size)
@@ -68,17 +71,15 @@ def create_instances(predictions, image_size):
 def create_pred_instances(predictions, image_size, metadata):
     ret = Instances(image_size)
     score = predictions.scores.cpu().numpy()
-    chosen = (score > 0.02).nonzero()[0]
-    score = score[chosen]
-    bbox = (predictions.pred_boxes)[chosen].tensor.cpu().numpy()
-    bbox = BoxMode.convert(bbox, BoxMode.XYWH_ABS, BoxMode.XYXY_ABS)
+    bbox = predictions.pred_boxes.tensor.cpu().numpy()
+    # bbox = BoxMode.convert(bbox, BoxMode.XYWH_ABS, BoxMode.XYXY_ABS)
     # labels = [metadata.thing_dataset_id_to_contiguous_id[predictions.pred_classes.cpu().numpy()[i]] for i in chosen]
-    masks = (predictions.pred_masks)[chosen].cpu().numpy()
+    masks = predictions.pred_masks.cpu().numpy()
     ret.scores = score
     ret.pred_boxes = Boxes(bbox)
     # NOTE: should change the _postprocess without interpolating to the ori_img_size
     ret.pred_masks = masks
-    # ret.pred_classes = labels
+    ret.pred_classes = predictions.pred_classes.cpu().numpy()
 
     return ret
 
@@ -121,11 +122,10 @@ def do_test(cfg, model):
     test_dataset = cfg.DATASETS.TEST[0]
     metadata = MetadataCatalog.get(test_dataset)
     # thing 可数
-    def dataset_id_map(ds_id):
-            return metadata.thing_dataset_id_to_contiguous_id[ds_id]
     MapperClass = SamDatasetMapper
     mapper = MapperClass(cfg, False, augmentations = build_custom_augmentation(cfg, False))
-    data_loader = build_detection_test_loader(cfg,test_dataset, mapper=mapper)
+    data_loader = custom_build_detection_test_loader(cfg, test_dataset, mapper=mapper)
+    show_iter = 0
     with ExitStack() as stack:
         if isinstance(model, nn.Module):
             stack.enter_context(inference_context(model))
@@ -133,12 +133,22 @@ def do_test(cfg, model):
         for data in data_loader:
             train_img = [ins['image'].permute(1,2,0).numpy() for ins in data]
             outs = model(data)
+         
+            # outs = outs.unsqueeze(1)
+            # outs = torch.nn.functional.interpolate(outs, size=(img.shape[:2]), mode='bilinear', align_corners=False, )
+            # outs = outs.squeeze(1)
+            # NOTE: reback the postprocess in detector
             for ind, img in enumerate(train_img):
-                vis = Visualizer(img, metadata)
-                pred_instance = create_pred_instances(outs[ind]['instances'], img.shape[:2], metadata)
+                img_tensor = torch.tensor(img, dtype=torch.float32).unsqueeze(0).permute(0,3,1,2)
+                resize_img = torch.nn.functional.interpolate(img_tensor, (data[ind]['height'],data[ind]['width']), mode='bilinear', align_corners=False)
+                resize_img = resize_img.permute(0,2,3,1).squeeze().numpy()
+                vis = Visualizer(resize_img, metadata)
+                pred_instance = outs[ind].to('cpu')
                 vis_pred = vis.draw_instance_predictions(pred_instance).get_image()
-                cv2.imwrite(f'output/visualize/pred_test_{ind}.png', vis_pred[:,:,::-1])    
-            break        
+                cv2.imwrite(f'output/visualize/pred_test_{ind+show_iter*len(data)}.png', vis_pred[:,:,::-1])    
+            show_iter += 1
+            if show_iter>=5:
+                break        
     pass
 
 def main(args):

@@ -6,7 +6,7 @@ import torch
 from torch import nn
 from detectron2.utils.events import get_event_storage
 from detectron2.config import configurable
-from detectron2.structures import ImageList, Instances, Boxes
+from detectron2.structures import ImageList, Instances, Boxes,ROIMasks
 import detectron2.utils.comm as comm
 
 from detectron2.modeling.meta_arch.build import META_ARCH_REGISTRY
@@ -140,23 +140,50 @@ class SamDetector(GeneralizedRCNN):
         """
         # note: private function; subject to changes
         sam_img_size = (self.sam.image_encoder.img_size, self.sam.image_encoder.img_size)
+        processed_results = []
         for results_per_img, input_per_img, img_size in zip(
             instances, batched_inputs, image_sizes
         ):  
+            
             mask_per_img = results_per_img["instances"].pred_masks.sigmoid()
             ori_height = input_per_img.get("height")
             ori_width = input_per_img.get("width")
-            masks = F.interpolate(
-                mask_per_img.unsqueeze(1),
-                sam_img_size,
-                mode="bilinear",
-                align_corners=False,
+        
+            # masks = F.interpolate(
+            #     mask_per_img.unsqueeze(1),
+            #     sam_img_size,
+            #     mode="bilinear",
+            #     align_corners=False,
+            # )
+            # masks = masks[..., : img_size[0], : img_size[1]]
+            # masks = F.interpolate(masks, (ori_height, ori_width), mode="bilinear", align_corners=False) 
+            # masks = masks.squeeze(1)
+        
+            #output boxes are resize with longest side=1024, so need to be reback
+            new_size = (ori_height, ori_width)
+            scale_x, scale_y = (
+                ori_width / img_size[1],
+                ori_height / img_size[0] 
             )
-            masks = masks[..., : img_size[0], : img_size[1]]
-            masks = F.interpolate(masks, (ori_height, ori_width), mode="bilinear", align_corners=False) 
-            if self.mask_thr_binary>=0:
-                masks = masks >= self.mask_thr_binary
-            else: 
-                masks = (masks * 255).to(dtype = torch.uint8)
-            results_per_img["instances"].pred_masks = masks.squeeze(1)
-        return instances
+            results = Instances(new_size, **results_per_img["instances"].get_fields())
+            if results.has("pred_boxes"):
+                output_boxes = results.pred_boxes
+            elif results.has("proposal_boxes"):
+                output_boxes = results.proposal_boxes
+            else:
+                output_boxes = None
+            assert output_boxes is not None, "Predictions must contain boxes!"
+
+            # the box corrdination x must be clipped first
+            # TODO:
+            output_boxes.scale(scale_x, scale_y)
+            output_boxes.clip(new_size)
+
+            roi_masks = ROIMasks(mask_per_img)
+            results.pred_masks = roi_masks.to_bitmasks(
+                results.pred_boxes, ori_height, ori_width, self.mask_thr_binary
+            ).tensor  # TODO return ROIMasks/BitMask object in the future
+
+            results = results[output_boxes.nonempty()]
+            processed_results.append(results)
+        return processed_results
