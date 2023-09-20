@@ -68,8 +68,8 @@ class samPromptMaskHead(nn.Module):
     
     def forward(
             self,
-            roi_feature: torch.Tensor,
-            features: torch.Tensor,
+            roi_feature: List[torch.Tensor],
+            img_features: torch.Tensor,
             instances: List[Instances],
             sam: nn.Module,
             img_flag_freq: List[int],
@@ -88,7 +88,7 @@ class samPromptMaskHead(nn.Module):
         Returns:
             A dict of losses in training. The predicted "instances" in inference(List[Dict['instances': Instances]]).
         """
-
+        # first, select positive rois
         batch_size = roi_feature.shape[0]
         point_emd = self.point_emb(roi_feature) #prompt head 
         point_emd = point_emd.view(batch_size, self.per_query_point, -1)
@@ -96,23 +96,22 @@ class samPromptMaskHead(nn.Module):
             point_emd = torch.sin(point_emd[..., ::2] + point_emd[..., 1::2])
         #::2, 从 0 列开始+2 取列， 1::2, 从 1 列开始+2 取列
         nomask_dense_embeddings = sam.prompt_encoder.no_mask_embed.weight.reshape(1, -1, 1, 1).expand(
-            point_emd.shape[0], -1, *features.shape[-2:]
+            point_emd.shape[0], -1, *img_features.shape[-2:]
         )
         img_flag_freq = torch.tensor(img_flag_freq, dtype=torch.long,device=point_emd.device)
-        img_embeddings = torch.repeat_interleave(features, img_flag_freq, dim=0 )
+        img_embeddings = torch.repeat_interleave(img_features, img_flag_freq, dim=0 )
         img_pe = sam.prompt_encoder.get_dense_pe()
         img_pe = repeat(img_pe, 'b c h w -> (b n) c h w', n=img_embeddings.shape[0])
 
         res_img_feat = None
-        with torch.no_grad():
-            low_res_masks, iou_predictions = sam.mask_decoder.forward_batch(
-                image_embeddings=img_embeddings,
-                image_pe=img_pe,
-                sparse_prompt_embeddings=point_emd,
-                dense_prompt_embeddings=nomask_dense_embeddings,
-                multimask_output=False,
-                res_img_feat=res_img_feat,
-            )
+        low_res_masks, iou_predictions = sam.mask_decoder.forward_batch(
+            image_embeddings=img_embeddings,
+            image_pe=img_pe,
+            sparse_prompt_embeddings=point_emd,
+            dense_prompt_embeddings=nomask_dense_embeddings,
+            multimask_output=False,
+            res_img_feat=res_img_feat,
+        )
         mask_preds = low_res_masks.squeeze(1)
         iou_predictions = iou_predictions.squeeze(1)
         mask_result = dict(mask_preds = mask_preds, mask_iou = iou_predictions)
@@ -125,6 +124,8 @@ class samPromptMaskHead(nn.Module):
             if mask_preds.size(0) == 0:
                 mask_loss_and_target = dict(loss_mask = low_res_masks.sum(), mask_target=None)
             else:
+                import ipdb
+                ipdb.set_trace()
                 mask_loss_and_target = self.loss_and_target(
                     mask_preds = mask_preds,
                     instances = instances,
@@ -168,7 +169,6 @@ class samPromptMaskHead(nn.Module):
         mask_targets, mask_classes = self.get_targets(
             instances=instances,
             rcnn_train_cfg=rcnn_train_cfg)
-        
         loss = dict()
         if mask_preds.size(0) == 0:
             loss_mask = mask_preds.sum()

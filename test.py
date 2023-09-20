@@ -1,6 +1,3 @@
 import torch
-
-a = torch.randint(0,5,(2, 1, 4))
-print(a)
-print(a[...,::2])
-print(a[...,1::2])
+import torch.nn as nn
+print('sam.' in 'module.sam.mask_decoder.iou_prediction_head.layers.0.weigh' )

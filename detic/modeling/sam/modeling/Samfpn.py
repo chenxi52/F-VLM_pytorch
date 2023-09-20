@@ -216,9 +216,9 @@ class SAMAggregatorNeck(Backbone):
     
     @property
     def output_shape(self):
-        return {'feat0': ShapeSpec(channels=self.out_channels, stride=self.anchor_stride[2]),
+        return {'feat2': ShapeSpec(channels=self.out_channels, stride=self.anchor_stride[0]),
                 'feat1': ShapeSpec(channels=self.out_channels, stride=self.anchor_stride[1]),
-                'feat2': ShapeSpec(channels=self.out_channels, stride=self.anchor_stride[0])}
+                'feat0': ShapeSpec(channels=self.out_channels, stride=self.anchor_stride[2])}
 
 @BACKBONE_REGISTRY.register()
 def build_sam_vit_fpn_backbone(cfg, input_shape=None):

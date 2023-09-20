@@ -17,6 +17,7 @@ from detectron2.structures import Keypoints, PolygonMasks, BitMasks
 from fvcore.transforms.transform import TransformList
 from .custom_build_augmentation import build_custom_augmentation
 from .tar_dataset import DiskTarDataset
+from fvcore.transforms.transform import NoOpTransform
 
 from detic.data.sam_instances import samInstances
 
@@ -325,15 +326,20 @@ class SamDatasetMapper(DatasetMapper):
             utils.transform_proposals(
                 dataset_dict, image_shape, transforms, proposal_topk=self.proposal_topk
             )
-
+        
+        # test into 
         if not self.is_train:
             # USER: Modify this if you want to keep them for some reason.
             dataset_dict.pop("annotations", None)
             dataset_dict.pop("sem_seg_file_name", None)
             return dataset_dict
 
+
         if "annotations" in dataset_dict:
-            self._transform_annotations(dataset_dict, transforms, image_shape)
+            dataset_dict = self._transform_annotations(dataset_dict, transforms, image_shape)
+        
+        # return annotation as instances without transform
+        # dataset_dict = self.test_transform_anno(dataset_dict, transforms, image_shape)
 
         return dataset_dict
     
@@ -369,6 +375,108 @@ class SamDatasetMapper(DatasetMapper):
         dataset_dict["instances"] = utils.filter_empty_instances(instances, by_box=False)
         return dataset_dict
     
+    def test_transform_anno(self, dataset_dict, transforms, image_shape):
+        # USER: Modify this if you want to keep them for some reason.
+        for anno in dataset_dict["annotations"]:
+            if not self.use_instance_mask:
+                anno.pop("segmentation", None)
+            if not self.use_keypoint:
+                anno.pop("keypoints", None)
+
+        # USER: Implement additional transformations if you have other types of data
+        annos = [
+            self.instance_annotations(
+                obj, image_shape
+            )
+            for obj in dataset_dict.pop("annotations")
+            if obj.get("iscrowd", 0) == 0
+        ]
+        instances = self.annotations_to_instances(
+            annos, transforms, image_shape, mask_format=self.instance_mask_format
+        )
+        
+        # After transforms such as cropping are applied, the bounding box may no longer
+        # tightly bound the object. As an example, imagine a triangle object
+        # [(0,0), (2,0), (0,2)] cropped by a box [(1,0),(2,2)] (XYXY format). The tight
+        # bounding box of the cropped triangle should be [(1,0),(2,1)], which is not equal to
+        # the intersection of original bounding box and the cropping box.
+        if self.recompute_boxes:
+            instances.gt_boxes = instances.gt_masks.get_bounding_boxes()
+
+        instances = self.filter_empty_instances(instances, by_mask=False)
+        dataset_dict["instances"] = self.filter_empty_instances(instances, by_box=False)
+        # filter out indtances without 'gt_maks'
+        return dataset_dict
+    
+    def filter_empty_instances(self,
+        instances, by_box=True, by_mask=True, box_threshold=1e-5, return_mask=False
+    ):
+        """
+        Filter out empty instances in an `Instances` object.
+
+        Args:
+            instances (Instances):
+            by_box (bool): whether to filter out instances with empty boxes
+            by_mask (bool): whether to filter out instances with empty masks
+            box_threshold (float): minimum width and height to be considered non-empty
+            return_mask (bool): whether to return boolean mask of filtered instances
+
+        Returns:
+            Instances: the filtered instances.
+            tensor[bool], optional: boolean mask of filtered instances
+        """
+        assert by_box or by_mask
+        r = []
+        if by_box:
+            r.append(instances.gt_boxes.nonempty(threshold=box_threshold))
+        if instances.has("gt_masks") and by_mask:
+            r.append(instances.gt_masks.nonempty())
+        
+        # TODO: can also filter visible keypoints
+
+        if not r:
+            return instances
+        m = r[0]
+        for x in r[1:]:
+            m = m & x
+        if return_mask:
+            return instances[m], m
+        return instances[m]
+    
+
+    def instance_annotations(self,
+    annotation, image_size, 
+    ):
+       
+        # bbox is 1d (per-instance bounding box)
+        bbox = BoxMode.convert(annotation["bbox"], annotation["bbox_mode"], BoxMode.XYXY_ABS)
+        # clip transformed bbox to image size
+        annotation["bbox"] = np.minimum(bbox, list(image_size + image_size)[::-1])
+        annotation["bbox_mode"] = BoxMode.XYXY_ABS
+
+        if "segmentation" in annotation:
+            # each instance contains 1 or more polygons
+            segm = annotation["segmentation"]
+            if isinstance(segm, list):
+                # polygons
+                polygons = [np.asarray(p).reshape(-1, 2) for p in segm]
+                annotation["segmentation"] = [
+                    p.reshape(-1) for p in polygons
+                ]
+            elif isinstance(segm, dict):
+                # RLE
+                mask = mask_util.decode(segm)
+                assert tuple(mask.shape[:2]) == image_size
+                annotation["segmentation"] = mask
+            else:
+                raise ValueError(
+                    "Cannot transform segmentation of type '{}'!"
+                    "Supported types are: polygons as list[list[float] or ndarray],"
+                    " COCO-style RLE as a dict.".format(type(segm))
+                )
+
+        return annotation
+
     def annotations_to_instances(self, annos, transforms, image_size, mask_format="polygon"):
         """
         Create an :class:`Instances` object used by the models,
@@ -387,6 +495,8 @@ class SamDatasetMapper(DatasetMapper):
         """
         if isinstance(transforms, (tuple, list)):
             transforms = T.TransformList(transforms)
+        # transforms = NoOpTransform()
+
         boxes = (
             np.stack(
                 [BoxMode.convert(obj["bbox"], obj["bbox_mode"], BoxMode.XYXY_ABS) for obj in annos]

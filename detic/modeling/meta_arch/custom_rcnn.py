@@ -113,7 +113,6 @@ class CustomRCNN(GeneralizedRCNN):
         """
         if not self.training:
             return self.inference(batched_inputs)
-
         images = self.preprocess_image(batched_inputs)
 
         ann_type = 'box'

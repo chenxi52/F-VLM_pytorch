@@ -170,5 +170,6 @@ def add_rsprompter_config(cfg):
     _C.TEST.DO_POSTPROCESS = True
     _C.TEST.IMS_PER_BATCH = 2 #the batch_size of testing
 
+    _C.MODEL.ROI_HEADS.ALLOW_LOW_QUALITY_MATCHES = True
 
 

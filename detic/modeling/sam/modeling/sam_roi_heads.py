@@ -14,6 +14,7 @@ from detectron2.layers import ShapeSpec
 from detectron2.modeling.proposal_generator.proposal_utils import add_ground_truth_to_proposals
 from detectron2.utils.events import get_event_storage
 from detectron2.modeling.sampling import subsample_labels
+from detectron2.modeling.matcher import Matcher
 import copy 
 
 @ROI_HEADS_REGISTRY.register()
@@ -67,6 +68,11 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         # maybe mask_forward need sam
         ret['mask_on'] = mask_on
         ret['input_size'] = input_size
+        ret['proposal_matcher'] = Matcher(
+                cfg.MODEL.ROI_HEADS.IOU_THRESHOLDS,
+                cfg.MODEL.ROI_HEADS.IOU_LABELS,
+                allow_low_quality_matches=cfg.MODEL.ROI_HEADS.ALLOW_LOW_QUALITY_MATCHES,
+            )
         return ret
 
 
@@ -77,7 +83,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         Args:
             img_features: features output by image_encoder
             features: Multi-level features
-            instances (list[Instances]): the per-image instances to train/predict masks. 
+            instances (list[Instances]): proposals from rpn. the per-image instances to train/predict masks. 
                 have predicted_boxes of _forward_box_head
                         In training, they can be the proposals.
                         In inference, they can be the boxes predicted by R-CNN box head.
@@ -88,7 +94,12 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             # head is only trained on positive proposals.
             instances, _ = select_foreground_proposals(instances, self.num_classes)
             # len(instances) = bz
+        import ipdb
+        ipdb.set_trace
         if self.mask_pooler is not None:
+            import ipdb
+            ipdb.set_trace
+            # the box here are fused together, but will be assigned to each level in mask_pooler
             boxes = [i.proposal_boxes if self.training else i.pred_boxes for i in instances]
             # List[bz * List[19*Boxes, 3*Boxes]]
             img_flags_freq = [len(box) for box in boxes]
@@ -97,6 +108,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             # len(Boxes)* Torch.tensor[256,14,14]
         else:
             features = {f: features[f] for f in self.mask_in_features}
+
         # prompt_head + mask_decoder
         return self.mask_head(features, img_features, instances, sam, img_flags_freq, origin_img_size)
 
@@ -140,9 +152,9 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         # targets[0][0]: Instances(num_instances=1, image_height=683, image_width=1024, 
             # fields=[gt_boxes: Boxes(tensor([[ 59.3920, 407.0560, 121.1200, 500.9760]], device='cuda:0')), 
             # gt_classes: tensor([0], device='cuda:0'), gt_masks: PolygonMasks(num_instances=1)])
-
         if self.training:
             assert targets, "'targets' argument is required during training"
+            # ROI assigner and sampler works
             proposals = self.label_and_sample_proposals(proposals, targets)
             #Instances(num_instances=1, image_height=683, image_width=1024, 
                 # fields=[proposal_boxes: Boxes(tensor([[196.3040, 415.1680, 223.5360, 464.7520]], device='cuda:0')), 
@@ -150,8 +162,10 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
                 # gt_boxes: Boxes(tensor([[196.3040, 415.1680, 223.5360, 464.7520]], device='cuda:0')), 
                 # gt_masks: PolygonMasks(num_instances=1)])
             # proposals: List[bz * List[512*Instances]]
+            # check the roi assignerer 
         del targets
         # pe map
+        # x: from large rois to small roi layer
         x = [item[1] for item in list(features.items())]
         bs, _, h, w = x[-1].shape
         mask_pe = torch.zeros((bs, h, w), device=x[0].device, dtype=torch.bool)
@@ -159,9 +173,9 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
 
         for i in range(len(features)):
             x[i] = x[i] + torch.nn.functional.interpolate(img_feat_pe, size=x[i].shape[-2:], mode='bilinear')
-        
+        x = {list(features.keys())[i]: x[i] for i in range(len(features))}
         if self.training:
-            losses = self._forward_box(features, proposals)
+            losses = self._forward_box(x, proposals)
             # losses: Instance
             # {'loss_cls': , 'loss_box_reg'}
             # Usually the original proposals used by the box head are used by the mask, keypoint
@@ -172,11 +186,12 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             return proposals, losses
         else:
             #proposals=None
-            pred_instances = self._forward_box(features, proposals)
+            pred_instances = self._forward_box(x, proposals)
+            
             # pred_boxes = Boxes(boxes)   result.scores = scores  pred_classes
             # During inference cascaded prediction is used: the mask and keypoints heads are only
             # applied to the top scoring box detections.
-            pred_instances = self.forward_with_given_boxes(sam, img_features, features, pred_instances, origin_img_size)
+            pred_instances = self.forward_with_given_boxes(sam, img_features, x, pred_instances, origin_img_size)
             return pred_instances, {}
     
     def forward_with_given_boxes(
@@ -202,7 +217,6 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         """
         assert not self.training
         assert instances[0].has("pred_boxes") and instances[0].has("pred_classes")
-        # features = [item[1] for item in features.items()]
         instances = self._forward_mask(sam, img_features, features, instances, origin_img_size)
         return instances
 
@@ -324,6 +338,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             gt_classes[matched_labels == 0] = self.num_classes
             # Label ignore proposals (-1 label)
             gt_classes[matched_labels == -1] = -1
+        
         else:
             gt_classes = torch.zeros_like(matched_idxs) + self.num_classes
             # NOTE: only for bitmask mask labeling-format

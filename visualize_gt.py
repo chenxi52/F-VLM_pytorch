@@ -143,7 +143,7 @@ def do_test(cfg, model):
                 resize_img = torch.nn.functional.interpolate(img_tensor, (data[ind]['height'],data[ind]['width']), mode='bilinear', align_corners=False)
                 resize_img = resize_img.permute(0,2,3,1).squeeze().numpy()
                 vis = Visualizer(resize_img, metadata)
-                pred_instance = outs[ind].to('cpu')
+                pred_instance = outs[ind]['instances'].to('cpu')
                 vis_pred = vis.draw_instance_predictions(pred_instance).get_image()
                 cv2.imwrite(f'output/visualize/pred_test_{ind+show_iter*len(data)}.png', vis_pred[:,:,::-1])    
             show_iter += 1

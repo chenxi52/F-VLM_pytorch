@@ -23,6 +23,7 @@ from detectron2.evaluation import (
     LVISEvaluator,
     COCOEvaluator,
 )
+from detic.evaluation.custom_evaluator import custom_inference_on_dataset
 from detectron2.modeling import build_model
 from detectron2.solver import build_lr_scheduler, build_optimizer
 from detectron2.utils.events import (
@@ -74,7 +75,7 @@ def do_test(cfg, model):
             assert 0, evaluator_type
         if cfg.SOLVER.AMP.ENABLED:
             with torch.cuda.amp.autocast():
-                results[dataset_name] = inference_on_dataset(
+                results[dataset_name] = custom_inference_on_dataset(
                     model, data_loader, evaluator)
         if comm.is_main_process():
             logger.info("Evaluation results for {} in csv format:".format(
@@ -86,19 +87,24 @@ def do_test(cfg, model):
 
 def do_train(cfg, model, resume=False):
     model.train()
-    if comm.get_world_size() > 1:
-        model.module.sam.eval()
-    else:
-        model.sam.eval()
+    def set_sam_eval():
+        if comm.get_world_size() > 1:
+            model.module.sam.eval()
+        else:
+            model.sam.eval()
+    set_sam_eval()
+
     if cfg.SOLVER.USE_CUSTOM_SOLVER:
+        # also set requires_grad for module
         optimizer = build_sam_optimizer(cfg, model)
     else:
         assert cfg.SOLVER.OPTIMIZER == 'SGD'
         assert cfg.SOLVER.CLIP_GRADIENTS.CLIP_TYPE != 'full_model'
         assert cfg.SOLVER.BACKBONE_MULTIPLIER == 1.
         optimizer = build_optimizer(cfg, model)
-    scheduler = build_lr_scheduler(cfg, optimizer)
 
+    scheduler = build_lr_scheduler(cfg, optimizer)
+    
     checkpointer = samCheckpointer(
         model, cfg.OUTPUT_DIR, optimizer=optimizer, scheduler=scheduler
     )
@@ -183,7 +189,6 @@ def do_train(cfg, model, resume=False):
                 and iteration != max_iter):
                 do_test(cfg, model)
                 comm.synchronize()
-
             if iteration - start_iter > 5 and \
                 (iteration % cfg.SOLVER.LOGGER_FREQ == 0 or iteration == max_iter):
                 for writer in writers:
@@ -220,6 +225,7 @@ def main(args):
 
     model = build_model(cfg)
     logger.info("Model:\n{}".format(model))
+    
     if args.eval_only:
         # for debugging, load fastercnn here
         samCheckpointer(model, save_dir=cfg.OUTPUT_DIR).resume_or_load(
