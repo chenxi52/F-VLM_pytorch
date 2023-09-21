@@ -94,17 +94,22 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             # head is only trained on positive proposals.
             instances, _ = select_foreground_proposals(instances, self.num_classes)
             # len(instances) = bz
-        import ipdb
-        ipdb.set_trace
+
         if self.mask_pooler is not None:
-            import ipdb
-            ipdb.set_trace
             # the box here are fused together, but will be assigned to each level in mask_pooler
             boxes = [i.proposal_boxes if self.training else i.pred_boxes for i in instances]
             # List[bz * List[19*Boxes, 3*Boxes]]
             img_flags_freq = [len(box) for box in boxes]
+            
             features = [features[f] for f in self.mask_in_features]
             features = self.mask_pooler(features, boxes)
+            if features.size(0)==0:
+                results_instances = []
+                for ins in instances:
+                    ins.pred_masks = torch.tensor([], device=ins.pred_classes.device)
+                results_instances.append({'instances': ins})
+                return results_instances
+            
             # len(Boxes)* Torch.tensor[256,14,14]
         else:
             features = {f: features[f] for f in self.mask_in_features}

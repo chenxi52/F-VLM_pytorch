@@ -91,6 +91,7 @@ class samPromptMaskHead(nn.Module):
         # first, select positive rois
         batch_size = roi_feature.shape[0]
         point_emd = self.point_emb(roi_feature) #prompt head 
+        
         point_emd = point_emd.view(batch_size, self.per_query_point, -1)
         if self.with_sincos: 
             point_emd = torch.sin(point_emd[..., ::2] + point_emd[..., 1::2])
@@ -124,8 +125,6 @@ class samPromptMaskHead(nn.Module):
             if mask_preds.size(0) == 0:
                 mask_loss_and_target = dict(loss_mask = low_res_masks.sum(), mask_target=None)
             else:
-                import ipdb
-                ipdb.set_trace()
                 mask_loss_and_target = self.loss_and_target(
                     mask_preds = mask_preds,
                     instances = instances,

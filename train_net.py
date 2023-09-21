@@ -85,6 +85,7 @@ def do_test(cfg, model):
         results = list(results.values())[0]
     return results
 
+
 def do_train(cfg, model, resume=False):
     model.train()
     def set_sam_eval():
@@ -93,7 +94,6 @@ def do_train(cfg, model, resume=False):
         else:
             model.sam.eval()
     set_sam_eval()
-
     if cfg.SOLVER.USE_CUSTOM_SOLVER:
         # also set requires_grad for module
         optimizer = build_sam_optimizer(cfg, model)
@@ -108,7 +108,6 @@ def do_train(cfg, model, resume=False):
     checkpointer = samCheckpointer(
         model, cfg.OUTPUT_DIR, optimizer=optimizer, scheduler=scheduler
     )
-
     start_iter = checkpointer.resume_or_load(
             cfg.MODEL.WEIGHTS, resume=resume).get("iteration", -1) + 1
     if not resume:
@@ -117,7 +116,7 @@ def do_train(cfg, model, resume=False):
 
     periodic_checkpointer = PeriodicCheckpointer(
         checkpointer, period=cfg.SOLVER.CHECKPOINT_PERIOD, max_iter=max_iter,
-        max_to_keep=2
+        max_to_keep=3
     )
     TIMESTAMP = "{0:%Y-%m-%dT%H-%M-%S/}".format(datetime.datetime.now())
     writers = (
@@ -231,6 +230,7 @@ def main(args):
         samCheckpointer(model, save_dir=cfg.OUTPUT_DIR).resume_or_load(
             cfg.MODEL.WEIGHTS, resume=args.resume
         )
+        model.eval()
         return do_test(cfg, model)
 
     distributed = comm.get_world_size() > 1

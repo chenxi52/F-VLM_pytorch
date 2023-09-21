@@ -5,9 +5,9 @@ MODEL:
     NAME: "build_sam_vit_fpn_backbone" #SAM vit_h
     # TYPE: "vit_h"
     TYPE: "vit_b"
-  # WEIGHTS: "sam_vit_b_01ec64.pth"
+  WEIGHTS: "sam_vit_b_01ec64.pth"
   # WEIGHTS: "sam_vit_h_4b8939.pth"
-  WEIGHTS: "output/Detic-COCO/RSPrompter_anchor/model_0044999.pth"
+  # WEIGHTS: "output/Detic-COCO/RSPrompter_anchor/model_0019999.pth"
   FPN:
     OUT_CHANNELS: 256
     INNER_CHANNELS: 32
@@ -77,18 +77,18 @@ DATASETS:
   TRAIN: ("coco_2017_train",)
   TEST: ("coco_2017_val",)
 DATALOADER:
-  NUM_WORKERS: 2 #num_workers == batchsize_per_gpu
+  NUM_WORKERS: 4 #num_workers == batchsize_per_gpu
 SOLVER:
   IMS_PER_BATCH: 8 # change  # max 8 imgs per batch
-  BASE_LR: 0.0001  # change
+  BASE_LR: 0.00002  # change
   # STEPS: (15000, 25000)  # change
-  WARMUP_ITERS: 1500  
+  WARMUP_ITERS: 18000  
   WARMUP_METHOD : "linear"
   WARMUP_FACTOR: 0.0001  
   LR_SCHEDULER_NAME: "WarmupCosineLR" 
   WEIGHT_DECAY: 0.001 
-  MAX_ITER: 45000  # change
-  CHECKPOINT_PERIOD: 1000  #  change
+  MAX_ITER: 180000  # change
+  CHECKPOINT_PERIOD: 5000  #  change
   USE_CUSTOM_SOLVER: True
   OPTIMIZER: 'ADAMW'
   LOGGER_FREQ: 20  # the output freq of logger writer

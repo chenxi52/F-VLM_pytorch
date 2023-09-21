@@ -136,10 +136,19 @@ class SamDetector(GeneralizedRCNN):
         for results_per_img, input_per_img, img_size in zip(
             instances, batched_inputs, image_sizes
         ):  
-            mask_per_img = results_per_img["instances"].pred_masks.sigmoid()
-
+            
             ori_height = input_per_img.get("height")
             ori_width = input_per_img.get("width")
+            new_size = (ori_height, ori_width)
+            results = Instances(new_size, **results_per_img["instances"].get_fields())
+            pred_masks = results_per_img['instances'].pred_masks
+            if pred_masks.size(0) == 0:
+                results.pred_masks = pred_masks
+                processed_results.append({'instances':results})
+                continue
+
+            mask_per_img = pred_masks.sigmoid()
+            
             masks = F.interpolate(
                 mask_per_img.unsqueeze(1),
                 sam_img_size,
@@ -154,13 +163,11 @@ class SamDetector(GeneralizedRCNN):
                 raise ValueError('The mask_thr_binary<0')
             # img_size: longest=1024
             
-            new_size = (ori_height, ori_width)
             scale_x, scale_y = (
                 ori_width / img_size[1],
                 ori_height / img_size[0] 
             )
 
-            results = Instances(new_size, **results_per_img["instances"].get_fields())
             if results.has("pred_boxes"):
                 output_boxes = results.pred_boxes
             elif results.has("proposal_boxes"):
