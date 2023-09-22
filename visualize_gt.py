@@ -132,8 +132,6 @@ def do_test(cfg, model):
         stack.enter_context(torch.no_grad())
         for data in data_loader:
             train_img = [ins['image'].permute(1,2,0).numpy() for ins in data]
-            import ipdb
-            ipdb.set_trace()
             # the model 
             outs = model(data)
 

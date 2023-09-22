@@ -95,12 +95,11 @@ def build_sam_optimizer(cfg: CfgNode, model: torch.nn.Module) -> torch.optim.Opt
         lr = cfg.SOLVER.BASE_LR
         weight_decay = cfg.SOLVER.WEIGHT_DECAY
         if 'sam.' not in key:
+            value.requires_grad_(True)
             param = {"params": [value], "lr": lr}
             if optimizer_type != 'ADAMW':
                 param['weight_decay'] = weight_decay
             params += [param]
-            
-            value.requires_grad_(True)
         else:
             value.requires_grad_(False)
 

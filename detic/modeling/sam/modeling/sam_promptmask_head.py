@@ -71,9 +71,8 @@ class samPromptMaskHead(nn.Module):
             roi_feature: List[torch.Tensor],
             img_features: torch.Tensor,
             instances: List[Instances],
+            mask_roi_inds: torch.Tensor,
             sam: nn.Module,
-            img_flag_freq: List[int],
-            origin_img_size: List[Tuple[int, int]]
         ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         firstly, inference, and then calculate losses
@@ -99,8 +98,14 @@ class samPromptMaskHead(nn.Module):
         nomask_dense_embeddings = sam.prompt_encoder.no_mask_embed.weight.reshape(1, -1, 1, 1).expand(
             point_emd.shape[0], -1, *img_features.shape[-2:]
         )
-        img_flag_freq = torch.tensor(img_flag_freq, dtype=torch.long,device=point_emd.device)
-        img_embeddings = torch.repeat_interleave(img_features, img_flag_freq, dim=0 )
+
+        # the index must have 
+        img_flag_ids = torch.bincount(mask_roi_inds.long())
+        padding = torch.zeros((len(img_features)-len(img_flag_ids),), device=img_flag_ids.device, dtype=img_flag_ids.dtype)
+        # padding: what if no_mask exist in the 
+        img_flag_ids = torch.cat([img_flag_ids, padding])
+        
+        img_embeddings = torch.repeat_interleave(img_features, img_flag_ids, dim=0)
         img_pe = sam.prompt_encoder.get_dense_pe()
         img_pe = repeat(img_pe, 'b c h w -> (b n) c h w', n=img_embeddings.shape[0])
 
@@ -113,9 +118,8 @@ class samPromptMaskHead(nn.Module):
             multimask_output=False,
             res_img_feat=res_img_feat,
         )
-        mask_preds = low_res_masks.squeeze(1)
         iou_predictions = iou_predictions.squeeze(1)
-        mask_result = dict(mask_preds = mask_preds, mask_iou = iou_predictions)
+        mask_result = dict(mask_preds = low_res_masks.squeeze(1), mask_iou = iou_predictions)
         # sample pos_ind from box_features, this has been done in the roi's _forward_mask
         if self.training:
             # gt_mask id [1024,1024]
@@ -133,14 +137,15 @@ class samPromptMaskHead(nn.Module):
             mask_result.update(loss_mask = mask_loss_and_target['loss_mask'])
             return mask_result
         else:
+            mask_preds = low_res_masks.squeeze(1)
             results_instances = []
-            start = end = 0
-            for freq, ins in zip(img_flag_freq, instances):
-                end += freq.cpu().numpy()
-                ins.pred_masks = mask_preds[start: end]
-                ins.pred_ious = iou_predictions[start: end]
-                start = end
-                results_instances.append({'instances':ins})
+            img_flag_ids = img_flag_ids.cpu().numpy().tolist()
+            mask_preds = mask_preds.split(img_flag_ids, 0)
+            iou_predictions = iou_predictions.split(img_flag_ids, 0)
+            for i, ins in enumerate(instances):
+                ins.pred_masks = mask_preds[i]
+                ins.pred_ious = iou_predictions[i]
+                results_instances.append(ins)
             # then check the detector.inference.
             return results_instances
             

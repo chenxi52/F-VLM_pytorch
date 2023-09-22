@@ -7,7 +7,7 @@ MODEL:
     TYPE: "vit_b"
   WEIGHTS: "sam_vit_b_01ec64.pth"
   # WEIGHTS: "sam_vit_h_4b8939.pth"
-  # WEIGHTS: "output/Detic-COCO/RSPrompter_anchor/model_0019999.pth"
+  # WEIGHTS: "output/Detic-COCO/RSPrompter_anchor/model_0000199.pth"
   FPN:
     OUT_CHANNELS: 256
     INNER_CHANNELS: 32
@@ -20,7 +20,7 @@ MODEL:
     SIZES: [[16,32,64,128,256,512],[32,64,128,256,512,1024],[64,128,256,512,1024,2048]]  # One size for each in feature map
     ASPECT_RATIOS: [[0.5, 1.0, 2.0]]  # Three aspect ratios (same for all in feature maps)
   PROPOSAL_GENERATOR:
-    NAME: "samRpn"
+    NAME: "RPN"
   RPN:
     HEAD_NAME: "StandardRPNHead"
     IN_FEATURES: ["feat2", "feat1", "feat0"]
@@ -58,7 +58,7 @@ MODEL:
     POOLER_TYPE: "ROIAlignV2"
     USE_SIGMOID_CE: False
     BBOX_REG_LOSS_WEIGHT: 1.0
-    TRAIN_ON_PRED_BOXES: True
+    TRAIN_ON_PRED_BOXES: False
   ROI_MASK_HEAD:
     NAME: "samPromptMaskHead"
     NUM_CONV: 4
@@ -82,13 +82,13 @@ SOLVER:
   IMS_PER_BATCH: 8 # change  # max 8 imgs per batch
   BASE_LR: 0.00002  # change
   # STEPS: (15000, 25000)  # change
-  WARMUP_ITERS: 18000  
+  WARMUP_ITERS: 9000  
   WARMUP_METHOD : "linear"
   WARMUP_FACTOR: 0.0001  
   LR_SCHEDULER_NAME: "WarmupCosineLR" 
   WEIGHT_DECAY: 0.001 
-  MAX_ITER: 180000  # change
-  CHECKPOINT_PERIOD: 5000  #  change
+  MAX_ITER: 90000  # change
+  CHECKPOINT_PERIOD: 500  #  change
   USE_CUSTOM_SOLVER: True
   OPTIMIZER: 'ADAMW'
   LOGGER_FREQ: 20  # the output freq of logger writer
@@ -108,7 +108,7 @@ TEST:
   DETECTIONS_PER_IMAGE: 100  #test_topk_per_image
   MASK_THR_BINARY: 0.5  
   DO_POSTPROCESS: True
-  EVAL_PERIOD: 5000  # change
+  EVAL_PERIOD: 200  # change
   IMS_PER_BATCH: 4 #every gpu has most 2 images  # change
 VERSION: 2
 FP16: True

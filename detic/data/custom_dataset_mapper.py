@@ -299,7 +299,8 @@ class SamDatasetMapper(DatasetMapper):
         """
         dataset_dict = copy.deepcopy(dataset_dict)  # it will be modified by code below
         # USER: Write your own image loading if it's not from a file
-        image = utils.read_image(dataset_dict["file_name"], format=self.image_format)
+        if 'file_name' in dataset_dict:
+            image = utils.read_image(dataset_dict["file_name"], format=self.image_format)
         utils.check_image_size(dataset_dict, image)
 
         # USER: Remove if you don't do semantic/panoptic segmentation.
@@ -308,7 +309,7 @@ class SamDatasetMapper(DatasetMapper):
         else:
             sem_seg_gt = None
 
-        aug_input = T.AugInput(image, sem_seg=sem_seg_gt)
+        aug_input = T.AugInput(copy.deepcopy(image), sem_seg=sem_seg_gt)
         transforms = self.augmentations(aug_input)
         image, sem_seg_gt = aug_input.image, aug_input.sem_seg
 
@@ -319,7 +320,8 @@ class SamDatasetMapper(DatasetMapper):
         dataset_dict["image"] = torch.as_tensor(np.ascontiguousarray(image.transpose(2, 0, 1)))
         if sem_seg_gt is not None:
             dataset_dict["sem_seg"] = torch.as_tensor(sem_seg_gt.astype("long"))
-
+        dataset_dict["input_height"] = dataset_dict["image"].size(0)
+        dataset_dict["input_width"] = dataset_dict["image"].size(1)
         # USER: Remove if you don't use pre-computed proposals.
         # Most users would not need this feature.
         if self.proposal_topk is not None:
@@ -334,10 +336,9 @@ class SamDatasetMapper(DatasetMapper):
             dataset_dict.pop("sem_seg_file_name", None)
             return dataset_dict
 
-
         if "annotations" in dataset_dict:
             dataset_dict = self._transform_annotations(dataset_dict, transforms, image_shape)
-        
+            # transform mode and become instances
         # return annotation as instances without transform
         # dataset_dict = self.test_transform_anno(dataset_dict, transforms, image_shape)
 
@@ -363,6 +364,7 @@ class SamDatasetMapper(DatasetMapper):
             annos, transforms, image_shape, mask_format=self.instance_mask_format
         )
         
+        del annos
         # After transforms such as cropping are applied, the bounding box may no longer
         # tightly bound the object. As an example, imagine a triangle object
         # [(0,0), (2,0), (0,2)] cropped by a box [(1,0),(2,2)] (XYXY format). The tight

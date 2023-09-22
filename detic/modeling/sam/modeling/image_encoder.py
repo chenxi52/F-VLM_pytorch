@@ -104,7 +104,6 @@ class ImageEncoderViT(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = torch.stack([self.preprocess(i)  for i in x], dim=0)
         x = self.patch_embed(x)
         if self.pos_embed is not None:
             x = x + self.pos_embed
@@ -114,19 +113,8 @@ class ImageEncoderViT(nn.Module):
             inter_features.append(x)
 
         x = self.neck(x.permute(0, 3, 1, 2))
-
         return x, inter_features
 
-    
-    def preprocess(self, x: torch.Tensor) -> torch.Tensor:
-        """Normalize pixel values and pad to a square input."""
-        # Normalize colors have done 
-        # Pad
-        h, w = x.shape[-2:]
-        padh = self.img_size - h
-        padw = self.img_size - w
-        x = F.pad(x, (0, padw, 0, padh))
-        return x
 
 
 class Block(nn.Module):

@@ -204,7 +204,7 @@ class SAMAggregatorNeck(Backbone):
         img_feats_0 = self.up_layers[1](x)
         img_feats_1 = self.up_sample_layers[0](img_feats_0) + self.up_sample_layers[1](img_feats_0)
         img_feats_2 = self.up_sample_layers[2](img_feats_1) + self.up_sample_layers[3](img_feats_1)
-        return { 'feat2':img_feats_2,'feat1': img_feats_1, 'feat0':img_feats_0}
+        return { 'feat2':img_feats_2, 'feat1': img_feats_1, 'feat0':img_feats_0}
     
     @property
     def size_divisibility(self):
@@ -212,7 +212,7 @@ class SAMAggregatorNeck(Backbone):
 
     @property
     def padding_constraints(self):
-        return {"square_size": self._square_pad}
+        return {"square_size": 1024}
     
     @property
     def output_shape(self):
