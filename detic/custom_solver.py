@@ -85,6 +85,8 @@ def build_sam_optimizer(cfg: CfgNode, model: torch.nn.Module) -> torch.optim.Opt
     params: List[Dict[str, Any]] = []
     memo: Set[torch.nn.parameter.Parameter] = set()
     optimizer_type = cfg.SOLVER.OPTIMIZER
+
+    # print(f'all Params: ')
     for key, value in model.named_parameters(recurse=True):
         if not value.requires_grad:
             continue
@@ -102,6 +104,12 @@ def build_sam_optimizer(cfg: CfgNode, model: torch.nn.Module) -> torch.optim.Opt
             params += [param]
         else:
             value.requires_grad_(False)
+        # print(key)
+    # print('*'*50)
+    # print('Optimzed Params are: ')
+    # for key, value in model.named_parameters(recurse=True):
+    #     if value.requires_grad == True:
+            # print(key)
 
     def maybe_add_full_model_gradient_clipping(optim):  # optim: the optimizer class
         # detectron2 doesn't have full model gradient clipping now

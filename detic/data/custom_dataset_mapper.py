@@ -320,8 +320,8 @@ class SamDatasetMapper(DatasetMapper):
         dataset_dict["image"] = torch.as_tensor(np.ascontiguousarray(image.transpose(2, 0, 1)))
         if sem_seg_gt is not None:
             dataset_dict["sem_seg"] = torch.as_tensor(sem_seg_gt.astype("long"))
-        dataset_dict["input_height"] = dataset_dict["image"].size(0)
-        dataset_dict["input_width"] = dataset_dict["image"].size(1)
+        dataset_dict["input_height"] = dataset_dict["image"].size(-2)
+        dataset_dict["input_width"] = dataset_dict["image"].size(-1)
         # USER: Remove if you don't use pre-computed proposals.
         # Most users would not need this feature.
         if self.proposal_topk is not None:
@@ -338,10 +338,6 @@ class SamDatasetMapper(DatasetMapper):
 
         if "annotations" in dataset_dict:
             dataset_dict = self._transform_annotations(dataset_dict, transforms, image_shape)
-            # transform mode and become instances
-        # return annotation as instances without transform
-        # dataset_dict = self.test_transform_anno(dataset_dict, transforms, image_shape)
-
         return dataset_dict
     
     def _transform_annotations(self, dataset_dict, transforms, image_shape):
@@ -495,8 +491,8 @@ class SamDatasetMapper(DatasetMapper):
                 "gt_masks", "gt_keypoints", if they can be obtained from `annos`.
                 This is the format that builtin models expect.
         """
-        if isinstance(transforms, (tuple, list)):
-            transforms = T.TransformList(transforms)
+        # if isinstance(transforms, (tuple, list)):
+        #     transforms = T.TransformList(transforms)
         # transforms = NoOpTransform()
 
         boxes = (
@@ -529,23 +525,23 @@ class SamDatasetMapper(DatasetMapper):
                     if isinstance(segm, list):
                         # polygon
                         bitmask = polygons_to_bitmask(segm, *image_size)
-                        if self.is_train:
-                            bitmask = transforms.apply_mask(bitmask) # 
+                        # if self.is_train:
+                        #     bitmask = transforms.apply_mask(bitmask) # 
                         masks.append(bitmask)
                     elif isinstance(segm, dict):
                         # COCO RLE
                         bitmask = mask_util.decode(segm)
-                        if self.is_train:
-                            bitmask = transforms.apply_mask(bitmask)
+                        # if self.is_train:
+                        #     bitmask = transforms.apply_mask(bitmask)
                         masks.append(bitmask)
                     elif isinstance(segm, np.ndarray):
                         assert segm.ndim == 2, "Expect segmentation of 2 dimensions, got {}.".format(
                             segm.ndim
                         )
                         # mask array
-                        print('array')
-                        if self.is_train:
-                            segm = transforms.apply_mask(segm)
+                        # print('array')
+                        # if self.is_train:
+                            # segm = transforms.apply_mask(segm)
                         masks.append(segm)
                     else:
                         raise ValueError(

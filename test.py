@@ -1,7 +1,5 @@
+from torch.nn.functional import sigmoid
 import torch
-
- 
-input = torch.tensor([1, 2, 2, 3, 3, 3, 5,5])
-counts = torch.bincount(input)
- 
-print(counts)  # 输出: tensor([0, 1, 2, 3, 4])
+image_size_tesnsor = [torch.tensor([300,400]), torch.tensor([200,500])]
+q=  torch.stack(image_size_tesnsor).max(0)
+print(q)

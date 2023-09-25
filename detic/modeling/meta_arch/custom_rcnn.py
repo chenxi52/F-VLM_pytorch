@@ -38,8 +38,7 @@ class CustomRCNN(GeneralizedRCNN):
         with_caption = False,
         dynamic_classifier = False,
         **kwargs):
-        """
-        """
+  
         self.with_image_labels = with_image_labels
         self.dataset_loss_weight = dataset_loss_weight
         self.fp16 = fp16

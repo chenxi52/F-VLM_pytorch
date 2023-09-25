@@ -56,6 +56,7 @@ class SAMAggregatorNeck(Backbone):
         self.selected_channels = selected_channels
         self.up_sample_scale = up_sample_scale
         self.down_sample_layers = nn.ModuleList()
+        self.inner_channels = inner_channels
 
         self._square_pad = square_pad
         self.anchor_stride= anchor_stride
@@ -208,11 +209,11 @@ class SAMAggregatorNeck(Backbone):
     
     @property
     def size_divisibility(self):
-        return self.anchor_stride[-1]
+        return 32
 
     @property
     def padding_constraints(self):
-        return {"square_size": 1024}
+        return {"square_size": 0}
     
     @property
     def output_shape(self):

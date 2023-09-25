@@ -132,14 +132,9 @@ def do_test(cfg, model):
         stack.enter_context(torch.no_grad())
         for data in data_loader:
             train_img = [ins['image'].permute(1,2,0).numpy() for ins in data]
-            # the model 
             outs = model(data)
-
-            # outs = outs.unsqueeze(1)
-            # outs = torch.nn.functional.interpolate(outs, size=(img.shape[:2]), mode='bilinear', align_corners=False, )
-            # outs = outs.squeeze(1)
-            # NOTE: reback the postprocess in detector
-            for ind, img in enumerate(train_img):
+            ind = 0
+            for img in train_img:
                 img_tensor = torch.tensor(img, dtype=torch.float32).unsqueeze(0).permute(0,3,1,2)
                 resize_img = torch.nn.functional.interpolate(img_tensor, (data[ind]['height'],data[ind]['width']), mode='bilinear', align_corners=False)
                 resize_img = resize_img.permute(0,2,3,1).squeeze().numpy()
@@ -147,8 +142,9 @@ def do_test(cfg, model):
                 pred_instance = outs[ind]['instances'].to('cpu')
                 vis_pred = vis.draw_instance_predictions(pred_instance).get_image()
                 cv2.imwrite(f'output/visualize/pred_test_{ind+show_iter*len(data)}.png', vis_pred[:,:,::-1])    
+                ind+=1
             show_iter += 1
-            if show_iter>=5:
+            if show_iter>=50:
                 break        
     pass
 

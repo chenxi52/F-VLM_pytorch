@@ -7,15 +7,16 @@ import torch
 from torch import nn
 from detectron2.config import configurable
 from detectron2.modeling.poolers import ROIPooler, ROIAlign
-from detectron2.modeling import build_roi_heads, ROI_HEADS_REGISTRY, StandardROIHeads, build_mask_head
+from detectron2.modeling import build_roi_heads, ROI_HEADS_REGISTRY, StandardROIHeads
 from detectron2.modeling.roi_heads import select_foreground_proposals
 from detectron2.structures import Instances, ImageList, pairwise_iou, BitMasks, Boxes
 from detectron2.layers import ShapeSpec
 from detectron2.modeling.proposal_generator.proposal_utils import add_ground_truth_to_proposals
-from detectron2.utils.events import get_event_storage
 from detectron2.modeling.sampling import subsample_labels
 from detectron2.modeling.matcher import Matcher
 import copy 
+from detectron2.modeling import build_box_head
+from detic.modeling.roi_heads.sam_fast_rcnn import SamRCNNOutputLayers
 from typing import Union
 from torch import Tensor
 from detic.modeling.custom_poolers import customRoiPooler
@@ -92,9 +93,19 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             if pooler_type
             else None
         )
-
+        del ret['box_predictor']
+        # update box_predictor for bbox_loss 
+        ret.update(cls.init_box_head(ret['box_head'].output_shape, cfg))
         return ret
 
+    @classmethod
+    def init_box_head(cls, box_out_shape, cfg):
+        # fmt: off
+        box_predictor = SamRCNNOutputLayers(cfg, box_out_shape)
+
+        return {
+            "box_predictor": box_predictor,
+        }
 
     def _forward_mask(self, sam: nn.Module, img_features: torch.Tensor, features: Dict[str, torch.Tensor], 
                       instances: List[Instances]):
@@ -122,20 +133,16 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
 
             # List[bz * List[19*Boxes, 3*Boxes]]
             # img_flags_freq = [len(box) for box in boxes]
-            
             features = [features[f] for f in self.mask_in_features]
             features, mask_roi_inds = self.mask_pooler(features, boxes)
             if features.size(0)==0:
                 results_instances = []
                 for ins in instances:
                     ins.pred_masks = torch.tensor([], device=ins.pred_classes.device)
-                results_instances.append({'instances': ins})
+                    results_instances.append(ins)
                 return results_instances
-            
-            # len(Boxes)* Torch.tensor[256,14,14]
         else:
             features = {f: features[f] for f in self.mask_in_features}
-    
         # prompt_head + mask_decoder
         return self.mask_head(features, img_features, instances, mask_roi_inds, sam)
 
@@ -143,7 +150,6 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
     def forward( 
             self,
             sam: nn.Module,
-            images: ImageList,
             img_features: torch.Tensor,
             features: Dict[str, torch.Tensor],
             proposals: List[Instances],
@@ -170,7 +176,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             mapping from a named loss to a tensor storing the loss. Used during training only.
         """
 
-        del images
+    
         # len(targets[0]) = 5; len(targets[1]) = 1
         # proposals[0][0]: Instances(num_instances=1, image_height=683, image_width=1024, 
             # fields=[proposal_boxes: Boxes(tensor([[ 44.6688, 107.2670,  50.0604, 118.8706]], device='cuda:0')), 
@@ -206,7 +212,8 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             # Usually the original proposals used by the box head are used by the mask, keypoint
             # heads. But when `self.train_on_pred_boxes is True`, proposals will contain boxes
             # predicted by the box head. proposal_boxes are replaced by boxes predicted by box_head
-            losses.update(loss_mask=self._forward_mask(sam, img_features, x, proposals)['loss_mask'])
+            if self.mask_on:
+                losses.update(loss_mask=self._forward_mask(sam, img_features, x, proposals)['loss_mask'])
             return proposals, losses
         else:
             #proposals=None
@@ -214,11 +221,12 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             # pred_boxes = Boxes(boxes)   result.scores = scores  pred_classes
             # During inference cascaded prediction is used: the mask and keypoints heads are only
             # applied to the top scoring box detections.
-            pred_instances = self.forward_with_given_boxes(sam, img_features, x, pred_instances)
+            if self.mask_on:
+                pred_instances = self.forward_with_given_boxes(sam, img_features, x, pred_instances)
             return pred_instances, {}
     
     def forward_with_given_boxes(
-        self, sam: nn.Module, img_features: torch.Tensor, features: Dict[str, torch.Tensor], instances: List[Instances], origin_img_size: Tuple[int,int]
+        self, sam: nn.Module, img_features: torch.Tensor, features: Dict[str, torch.Tensor], instances: List[Instances]
         ) -> List[Instances]:
         """
         Use the given boxes in `instances` to produce other (non-box) per-ROI outputs.

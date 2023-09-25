@@ -85,16 +85,18 @@ class SamDetector(GeneralizedRCNN):
         fpn_features = self.backbone(inter_feats)
         # proposal_generator need to be trained before testing
         proposals, _ = self.proposal_generator(images, fpn_features, None) #samFpn # proposals: img_height=img_width=1024
-        results, _ = self.roi_heads(self.sam, images, img_embedding_feat, fpn_features, proposals)
+
+        results, _ = self.roi_heads(self.sam, img_embedding_feat, fpn_features, proposals)
         # batched_inputs have ori_image_sizes
         # images.image_sizes have input_image_sizes
-        img_input_sizes = [(inp['input_height'], inp['input_width']) for inp in batched_inputs]
-        ori_sizes = [(inp['height'], inp['width']) for inp in batched_inputs]
+        # img_input_sizes = [(inp['input_height'], inp['input_width']) for inp in batched_inputs]
+        # ori_sizes = [(inp['height'], inp['width']) for inp in batched_inputs]
         if do_postprocess:
             assert not torch.jit.is_scripting(), \
                 "Scripting is not supported for postprocess."
-            return self._postprocess(
-                instances=results, ori_sizes=ori_sizes, image_sizes=img_input_sizes)
+            # return self._postprocess(
+            #     instances=results, ori_sizes=ori_sizes, image_sizes=img_input_sizes)
+            return GeneralizedRCNN._postprocess(instances=results, batched_inputs=batched_inputs, image_size=images.image_sizes)
         else:
             return results
         
@@ -103,16 +105,16 @@ class SamDetector(GeneralizedRCNN):
             return self.inference(batched_inputs, do_postprocess=self.do_postprocess)
         images = self.preprocess_image(batched_inputs)
         gt_instances = [x["instances"].to(self.device) for x in batched_inputs] #instance have img_Size with longest-size = 1024
-        img_embedding_feat, inter_feats = self.extract_feat(images.tensor)
+        img_embedding_feat, inter_feats = self.extract_feat(images.tensor) 
         fpn_features = self.backbone(inter_feats)
         # fpn_features: Dict{'feat0': Tuple[2*Tensor[256,32,32]], 'feat1': Tuple[2*Tensor[256,64,64]], ...}
         # resize the img_size in gt_instances to (1024,1024)
         proposals, _ = self.proposal_generator(
             images, fpn_features, gt_instances)
-        # proposals: img_width=img_height=1024,  gt_instance:max(h,w)=1024
+        # proposals:max(h,w)=1024,  gt_instance:max(h,w)=1024
         # proposals: List[bz * Instance[1000 * Instances(num_instances, image_height, image_width, fields=[proposal_boxes: Boxes(tensor([1,4])), objectness_logits:tensor[1],])]]
-        
-        _, detector_losses = self.roi_heads(self.sam, images, img_embedding_feat, fpn_features, proposals, gt_instances)
+        del images
+        _, detector_losses = self.roi_heads(self.sam, img_embedding_feat, fpn_features, proposals, gt_instances)
         return detector_losses
         
 
@@ -123,62 +125,63 @@ class SamDetector(GeneralizedRCNN):
         # feat: Tensor[bz, 256, 64, 64]  inter_feats: List[32*Tensor[bz,64,64,1280]]
         return feat, inter_features
     
-    def _postprocess(self, instances: List[Dict[str,Instances]], ori_sizes: List[Dict[str, torch.Tensor]], image_sizes: List[Tuple[int,int]]):
-        """
-        instances: with instance(mask_preds, iou_preds)
-        Rescale the output instances to the target size.
-        Return: processed_results: List[bz*Dict['instances':Instances('pred_boxes', 'scores', pred_classes', 'pred_masks', 'pred_ious')]]
-        """
+    # @staticmethod
+    # def _postprocess(instances: List[Dict[str,Instances]], ori_sizes: List[Dict[str, torch.Tensor]], image_sizes: List[Tuple[int,int]]):
+    #     """
+    #     instances: with instance(mask_preds, iou_preds)
+    #     Rescale the output instances to the target size.
+    #     Return: processed_results: List[bz*Dict['instances':Instances('pred_boxes', 'scores', pred_classes', 'pred_masks', 'pred_ious')]]
+    #     """
         # note: private function; subject to changes
-        sam_img_size = (self.sam.image_encoder.img_size, self.sam.image_encoder.img_size)
-        processed_results = []
-        for results_per_img, ori_size, img_size in zip(
-            instances, ori_sizes, image_sizes
-        ):  
-            results = Instances(ori_size, **results_per_img.get_fields())
+        # sam_img_size = (self.sam.image_encoder.img_size, self.sam.image_encoder.img_size)
+        # processed_results = []
+        # for results_per_img, ori_size, img_size in zip(
+        #     instances, ori_sizes, image_sizes
+        # ):  
+        #     results = Instances(ori_size, **results_per_img.get_fields())
             
-            if results.has('pred_masks'):
-                pred_masks = results.pred_masks
-                if pred_masks.size(0) == 0:
-                    processed_results.append({'instances':results})
-                    continue
+        #     if results.has('pred_masks'):
+        #         pred_masks = results.pred_masks
+        #         if pred_masks.size(0) == 0:
+        #             processed_results.append({'instances':results})
+        #             continue
 
-                mask_per_img = pred_masks.sigmoid()
-                masks = F.interpolate(
-                    mask_per_img.unsqueeze(1),
-                    sam_img_size,
-                    mode="bilinear",
-                    align_corners=False)
-                masks = masks[..., : img_size[0], : img_size[1]]
-                masks = F.interpolate(masks, ori_size, mode="bilinear", align_corners=False)
-                masks = masks.squeeze(1)
-                if self.mask_thr_binary>=0:
-                    masks = masks >= self.mask_thr_binary
-                else: 
-                    raise ValueError('The mask_thr_binary<0')
-                # img_size: longest=1024
-                results.pred_masks = masks
+        #         mask_per_img = pred_masks.sigmoid()
+        #         masks = F.interpolate(
+        #             mask_per_img.unsqueeze(1),
+        #             sam_img_size,
+        #             mode="bilinear",
+        #             align_corners=False)
+        #         masks = masks[..., : img_size[0], : img_size[1]]
+        #         masks = F.interpolate(masks, ori_size, mode="bilinear", align_corners=False)
+        #         masks = masks.squeeze(1)
+        #         if self.mask_thr_binary>=0:
+        #             masks = masks >= self.mask_thr_binary
+        #         else: 
+        #             raise ValueError('The mask_thr_binary<0')
+        #         # img_size: longest=1024
+        #         results.pred_masks = masks
                 
-            scale_x, scale_y = (
-                ori_size[1] / img_size[1],
-                ori_size[0] / img_size[0] 
-            )
+        #     scale_x, scale_y = (
+        #         ori_size[1] / img_size[1],
+        #         ori_size[0] / img_size[0] 
+        #     )
 
-            if results.has("pred_boxes"):
-                output_boxes = results.pred_boxes
-            elif results.has("proposal_boxes"):
-                output_boxes = results.proposal_boxes
-            else:
-                output_boxes = None
-            assert output_boxes is not None, "Predictions must contain boxes!"
+        #     if results.has("pred_boxes"):
+        #         output_boxes = results.pred_boxes
+        #     elif results.has("proposal_boxes"):
+        #         output_boxes = results.proposal_boxes
+        #     else:
+        #         output_boxes = None
+        #     assert output_boxes is not None, "Predictions must contain boxes!"
 
-            # scaled to the (ori_height, ori_width)
-            output_boxes.scale(scale_x, scale_y)
-            output_boxes.clip(ori_size)
+        #     # scaled to the (ori_height, ori_width)
+        #     output_boxes.scale(scale_x, scale_y)
+        #     output_boxes.clip(ori_size)
 
-            results.pred_boxes = output_boxes
-            results = results[output_boxes.nonempty()]
-            processed_results.append({'instances':results})
+        #     results.pred_boxes = output_boxes
+        #     results = results[output_boxes.nonempty()]
+        #     processed_results.append({'instances':results})
 
-        return processed_results
+        # return processed_results
     
