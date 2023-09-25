@@ -82,7 +82,7 @@ DATASETS:
 DATALOADER:
   NUM_WORKERS: 4 #num_workers == batchsize_per_gpu
 SOLVER:
-  IMS_PER_BATCH: 4 # change  # max 8 imgs per batch
+  IMS_PER_BATCH: 16 # change  # max 8 imgs per batch
   BASE_LR: 0.001  # change
   # STEPS: (15000, 25000)  # change
   WARMUP_ITERS: 10000  
@@ -112,6 +112,6 @@ TEST:
   MASK_THR_BINARY: 0.5  
   DO_POSTPROCESS: True
   EVAL_PERIOD: 5000  # change
-  IMS_PER_BATCH: 2 #every gpu has most 2 images  # change
+  IMS_PER_BATCH: 8 #every gpu has most 2 images  # change
 VERSION: 2
 FP16: True
