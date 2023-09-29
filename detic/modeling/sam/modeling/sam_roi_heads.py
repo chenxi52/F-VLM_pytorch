@@ -1,34 +1,23 @@
 # Copyright (c) Facebook, Inc. and its affiliates.
-import inspect
-import logging
 import numpy as np
 from typing import Dict, List, Optional, Tuple
 import torch
 from torch import nn
 from detectron2.config import configurable
-from detectron2.modeling.poolers import ROIPooler, ROIAlign
 from detectron2.modeling import build_roi_heads, ROI_HEADS_REGISTRY, StandardROIHeads
 from detectron2.modeling.roi_heads import select_foreground_proposals
 from detectron2.structures import Instances, ImageList, pairwise_iou, BitMasks, Boxes
-from detectron2.layers import ShapeSpec
-from detectron2.modeling.proposal_generator.proposal_utils import add_ground_truth_to_proposals
-from detectron2.modeling.sampling import subsample_labels
 from detectron2.modeling.matcher import Matcher
-import copy 
-from detectron2.modeling import build_box_head
 from detic.modeling.roi_heads.sam_fast_rcnn import SamRCNNOutputLayers
-from typing import Union
 from torch import Tensor
 from detic.modeling.custom_poolers import customRoiPooler
+import math
+
 
 @ROI_HEADS_REGISTRY.register()
 class samAnchorPromptRoiHeads(StandardROIHeads):
     """
-    The ROIHeads in a typical "C4" R-CNN model, where
-    the box and mask head share the cropping and
-    the per-region feature computation by a Res5 block.
-
-    the returns of _int_*_head will be the input of __init__
+    The roi heads controls the boxes head and mask head.
     """
     @configurable
     def __init__(
@@ -43,15 +32,9 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         NOTE: this interface is experimental.
 
         Args:
-            in_features (list[str]): list of backbone feature map names to use for
-                feature extraction
-            pooler (ROIPooler): pooler to extra region features from backbone
-            res5 (nn.Sequential): a CNN to compute per-region features, to be used by
-                ``box_predictor`` and ``mask_head``. Typically this is a "res5"
-                block from a ResNet.
-            box_predictor (nn.Module): make box predictions from the feature.
-                Should have the same interface as :class:`FastRCNNOutputLayers`.
-            mask_head (nn.Module): transform features to make mask predictions
+            positional_encoding: added to FPN features
+            mask_on: whether to use mask head
+            input_size: input size for sam image_encoder
         """
         super().__init__(**kwargs)
         self.generator_pe = SinePositionalEncoding(**positional_encoding)
@@ -64,14 +47,12 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         # super().from_config and _init_box_head, _init_mask_head
         _init_box_head has in_features, 
         """
-        # fmt: off
         ret = super().from_config(cfg, input_shape)
         mask_on   = cfg.MODEL.MASK_ON
         input_size = cfg.INPUT.TRAIN_SIZE
-        # fmt: on
-        # maybe mask_forward need sam
         ret['mask_on'] = mask_on
         ret['input_size'] = input_size
+        # add allow_quality to the cfg.
         ret['proposal_matcher'] = Matcher(
                 cfg.MODEL.ROI_HEADS.IOU_THRESHOLDS,
                 cfg.MODEL.ROI_HEADS.IOU_LABELS,
@@ -100,9 +81,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
 
     @classmethod
     def init_box_head(cls, box_out_shape, cfg):
-        # fmt: off
         box_predictor = SamRCNNOutputLayers(cfg, box_out_shape)
-
         return {
             "box_predictor": box_predictor,
         }
@@ -130,9 +109,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         if self.mask_pooler is not None:
             # the box here are fused together, but will be assigned to each level in mask_pooler
             boxes = [i.proposal_boxes if self.training else i.pred_boxes for i in instances]
-
             # List[bz * List[19*Boxes, 3*Boxes]]
-            # img_flags_freq = [len(box) for box in boxes]
             features = [features[f] for f in self.mask_in_features]
             features, mask_roi_inds = self.mask_pooler(features, boxes)
             if features.size(0)==0:
@@ -143,7 +120,6 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
                 return results_instances
         else:
             features = {f: features[f] for f in self.mask_in_features}
-        # prompt_head + mask_decoder
         return self.mask_head(features, img_features, instances, mask_roi_inds, sam)
 
 
@@ -163,41 +139,17 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
                 with fields "proposal_boxes" and "objectness_logits".
             targets (list[Instances], optional): length `N` list of `Instances`. The i-th
                 `Instances` contains the ground-truth per-instance annotations
-                for the i-th input image.  Specify `targets` during training only.
-                It may have the following fields:
-
-                - gt_boxes: the bounding box of each instance.
-                - gt_classes: the label for each instance with a category ranging in [0, #class].
-                - gt_masks: PolygonMasks or BitMasks, the ground-truth masks of each instance.
-                - gt_keypoints: NxKx3, the groud-truth keypoints for each instance.
         Return: pred_instances
             list[Instances]: length `N` list of `Instances` containing the
                 detected instances. Returned during inference only; may be [] during training.
             mapping from a named loss to a tensor storing the loss. Used during training only.
         """
-
-    
-        # len(targets[0]) = 5; len(targets[1]) = 1
-        # proposals[0][0]: Instances(num_instances=1, image_height=683, image_width=1024, 
-            # fields=[proposal_boxes: Boxes(tensor([[ 44.6688, 107.2670,  50.0604, 118.8706]], device='cuda:0')), 
-            # objectness_logits: tensor([0.1904], device='cuda:0')])
-        # targets[0][0]: Instances(num_instances=1, image_height=683, image_width=1024, 
-            # fields=[gt_boxes: Boxes(tensor([[ 59.3920, 407.0560, 121.1200, 500.9760]], device='cuda:0')), 
-            # gt_classes: tensor([0], device='cuda:0'), gt_masks: PolygonMasks(num_instances=1)])
         if self.training:
             assert targets, "'targets' argument is required during training"
             # ROI assigner and sampler works
             proposals = self.label_and_sample_proposals(proposals, targets)
-            #Instances(num_instances=1, image_height=683, image_width=1024, 
-                # fields=[proposal_boxes: Boxes(tensor([[196.3040, 415.1680, 223.5360, 464.7520]], device='cuda:0')), 
-                # objectness_logits: tensor([23.0259], device='cuda:0'), gt_classes: tensor([0], device='cuda:0'), 
-                # gt_boxes: Boxes(tensor([[196.3040, 415.1680, 223.5360, 464.7520]], device='cuda:0')), 
-                # gt_masks: PolygonMasks(num_instances=1)])
-            # proposals: List[bz * List[512*Instances]]
-            # check the roi assignerer 
         del targets
         # pe map
-        # x: from large rois to small roi layer
         x = [item[1] for item in list(features.items())]
         bs, _, h, w = x[-1].shape #
         mask_pe = torch.zeros((bs, h, w), device=x[0].device, dtype=torch.bool)
@@ -216,7 +168,6 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
                 losses.update(loss_mask=self._forward_mask(sam, img_features, x, proposals)['loss_mask'])
             return proposals, losses
         else:
-            #proposals=None
             pred_instances = self._forward_box(x, proposals)
             # pred_boxes = Boxes(boxes)   result.scores = scores  pred_classes
             # During inference cascaded prediction is used: the mask and keypoints heads are only
@@ -252,8 +203,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         return instances
 
 
-import math
-from torch import Tensor
+
 class SinePositionalEncoding(nn.Module):
     """Position encoding with sine and cosine functions.
 

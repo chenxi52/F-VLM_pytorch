@@ -4,25 +4,18 @@ from torch import Tensor
 from detectron2.structures import Boxes
 import torch
 from detectron2.utils.tracing import assert_fx_safe, is_fx_tracing
-from detectron2.modeling.poolers import _convert_boxes_to_pooler_format, _create_zeros, assign_boxes_to_levels, convert_boxes_to_pooler_format
-from detectron2.layers import ROIAlign, ROIAlignRotated, cat, nonzero_tuple, shapes_to_tensor
+from detectron2.modeling.poolers import _create_zeros, assign_boxes_to_levels, convert_boxes_to_pooler_format
+from detectron2.layers import nonzero_tuple
 
 
 class customRoiPooler(ROIPooler):
     def forward(self, x: List[Tensor], box_lists: List[Boxes]) -> Tensor:
         """
-        Args:
-            x (list[Tensor]): A list of feature maps of NCHW shape, with scales matching those
-                used to construct this module.
-            box_lists (list[Boxes] | list[RotatedBoxes]):
-                A list of N Boxes or N RotatedBoxes, where N is the number of images in the batch.
-                The box coordinates are defined on the original image and
-                will be scaled by the `scales` argument of :class:`ROIPooler`.
-
         Returns:
-            Tensor:
+            output:
                 A tensor of shape (M, C, output_size, output_size) where M is the total number of
                 boxes aggregated over all N batch images and C is the number of channels in `x`.
+            Rois_index: the roi index to image in this batch
         """
         num_level_assignments = len(self.level_poolers)
 

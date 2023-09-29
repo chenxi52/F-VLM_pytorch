@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from typing import Tuple, List, Dict, Optional
+from typing import Tuple, List
 from detectron2.modeling import BaseMaskRCNNHead, ROI_MASK_HEAD_REGISTRY
 from detectron2.config import configurable
 from einops import repeat
@@ -26,6 +26,7 @@ class samMaskHead(BaseMaskRCNNHead):
             sincos = 2
         else:
             sincos = 1
+        # Prompt encoder
         point_emb = nn.Sequential(
             nn.Conv2d(256, 256, 3, stride=2, padding=1),
             nn.BatchNorm2d(256),
@@ -117,39 +118,10 @@ class samMaskHead(BaseMaskRCNNHead):
             res_img_feat=res_img_feat,
         )
         iou_predictions = iou_predictions.squeeze(1)
-        mask_result = dict(mask_preds = low_res_masks.squeeze(1), mask_iou = iou_predictions)
         # sample pos_ind from box_features, this has been done in the roi's _forward_mask
         if self.training:
+            # TODO: not right
             return {"loss_mask": mask_rcnn_loss(low_res_masks, instances, self.vis_period) * self.loss_weight}
         else:
             mask_rcnn_inference(low_res_masks, instances)
             return instances
-        
-        if self.training:
-            # gt_mask id [1024,1024]
-            # first pad the mask_result, then the loss
-            mask_preds = F.interpolate(
-                low_res_masks, size=(self.train_size, self.train_size), mode='bilinear', align_corners=False)
-            if mask_preds.size(0) == 0:
-                mask_loss_and_target = dict(loss_mask = low_res_masks.sum(), mask_target=None)
-            else:
-                mask_loss_and_target = self.loss_and_target(
-                    mask_preds = mask_preds,
-                    instances = instances,
-                    rcnn_train_cfg = self.train_size
-                )
-            mask_result.update(loss_mask = mask_loss_and_target['loss_mask'])
-            return mask_result
-        else:
-            mask_preds = low_res_masks.squeeze(1)
-            results_instances = []
-            img_flag_ids = img_flag_ids.cpu().numpy().tolist()
-            mask_preds = mask_preds.split(img_flag_ids, 0)
-            iou_predictions = iou_predictions.split(img_flag_ids, 0)
-            for i, ins in enumerate(instances):
-                ins.pred_masks = mask_preds[i]
-                ins.pred_ious = iou_predictions[i]
-                results_instances.append(ins)
-            # then check the detector.inference.
-            return results_instances
-            
