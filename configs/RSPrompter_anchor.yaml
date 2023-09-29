@@ -88,8 +88,8 @@ SOLVER:
   WARMUP_ITERS: 10000  
   WARMUP_METHOD : "linear"
   WARMUP_FACTOR: 0.0001  
-  # LR_SCHEDULER_NAME: "WarmupCosineLR" 
-  LR_SCHEDULER_NAME: "WarmupMultiStepLR"
+  LR_SCHEDULER_NAME: "WarmupCosineLR" 
+  # LR_SCHEDULER_NAME: "WarmupMultiStepLR"
   WEIGHT_DECAY: 0.001 
   MAX_ITER: 90000  # change
   CHECKPOINT_PERIOD: 5000  #  change
