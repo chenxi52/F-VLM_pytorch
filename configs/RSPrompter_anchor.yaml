@@ -5,9 +5,9 @@ MODEL:
     NAME: "build_sam_vit_fpn_backbone" #SAM vit_h
     # TYPE: "vit_h"
     TYPE: "vit_b"
-  WEIGHTS: "sam_vit_b_01ec64.pth"
+  # WEIGHTS: "sam_vit_b_01ec64.pth"
   # WEIGHTS: "sam_vit_h_4b8939.pth"
-  # WEIGHTS: "output/Detic-COCO/RSPrompter_anchor/model_0000999.pth"
+  WEIGHTS: "output/Detic-COCO/RSPrompter_anchor/model_0089999.pth"
   FPN:
     OUT_CHANNELS: 256
     INNER_CHANNELS: 32
@@ -40,10 +40,10 @@ MODEL:
   ROI_HEADS:
     NAME: "samAnchorPromptRoiHeads" 
     IN_FEATURES: ["feat2","feat1","feat0"]
-    SCORE_THRESH_TEST: 0.02
+    SCORE_THRESH_TEST: 0.0
     NUM_CLASSES: 80
     NMS_THRESH_TEST: 0.5
-    BATCH_SIZE_PER_IMAGE: 256 #the sampling num 
+    BATCH_SIZE_PER_IMAGE: 512 #the sampling num 
     POSITIVE_FRACTION: 0.25
     IOU_THRESHOLDS: [0.5]
     IOU_LABELS: [0, 1]
@@ -109,10 +109,10 @@ INPUT:
   MASK_PAD_VAL: 0.0
   MASK_FORMAT: polygon
 TEST:
-  DETECTIONS_PER_IMAGE: 100  #test_topk_per_image
+  DETECTIONS_PER_IMAGE: 300  #test_topk_per_image
   MASK_THR_BINARY: 0.5  
   DO_POSTPROCESS: True
   EVAL_PERIOD: 5000  # change
-  IMS_PER_BATCH: 4 #every gpu has most 2 images  # change
+  IMS_PER_BATCH: 1 #every gpu has most 2 images  # change
 VERSION: 2
 FP16: True

@@ -12,6 +12,8 @@ from detic.modeling.roi_heads.sam_fast_rcnn import SamRCNNOutputLayers
 from torch import Tensor
 from detic.modeling.custom_poolers import customRoiPooler
 import math
+from detectron2.modeling.poolers import ROIPooler
+
 
 
 @ROI_HEADS_REGISTRY.register()
@@ -64,6 +66,8 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         pooler_scales     = tuple(1.0 / input_shape[k].stride for k in in_features)
         sampling_ratio    = cfg.MODEL.ROI_MASK_HEAD.POOLER_SAMPLING_RATIO
         pooler_type       = cfg.MODEL.ROI_MASK_HEAD.POOLER_TYPE
+        del ret['mask_pooler']
+        del ret['box_pooler']
         ret['mask_pooler'] = (
             customRoiPooler(
                 output_size=pooler_resolution,
@@ -73,6 +77,16 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             )
             if pooler_type
             else None
+        )
+        ret['box_pooler'] = (
+            ROIPooler(
+                output_size=pooler_resolution,
+                scales=pooler_scales,
+                sampling_ratio=sampling_ratio,
+                pooler_type=pooler_type,
+                canonical_box_size=56,
+                canonical_level=0
+            )
         )
         del ret['box_predictor']
         # update box_predictor for bbox_loss 

@@ -95,8 +95,6 @@ class SamDetector(GeneralizedRCNN):
         if do_postprocess:
             assert not torch.jit.is_scripting(), \
                 "Scripting is not supported for postprocess."
-            # return self._postprocess(
-            #     instances=results, ori_sizes=ori_sizes, image_sizes=img_input_sizes)
             return self._postprocess(instances=results, batched_inputs=batched_inputs, mask_threshold=self.mask_thr_binary)
         else:
             return results
