@@ -1,0 +1,1 @@
+python train_net.py --config-file configs/RSPrompter_anchor_test.yaml --num-gpus 8

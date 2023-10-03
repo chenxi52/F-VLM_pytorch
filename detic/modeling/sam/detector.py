@@ -58,8 +58,8 @@ class SamDetector(GeneralizedRCNN):
         # roi_heads include box_heads, mask_heads
         ret=({
             'backbone':backbone,
-            'proposal_generator':build_proposal_generator(cfg, backbone.output_shape),
-            "roi_heads": build_roi_heads(cfg, backbone.output_shape),
+            'proposal_generator':build_proposal_generator(cfg, backbone.output_shape()),
+            "roi_heads": build_roi_heads(cfg, backbone.output_shape()),
             'fp16': cfg.FP16,
             'input_format': cfg.INPUT.FORMAT,
             "pixel_mean": cfg.MODEL.PIXEL_MEAN,

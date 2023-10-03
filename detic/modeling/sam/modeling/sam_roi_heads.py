@@ -66,28 +66,28 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         pooler_scales     = tuple(1.0 / input_shape[k].stride for k in in_features)
         sampling_ratio    = cfg.MODEL.ROI_MASK_HEAD.POOLER_SAMPLING_RATIO
         pooler_type       = cfg.MODEL.ROI_MASK_HEAD.POOLER_TYPE
-        del ret['mask_pooler']
-        del ret['box_pooler']
-        ret['mask_pooler'] = (
-            customRoiPooler(
-                output_size=pooler_resolution,
-                scales=pooler_scales,
-                sampling_ratio=sampling_ratio,
-                pooler_type=pooler_type,
+        if cfg.MODEL.MASK_ON:
+            del ret['mask_pooler']
+            ret['mask_pooler'] = (
+                customRoiPooler(
+                    output_size=pooler_resolution,
+                    scales=pooler_scales,
+                    sampling_ratio=sampling_ratio,
+                    pooler_type=pooler_type,
+                )
+                if pooler_type
+                else None
             )
-            if pooler_type
-            else None
-        )
+        del ret['box_pooler']
         ret['box_pooler'] = (
             ROIPooler(
-                output_size=pooler_resolution,
+                output_size=cfg.MODEL.ROI_BOX_HEAD.POOLER_RESOLUTION,
                 scales=pooler_scales,
-                sampling_ratio=sampling_ratio,
-                pooler_type=pooler_type,
-                canonical_box_size=56,
-                canonical_level=0
+                sampling_ratio=cfg.MODEL.ROI_BOX_HEAD.POOLER_SAMPLING_RATIO,
+                pooler_type=cfg.MODEL.ROI_BOX_HEAD.POOLER_TYPE,
             )
         )
+        # debug: check box_heads
         del ret['box_predictor']
         # update box_predictor for bbox_loss 
         ret.update(cls.init_box_head(ret['box_head'].output_shape, cfg))
