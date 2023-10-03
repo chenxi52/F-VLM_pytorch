@@ -20,7 +20,7 @@ DATALOADER:
 INPUT:
   TEST_INPUT_TYPE: ResizeLongestSize
 TEST:
-  DETECTIONS_PER_IMAGE: 100  #test_topk_per_image
+  DETECTIONS_PER_IMAGE: 300  #test_topk_per_image
   MASK_THR_BINARY: 0.5  
   IMS_PER_BATCH: 4 #every gpu has most 2 images  # change
 VERSION: 2

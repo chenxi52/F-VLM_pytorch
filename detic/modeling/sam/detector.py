@@ -104,26 +104,17 @@ class SamDetector(GeneralizedRCNN):
             return self.inference(batched_inputs, do_postprocess=self.do_postprocess)
         images = self.preprocess_image(batched_inputs)
         gt_instances = [x["instances"].to(self.device) for x in batched_inputs] #instance have img_Size with longest-size = 1024
-        img_embedding_feat, inter_feats = self.extract_feat(images.tensor) 
-        fpn_features = self.backbone(inter_feats)
+        fpn_features = self.backbone(images.tensor)
         # fpn_features: Dict{'feat0': Tuple[2*Tensor[256,32,32]], 'feat1': Tuple[2*Tensor[256,64,64]], ...}
         # resize the img_size in gt_instances to (1024,1024)
-        proposals, _ = self.proposal_generator(
-            images, fpn_features, gt_instances)
+        proposals, proposal_losses = self.proposal_generator(images, fpn_features, gt_instances)
         # proposals:max(h,w)=1024,  gt_instance:max(h,w)=1024
         # proposals: List[bz * Instance[1000 * Instances(num_instances, image_height, image_width, fields=[proposal_boxes: Boxes(tensor([1,4])), objectness_logits:tensor[1],])]]
         del images
-        _, detector_losses = self.roi_heads(self.sam, img_embedding_feat, fpn_features, proposals, gt_instances)
+        _, detector_losses = self.roi_heads(self.sam, None, fpn_features, proposals, gt_instances)
         return detector_losses
         
 
-    def extract_feat(self, batched_inputs):
-        # forward sam.image_encoder
-        
-        feat, inter_features = self.sam.image_encoder(batched_inputs)
-        # feat: Tensor[bz, 256, 64, 64]  inter_feats: List[32*Tensor[bz,64,64,1280]]
-        return feat, inter_features
-    
     @staticmethod
     def _postprocess(instances, batched_inputs: List[Dict[str, torch.Tensor]], mask_threshold:float):
         """

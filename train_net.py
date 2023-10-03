@@ -93,14 +93,15 @@ def do_train(cfg, model, resume=False):
             model.module.sam.eval()
         else:
             model.sam.eval()
-    set_sam_eval()
+    if 'sam' in cfg.MODEL.BACKBONE:
+        set_sam_eval()
     if cfg.SOLVER.USE_CUSTOM_SOLVER:
         # also set requires_grad for module
         optimizer = build_sam_optimizer(cfg, model)
     else:
         assert cfg.SOLVER.OPTIMIZER == 'SGD'
         assert cfg.SOLVER.CLIP_GRADIENTS.CLIP_TYPE != 'full_model'
-        assert cfg.SOLVER.BACKBONE_MULTIPLIER == 1.
+        # assert cfg.SOLVER.BACKBONE_MULTIPLIER == 1.
         optimizer = build_optimizer(cfg, model)
 
     scheduler = build_lr_scheduler(cfg, optimizer)

@@ -173,3 +173,4 @@ def add_rsprompter_config(cfg):
     _C.MODEL.ROI_HEADS.ALLOW_LOW_QUALITY_MATCHES = True
 
 
+    _C.FP16 = False

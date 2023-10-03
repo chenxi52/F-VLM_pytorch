@@ -168,7 +168,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         bs, _, h, w = x[-1].shape #
         mask_pe = torch.zeros((bs, h, w), device=x[0].device, dtype=torch.bool)
         img_feat_pe = self.generator_pe(mask_pe)
-
+        # why insert position here
         for i in range(len(x)):
             x[i] = x[i] + torch.nn.functional.interpolate(img_feat_pe, size=x[i].shape[-2:], mode='bilinear')
         x = {list(features.keys())[i]: x[i] for i in range(len(features))}
