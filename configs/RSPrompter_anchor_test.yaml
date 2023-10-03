@@ -1,7 +1,7 @@
 MODEL:
   META_ARCHITECTURE: "SamDetector" 
   BACKBONE:
-    NAME: "build_sam_vit_fpn_backbone" #SAM vit_h
+    NAME: "" #SAM vit_h
     # TYPE: "vit_h"
     TYPE: "vit_b"
   WEIGHTS: "sam_vit_b_01ec64.pth"
