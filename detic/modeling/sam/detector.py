@@ -81,13 +81,12 @@ class SamDetector(GeneralizedRCNN):
         # normalize images
         # batched_inputs is a dict
         images = self.preprocess_image(batched_inputs) #padding and size_divisiable
-        img_embedding_feat, inter_feats = self.extract_feat(images.tensor)
 
-        fpn_features = self.backbone(inter_feats)
+        fpn_features = self.backbone(images.tesnsor)
         # proposal_generator need to be trained before testing
         proposals, _ = self.proposal_generator(images, fpn_features, None) #samFpn # proposals: img_height=img_width=1024
 
-        results, _ = self.roi_heads(self.sam, img_embedding_feat, fpn_features, proposals)
+        results, _ = self.roi_heads(self.sam, None, fpn_features, proposals)
         # batched_inputs have ori_image_sizes
         # images.image_sizes have input_image_sizes
         # img_input_sizes = [(inp['input_height'], inp['input_width']) for inp in batched_inputs]
@@ -112,7 +111,10 @@ class SamDetector(GeneralizedRCNN):
         # proposals: List[bz * Instance[1000 * Instances(num_instances, image_height, image_width, fields=[proposal_boxes: Boxes(tensor([1,4])), objectness_logits:tensor[1],])]]
         del images
         _, detector_losses = self.roi_heads(self.sam, None, fpn_features, proposals, gt_instances)
-        return detector_losses
+        loss = {}
+        loss.update(detector_losses)
+        loss.update(proposal_losses)
+        return loss
         
 
     @staticmethod
