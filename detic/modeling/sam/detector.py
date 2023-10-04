@@ -117,8 +117,6 @@ class SamDetector(GeneralizedRCNN):
         loss = {}
         loss.update(proposal_loss)
         loss.update(detector_losses)
-        import ipdb
-        ipdb.set_trace()
         return loss
         
 
