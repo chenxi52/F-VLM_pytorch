@@ -61,7 +61,7 @@ def do_test(cfg, model):
             cfg.OUTPUT_DIR, "inference_{}".format(dataset_name))
         evaluator_type = MetadataCatalog.get(dataset_name).evaluator_type
 
-        if evaluator_type == "lvis" or cfg.GEN_PSEDO_LABELS:
+        if evaluator_type == "lvis" :
             evaluator = LVISEvaluator(dataset_name, cfg, True, output_folder)
         elif evaluator_type == 'coco':
             if dataset_name == 'coco_generalized_zeroshot_val':
