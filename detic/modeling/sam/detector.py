@@ -82,7 +82,7 @@ class SamDetector(GeneralizedRCNN):
         # batched_inputs is a dict
         images = self.preprocess_image(batched_inputs) #padding and size_divisiable
 
-        fpn_features = self.backbone(images.tesnsor)
+        fpn_features = self.backbone(images.tensor)
         # proposal_generator need to be trained before testing
         proposals, _ = self.proposal_generator(images, fpn_features, None) #samFpn # proposals: img_height=img_width=1024
 
