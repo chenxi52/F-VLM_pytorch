@@ -6,7 +6,6 @@ MODEL:
     TYPE: "vit_b"
   WEIGHTS: "sam_vit_b_01ec64.pth"
   # WEIGHTS: "sam_vit_h_4b8939.pth"
-  # WEIGHTS: "output/Detic-COCO/RSPrompter_anchor/model_0089999.pth"
   FPN:
     OUT_CHANNELS: 256
     INNER_CHANNELS: 32
@@ -112,6 +111,6 @@ TEST:
   MASK_THR_BINARY: 0.5  
   DO_POSTPROCESS: True
   EVAL_PERIOD: 5000  # change
-  IMS_PER_BATCH: 1 #every gpu has most 2 images  # change
+  IMS_PER_BATCH: 8 #every gpu has most 2 images  # change
 VERSION: 2
 FP16: True

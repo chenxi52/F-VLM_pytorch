@@ -108,13 +108,18 @@ class SamDetector(GeneralizedRCNN):
         fpn_features = self.backbone(inter_feats)
         # fpn_features: Dict{'feat0': Tuple[2*Tensor[256,32,32]], 'feat1': Tuple[2*Tensor[256,64,64]], ...}
         # resize the img_size in gt_instances to (1024,1024)
-        proposals, _ = self.proposal_generator(
+        proposals, proposal_loss = self.proposal_generator(
             images, fpn_features, gt_instances)
         # proposals:max(h,w)=1024,  gt_instance:max(h,w)=1024
         # proposals: List[bz * Instance[1000 * Instances(num_instances, image_height, image_width, fields=[proposal_boxes: Boxes(tensor([1,4])), objectness_logits:tensor[1],])]]
         del images
         _, detector_losses = self.roi_heads(self.sam, img_embedding_feat, fpn_features, proposals, gt_instances)
-        return detector_losses
+        loss = {}
+        loss.update(proposal_loss)
+        loss.update(detector_losses)
+        import ipdb
+        ipdb.set_trace()
+        return loss
         
 
     def extract_feat(self, batched_inputs):
