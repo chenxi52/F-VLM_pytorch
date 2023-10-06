@@ -102,6 +102,7 @@ class ImageEncoderViT(nn.Module):
             ),
             LayerNorm2d(out_chans),
         )
+        self.norm = LayerNorm2d(embed_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = torch.stack([self.preprocess(i)  for i in x], dim=0)
@@ -115,6 +116,21 @@ class ImageEncoderViT(nn.Module):
 
         x = self.neck(x.permute(0, 3, 1, 2))
         return x, inter_features
+
+    def forward_wo_neck(self, x:torch.Tensor):
+        x = torch.stack([self.preprocess(i)  for i in x], dim=0)
+        x  = self.patch_embed(x)
+        if self.pos_embed is not None:
+            x = x + self.pos_embed
+
+        for blk in self.blocks:
+            x = blk(x)
+        # x: tensor(B, H,W,C)
+        x = x.permute(0,3,1,2)
+        xp = self.norm(x)
+        x = self.neck(x)
+        # x:b,c,h,w  xp:b,c,h,w
+        return x, xp
 
     def preprocess(self, x: torch.Tensor) -> torch.Tensor:
         """Normalize pixel values and pad to a square input."""

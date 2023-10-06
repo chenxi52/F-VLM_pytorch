@@ -61,7 +61,7 @@ def do_test(cfg, model):
             cfg.OUTPUT_DIR, "inference_{}".format(dataset_name))
         evaluator_type = MetadataCatalog.get(dataset_name).evaluator_type
 
-        if evaluator_type == "lvis":
+        if evaluator_type == "lvis" or cfg.GEN_PSEDO_LABELS:
             evaluator = LVISEvaluator(dataset_name, cfg, True, output_folder)
         elif evaluator_type == 'coco':
             if dataset_name == 'coco_generalized_zeroshot_val':
@@ -93,15 +93,14 @@ def do_train(cfg, model, resume=False):
             model.module.sam.eval()
         else:
             model.sam.eval()
-    if 'sam' in cfg.MODEL.BACKBONE:
-        set_sam_eval()
+    set_sam_eval()
     if cfg.SOLVER.USE_CUSTOM_SOLVER:
         # also set requires_grad for module
         optimizer = build_sam_optimizer(cfg, model)
     else:
         assert cfg.SOLVER.OPTIMIZER == 'SGD'
         assert cfg.SOLVER.CLIP_GRADIENTS.CLIP_TYPE != 'full_model'
-        # assert cfg.SOLVER.BACKBONE_MULTIPLIER == 1.
+        assert cfg.SOLVER.BACKBONE_MULTIPLIER == 1.
         optimizer = build_optimizer(cfg, model)
 
     scheduler = build_lr_scheduler(cfg, optimizer)
@@ -204,8 +203,9 @@ def setup(args):
     """
     Create configs and perform basic setups.
     """
-    cfg = get_cfg() #defaults
+    cfg = get_cfg()
     add_rsprompter_config(cfg)
+    add_detic_config(cfg)
     cfg.merge_from_file(args.config_file)
     cfg.merge_from_list(args.opts)
     if '/auto' in cfg.OUTPUT_DIR:

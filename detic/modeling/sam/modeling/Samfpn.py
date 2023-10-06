@@ -5,6 +5,8 @@ import torch.nn as nn
 import einops
 import torch
 
+
+
 class SAMAggregatorNeck(Backbone):
     def __init__(
             self,
@@ -191,16 +193,18 @@ class SAMAggregatorNeck(Backbone):
                 mapping from feature map name to FPN feature map tensor
                 in high to low resolution order. 
         """
+        # import ipdb; ipdb.set_trace()
 
         inner_states = [einops.rearrange(features[idx], 'b h w c -> b c h w') for idx in self.selected_channels]
         inner_states = [layer(x) for layer, x in zip(self.down_sample_layers, inner_states)]
-
+        #channel reduce
         x = None
         for inner_state, layer in zip(inner_states, self.fusion_layers):
             if x is not None:
                 inner_state = x + inner_state
             x = inner_state + layer(inner_state)
         x = self.up_layers[0](x) + x
+        #x = inner_states[-1]
         # FPN TODO
         img_feats_0 = self.up_layers[1](x)
         img_feats_1 = self.up_sample_layers[0](img_feats_0) + self.up_sample_layers[1](img_feats_0)
@@ -221,6 +225,114 @@ class SAMAggregatorNeck(Backbone):
                 'feat1': ShapeSpec(channels=self.out_channels, stride=self.anchor_stride[1]),
                 'feat0': ShapeSpec(channels=self.out_channels, stride=self.anchor_stride[2])}
 
+class Norm2d(nn.Module):
+    def __init__(self, embed_dim):
+        super().__init__()
+        self.ln = nn.LayerNorm(embed_dim, eps=1e-6)
+    def forward(self, x):
+        x = x.permute(0, 2, 3, 1)
+        x = self.ln(x)
+        x = x.permute(0, 3, 1, 2).contiguous()
+        return x
+    
+class SAMVitDet(SAMAggregatorNeck):
+    def __init__(self,
+            in_channels=[1280]*16,
+            selected_channels: list=None,
+            out_channels=256,
+            kernel_size=3,
+            stride=1,
+            anchor_stride=[8,16,32],
+            norm_cfg=dict(type='BN', requires_grad=True),
+            act_cfg=dict(type='relu', inplace=True),
+            up_sample_scale=4,
+            square_pad=0,
+            use_residual=False,
+            num_outs = 5):
+        super(SAMAggregatorNeck, self).__init__()
+        self.in_channels = in_channels
+        self.kernel_size = kernel_size
+        self.norm_cfg = norm_cfg
+        self.act_cfg = act_cfg
+        self.out_channels = out_channels
+        self.stride = stride
+        self.selected_channels = selected_channels
+        self.up_sample_scale = up_sample_scale
+
+        self._square_pad = square_pad
+        self.anchor_stride= anchor_stride
+        self.use_residual = use_residual
+        self.num_outs = num_outs
+        embed_dim = in_channels[0]
+
+        self.fpn1 = nn.Sequential(
+            nn.ConvTranspose2d(embed_dim, embed_dim, kernel_size=2, stride=2),
+            Norm2d(embed_dim),
+            nn.GELU(),
+            nn.ConvTranspose2d(embed_dim, embed_dim, kernel_size=2, stride=2),
+        )
+        self.fpn2 = nn.Sequential(
+            nn.ConvTranspose2d(embed_dim, embed_dim, kernel_size=2, stride=2),
+        )
+        self.fpn3 = nn.Identity()
+        self.fpn4 = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.ops = [self.fpn1, self.fpn2, self.fpn3, self.fpn4]
+
+        self.lateral_convs= nn.ModuleList()
+        self.fpn_convs= nn.ModuleList()
+        for i in range(len(in_channels)):
+            l_conv = ConvModule(
+                        in_channels[i],
+                        out_channels,
+                        kernel_size=1,
+                        padding=0,
+                        norm_cfg=self.norm_cfg,
+                        act_cfg=self.act_cfg
+                        )
+            f_conv = ConvModule(
+                        out_channels,
+                        out_channels,
+                        kernel_size=3,
+                        padding=1,
+                        norm_cfg=self.norm_cfg,
+                        act_cfg=self.act_cfg
+                    )
+            self.lateral_convs.append(l_conv)
+            self.fpn_convs.append(f_conv)
+        
+    def forward(self, features):
+        """
+        Args:
+            features: multi-level features output from sam.image_encoder
+            input (dict[str->Tensor]): mapping feature map name (e.g., "res5") to
+                feature map tensor for each feature level in high to low resolution order.
+
+        Returns:
+            dict[str->Tensor]:
+                mapping from feature map name to FPN feature map tensor
+                in high to low resolution order. 
+        """
+        # import ipdb; ipdb.set_trace()
+        feature_list = []
+        for i in range(len(self.ops)):
+            feature_list.append(self.ops[i](features))
+        laterals = [lateral_conv(feature_list[i]) for i, lateral_conv in enumerate(self.lateral_convs)]
+        outputs = [self.fpn_convs[i](laterals[i]) for i in range(len(laterals))]
+        if self.num_outs>len(outputs):
+            for i in range(self.num_outs-len(outputs)):
+                outputs.append(nn.functional.max_pool2d(outputs[-1], 1, stride=2))
+        return { 'feat4':outputs[0], 'feat3': outputs[1], 'feat2':outputs[2], 'feat1':outputs[3], 'feat0':outputs[4]}
+    
+    @property
+    def output_shape(self):
+        return {
+                'feat4': ShapeSpec(channels=self.out_channels, stride=self.anchor_stride[0]),
+                'feat3': ShapeSpec(channels=self.out_channels, stride=self.anchor_stride[1]),
+                'feat2': ShapeSpec(channels=self.out_channels, stride=self.anchor_stride[2]),
+                'feat1': ShapeSpec(channels=self.out_channels, stride=self.anchor_stride[3]),
+                'feat0': ShapeSpec(channels=self.out_channels, stride=self.anchor_stride[4])}
+
+
 @BACKBONE_REGISTRY.register()
 def build_sam_vit_fpn_backbone(cfg, input_shape=None):
     if cfg.MODEL.BACKBONE.TYPE=='vit_h':
@@ -236,6 +348,19 @@ def build_sam_vit_fpn_backbone(cfg, input_shape=None):
         selected_channels=selected_channels,
         up_sample_scale=cfg.MODEL.FPN.UP_SAMPLE_SCALE,
         anchor_stride=cfg.MODEL.FPN.ANCHOR_STRIDE
+    )
+    return backbone
+
+@BACKBONE_REGISTRY.register()
+def build_sam_vit_det_backbone(cfg, input_shape=None):
+    norm_cfg = {'type':cfg.MODEL.FPN.NORM }
+    backbone = SAMVitDet(
+        in_channels=cfg.MODEL.FPN.IN_CHANNELS,
+        out_channels=cfg.MODEL.FPN.OUT_CHANNELS,
+        up_sample_scale=cfg.MODEL.FPN.UP_SAMPLE_SCALE,
+        anchor_stride=cfg.MODEL.FPN.ANCHOR_STRIDE,
+        norm_cfg=norm_cfg,
+        act_cfg=None
     )
     return backbone
 
@@ -434,7 +559,12 @@ class ConvModule(nn.Module):
                     x = self.padding_layer(x)
                 x = self.conv(x)
             elif layer == 'norm' and norm and self.with_norm:
-                x = self.norm(x)
+                if 'LN' in self.norm_name:
+                    x = x.permute(0, 2, 3, 1)
+                    x = self.norm(x)
+                    x = x.permute(0, 3, 1, 2).contiguous()
+                else:
+                    x = self.norm(x)
             elif layer == 'act' and activate and self.with_activation:
                 x = self.activate(x)
         return x
@@ -456,7 +586,7 @@ def build_conv_layer(cfg: Optional[Dict], *args, **kwargs) -> nn.Module:
     return layer
 
 def build_norm_layer(
-        cfg: Dict,
+        cfg: dict,
         num_features: int,
         postfix: Union[int, str] = '')->Tuple[str, nn.Module]:
     """
@@ -468,24 +598,19 @@ def build_norm_layer(
     num_features (int): Number of input channels.
     
     """
-    if not isinstance(cfg, dict):
-        raise TypeError('cfg must be a dict')
-    if 'type' not in cfg:
-        raise KeyError('the cfg dict must contain the key "type"')
-    cfg_ = cfg.copy()
-
-    layer_type = cfg_.pop('type')
     dicts = {'BN': nn.BatchNorm2d,
              'BN2d':nn.BatchNorm2d,
              'LN':nn.LayerNorm,
              'IN':nn.InstanceNorm2d}
+    cfg_ = cfg.copy()
+    layer_type = cfg_.pop('type')
     norm_layer = dicts[layer_type]
     abbr = layer_type
     assert isinstance(postfix, (int, str))
 
     name = abbr + postfix
     requires_grad = cfg_.pop('requires_grad', True)
-    cfg_.setdefault('eps', 1e-5)
+    cfg_.setdefault('eps', 1e-6)
     if layer_type != 'GN':
         layer = norm_layer(num_features, **cfg_)
         if layer_type == 'SyncBN' and hasattr(layer, '_specify_ddp_gpu_num'):
@@ -543,3 +668,4 @@ def constant_init(module, val, bias=0):
         nn.init.constant_(module.weight, val)
     if hasattr(module, 'bias') and module.bias is not None:
         nn.init.constant_(module.bias, bias)
+

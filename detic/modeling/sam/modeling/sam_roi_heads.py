@@ -12,8 +12,6 @@ from detic.modeling.roi_heads.sam_fast_rcnn import SamRCNNOutputLayers
 from torch import Tensor
 from detic.modeling.custom_poolers import customRoiPooler
 import math
-from detectron2.modeling.poolers import ROIPooler
-
 
 
 @ROI_HEADS_REGISTRY.register()
@@ -66,28 +64,16 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         pooler_scales     = tuple(1.0 / input_shape[k].stride for k in in_features)
         sampling_ratio    = cfg.MODEL.ROI_MASK_HEAD.POOLER_SAMPLING_RATIO
         pooler_type       = cfg.MODEL.ROI_MASK_HEAD.POOLER_TYPE
-        if cfg.MODEL.MASK_ON:
-            del ret['mask_pooler']
-            ret['mask_pooler'] = (
-                customRoiPooler(
-                    output_size=pooler_resolution,
-                    scales=pooler_scales,
-                    sampling_ratio=sampling_ratio,
-                    pooler_type=pooler_type,
-                )
-                if pooler_type
-                else None
-            )
-        del ret['box_pooler']
-        ret['box_pooler'] = (
-            ROIPooler(
-                output_size=cfg.MODEL.ROI_BOX_HEAD.POOLER_RESOLUTION,
+        ret['mask_pooler'] = (
+            customRoiPooler(
+                output_size=pooler_resolution,
                 scales=pooler_scales,
-                sampling_ratio=cfg.MODEL.ROI_BOX_HEAD.POOLER_SAMPLING_RATIO,
-                pooler_type=cfg.MODEL.ROI_BOX_HEAD.POOLER_TYPE,
+                sampling_ratio=sampling_ratio,
+                pooler_type=pooler_type,
             )
+            if pooler_type
+            else None
         )
-        # debug: check box_heads
         del ret['box_predictor']
         # update box_predictor for bbox_loss 
         ret.update(cls.init_box_head(ret['box_head'].output_shape, cfg))
@@ -168,7 +154,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         bs, _, h, w = x[-1].shape #
         mask_pe = torch.zeros((bs, h, w), device=x[0].device, dtype=torch.bool)
         img_feat_pe = self.generator_pe(mask_pe)
-        # why insert position here
+
         for i in range(len(x)):
             x[i] = x[i] + torch.nn.functional.interpolate(img_feat_pe, size=x[i].shape[-2:], mode='bilinear')
         x = {list(features.keys())[i]: x[i] for i in range(len(features))}
@@ -284,7 +270,9 @@ class SinePositionalEncoding(nn.Module):
                       (x_embed[:, :, -1:] + self.eps) * self.scale
         dim_t = torch.arange(
             self.num_feats, dtype=torch.float32, device=mask.device)
-        dim_t = self.temperature**(2 * (dim_t // 2) / self.num_feats)
+        # dim_t = self.temperature**(2 * (dim_t // 2) / self.num_feats)
+        dim_t = self.temperature**(2 * torch.div(dim_t, 2, rounding_mode='trunc') / self.num_feats)
+
         pos_x = x_embed[:, :, :, None] / dim_t
         pos_y = y_embed[:, :, :, None] / dim_t
         # use `view` instead of `flatten` for dynamically exporting to ONNX
