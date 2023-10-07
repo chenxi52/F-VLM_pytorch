@@ -353,14 +353,13 @@ def build_sam_vit_fpn_backbone(cfg, input_shape=None):
 
 @BACKBONE_REGISTRY.register()
 def build_sam_vit_det_backbone(cfg, input_shape=None):
-    norm_cfg = {'type':cfg.MODEL.FPN.NORM }
+    norm_cfg = {'type':cfg.MODEL.FPN.NORM,'requires_grad':True }
     backbone = SAMVitDet(
         in_channels=cfg.MODEL.FPN.IN_CHANNELS,
         out_channels=cfg.MODEL.FPN.OUT_CHANNELS,
         up_sample_scale=cfg.MODEL.FPN.UP_SAMPLE_SCALE,
         anchor_stride=cfg.MODEL.FPN.ANCHOR_STRIDE,
         norm_cfg=norm_cfg,
-        act_cfg=None
     )
     return backbone
 
