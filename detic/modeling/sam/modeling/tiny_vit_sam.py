@@ -618,14 +618,9 @@ class TinyViT(nn.Module):
         x = self.forward_features(x)
         x = x.permute(0, 3, 1, 2)
         x=self.neck(x)
-        return x
+        return x, None 
     
-    def forward_wo_neck(self,x):
-        x = self.forward_features(x)
-        xp = self.norm_head(x)
-        xp = xp.permute(0,3,1,2)
-        x=self.neck(x.permute(0, 3, 1, 2))
-        return x, xp
+
     def preprocess(self, x: torch.Tensor) -> torch.Tensor:
         # Normalize colors have done 
         # Pad

@@ -12,7 +12,7 @@ MODEL:
   # WEIGHTS: "output/Detic-COCO/RSPrompter_anchor/model_0000999.pth"
   FPN:
     OUT_CHANNELS: 256
-    IN_CHANNELS: [768, 768, 768, 768]
+    IN_CHANNELS: [256]
     UP_SAMPLE_SCALE: 4
     ANCHOR_STRIDE: [4, 8, 16, 32, 64]
     NORM: 'LN'
@@ -78,12 +78,12 @@ MODEL:
     POOLER_SAMPLING_RATIO: 0
     POOLER_TYPE: "ROIAlignV2"
     PER_QUERY_POINT: 4
-  MASK_ON: True
+  MASK_ON: False
 DATASETS:
   TRAIN: ("coco_2017_train",)
   TEST: ("coco_2017_val",)
 DATALOADER:
-  NUM_WORKERS: 16  # num_workers == batchsize_per_gpu
+  NUM_WORKERS: 2  # num_workers == batchsize_per_gpu
 
 SOLVER:
   IMS_PER_BATCH: 2  # change  # max 8 imgs per batch
