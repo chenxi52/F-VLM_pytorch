@@ -7,6 +7,7 @@ from einops import repeat
 from detectron2.structures import Instances, ImageList
 import torch.nn.functional as F
 from detectron2.modeling.roi_heads.mask_head import mask_rcnn_loss, mask_rcnn_inference
+from timm.models.layers import trunc_normal_
 
 @ROI_MASK_HEAD_REGISTRY.register()
 class samMaskHead(BaseMaskRCNNHead):
@@ -45,7 +46,18 @@ class samMaskHead(BaseMaskRCNNHead):
         self.train_size = train_size
         self.num_classes = num_classes
         self.vis_period = vis_period
-        
+
+        self._init_weights(self.point_emb)
+
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            trunc_normal_(m.weight, std=.02)
+            if isinstance(m, nn.Linear) and m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.LayerNorm):
+            nn.init.constant_(m.bias, 0)
+            nn.init.constant_(m.weight, 1.0)
+            
     @classmethod
     def from_config(cls, cfg, input_shape):
         with_sincos = cfg.MODEL.ROI_MASK_HEAD.WITH_SINCOS
