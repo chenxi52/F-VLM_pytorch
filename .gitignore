@@ -70,3 +70,4 @@ CODE_OF_CONDUCT.md
 test.py
 
 *.DS_Store
+*.pt
