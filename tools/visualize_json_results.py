@@ -45,7 +45,7 @@ if __name__ == "__main__":
     parser.add_argument("--input", required=True, help="JSON file produced by the model")
     parser.add_argument("--output", required=True, help="output directory")
     parser.add_argument("--dataset", help="name of the dataset", default="coco_2017_val")
-    parser.add_argument("--conf-threshold", default=0.05, type=float, help="confidence threshold")
+    parser.add_argument("--conf-threshold", default=0, type=float, help="confidence threshold")
     args = parser.parse_args()
 
     logger = setup_logger()
@@ -89,5 +89,5 @@ if __name__ == "__main__":
         concat = np.concatenate((vis_pred, vis_gt), axis=1)
         cv2.imwrite(os.path.join(args.output, basename), concat[:, :, ::-1])
         num+=1
-        if num>20:
-            break
+        # if num>20:
+        #     break

@@ -47,14 +47,15 @@ def _custom_train_loader_from_config(cfg, mapper=None, *, dataset=None, sampler=
             if cfg.MODEL.KEYPOINT_ON else 0,
             proposal_files=cfg.DATASETS.PROPOSAL_FILES_TRAIN if cfg.MODEL.LOAD_PROPOSALS else None,
         )
-
     if mapper is None:
         mapper = DatasetMapper(cfg, True)
 
     if sampler is not None:
         pass
+    
     elif sampler_name == "TrainingSampler":
         sampler = TrainingSampler(len(dataset))
+    
     elif sampler_name == "MultiDatasetSampler":
         sampler = MultiDatasetSampler(
             dataset_dicts,

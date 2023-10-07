@@ -205,6 +205,7 @@ def setup(args):
     """
     cfg = get_cfg()
     add_rsprompter_config(cfg)
+    add_detic_config(cfg)
     cfg.merge_from_file(args.config_file)
     cfg.merge_from_list(args.opts)
     if '/auto' in cfg.OUTPUT_DIR:

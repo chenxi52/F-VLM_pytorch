@@ -8,6 +8,7 @@ from detectron2.utils.events import get_event_storage
 from detectron2.config import configurable
 from detectron2.structures import ImageList, Instances, Boxes, BitMasks,ROIMasks
 import detectron2.utils.comm as comm
+from torchvision.utils import save_image
 
 from detectron2.modeling.meta_arch.build import META_ARCH_REGISTRY
 from detectron2.modeling.meta_arch.rcnn import GeneralizedRCNN, detector_postprocess
@@ -17,7 +18,8 @@ from detectron2.modeling import build_backbone, build_proposal_generator, build_
 from detic.modeling.sam import sam_model_registry
 import torch.nn.functional as F
 import ipdb
-
+import matplotlib.pyplot as plt
+import os
 
 @META_ARCH_REGISTRY.register()
 class SamDetector(GeneralizedRCNN):
@@ -31,6 +33,7 @@ class SamDetector(GeneralizedRCNN):
         sam=None,
         mask_thr_binary=0.5,
         do_postprocess=True,
+        backbone_name=None,
         **kwargs
     ):
         """
@@ -50,6 +53,7 @@ class SamDetector(GeneralizedRCNN):
         
         self.mask_thr_binary = mask_thr_binary
         self.do_postprocess = do_postprocess
+        self.backbone_name = backbone_name
 
     @classmethod
     def from_config(cls, cfg):
@@ -66,10 +70,12 @@ class SamDetector(GeneralizedRCNN):
             "pixel_std": cfg.MODEL.PIXEL_STD,
             "sam": sam,
             "do_postprocess": cfg.TEST.DO_POSTPROCESS,
+            "backbone_name":cfg.MODEL.BACKBONE.NAME
         })
         ret.update(mask_thr_binary = cfg.TEST.MASK_THR_BINARY)
         return ret
-
+    
+    
     def inference(
             self,
             batched_inputs: Tuple[Dict[str, torch.Tensor]],
@@ -82,12 +88,92 @@ class SamDetector(GeneralizedRCNN):
         # batched_inputs is a dict
         images = self.preprocess_image(batched_inputs) #padding and size_divisiable
         img_embedding_feat, inter_feats = self.extract_feat(images.tensor)
+        #########################
+        # import ipdb; ipdb.set_trace()
+        # gt_instances = [x["instances"].to(self.device) for x in batched_inputs] #instance have img_Size with longest-size = 1024
+        # boxes_prompt = gt_instances[0].get("gt_boxes")
+        # #sam 
+        # sparse_embeddings, dense_embeddings = self.sam.prompt_encoder(
+        #         points=None,
+        #         boxes=boxes_prompt.tensor,
+        #         masks=None,
+        #     )
+        # low_res_masks, iou_predictions = self.sam.mask_decoder(
+        #     image_embeddings=img_embedding_feat,
+        #     image_pe=self.sam.prompt_encoder.get_dense_pe(),
+        #     sparse_prompt_embeddings=sparse_embeddings,
+        #     dense_prompt_embeddings=dense_embeddings,
+        #     multimask_output=True,
+        # )
+        # masks = F.interpolate(
+        #     low_res_masks,
+        #     (self.sam.image_encoder.img_size, self.sam.image_encoder.img_size),
+        #     mode="bilinear",
+        #     align_corners=False,
+        # )
+        # masks = masks > self.sam.mask_threshold
+        # # Assuming img_tensor is your normalized image tensor with shape [3, 1024, 1024]
+        # # Define a directory to save the images and masks
+        # save_dir = "visualized_results"
+        # if not os.path.exists(save_dir):
+        #     os.makedirs(save_dir)
 
+        # # Convert normalized tensor to range [0, 1] for image visualization
+        # img_np = images[0].cpu().numpy().transpose(1, 2, 0)
+        # img_np = img_np.clip(0, 1)
+        # # Save the image
+        # img_filename = os.path.join(save_dir, "image.png")
+        # # import ipdb; ipdb.set_trace()
+        # # plt.imsave(img_filename,  img_np)
+        # plt.figure(figsize=(10,10))
+        # plt.imshow(img_np)
+        # plt.axis('on')
+        # plt.show()
+        # plt.close()
+
+
+        # fig, ax = plt.subplots(figsize=(10,10))
+        # ax.imshow(img_np)
+
+        # # Now, save each of the 20 masks
+        # for idx in range(masks.shape[0]):
+        #     # Extract mask
+        #     mask_np = masks[idx].cpu().numpy().transpose(1, 2, 0)
+            
+        #     # Normalize mask to range [0, 1] 
+        #     # mask_np = (mask_np - mask_np.min()) / (mask_np.max() - mask_np.min() + 1e-5)  # added small epsilon to avoid division by zero
+            
+        #     # Ensure mask is in range [0, 1]
+        #     mask_np = mask_np.clip(0, 1)
+        #     # Convert to float
+        #     mask_np = mask_np.astype(float)
+        #     ax.imshow(mask_np)
+        #     # Save the mask
+        #     # mask_filename = os.path.join(save_dir, f"mask_{idx+1}.png")
+        #     # plt.imsave(mask_filename, mask_np)
+        # ax.axis('off')
+        # plt.show()
+        # # Saving the image with points before mask
+        # fig.savefig('result.png')
+        # plt.close(fig)
+
+        # save_image(images.tensor[0], 'output_image.png') # nrow determines the number of images in a row
+        # #########################
+
+        # sssss
         fpn_features = self.backbone(inter_feats)
         # proposal_generator need to be trained before testing
         proposals, _ = self.proposal_generator(images, fpn_features, None) #samFpn # proposals: img_height=img_width=1024
 
         results, _ = self.roi_heads(self.sam, img_embedding_feat, fpn_features, proposals)
+        # gt_instances = [x["instances"].to(self.device) for x in batched_inputs] #instance have img_Size with longest-size = 1024
+        ###########################
+        # Replacing content for each pair of gt_instance and result
+        # Assuming results and gt_instances are lists of Instances and have the same length
+        
+
+        # This will give you a list of results in the desired format
+        ###########################
         # batched_inputs have ori_image_sizes
         # images.image_sizes have input_image_sizes
         # img_input_sizes = [(inp['input_height'], inp['input_width']) for inp in batched_inputs]
@@ -95,6 +181,8 @@ class SamDetector(GeneralizedRCNN):
         if do_postprocess:
             assert not torch.jit.is_scripting(), \
                 "Scripting is not supported for postprocess."
+            # return self._postprocess(
+            #     instances=results, ori_sizes=ori_sizes, image_sizes=img_input_sizes)
             return self._postprocess(instances=results, batched_inputs=batched_inputs, mask_threshold=self.mask_thr_binary)
         else:
             return results
@@ -104,26 +192,29 @@ class SamDetector(GeneralizedRCNN):
             return self.inference(batched_inputs, do_postprocess=self.do_postprocess)
         images = self.preprocess_image(batched_inputs)
         gt_instances = [x["instances"].to(self.device) for x in batched_inputs] #instance have img_Size with longest-size = 1024
+        
         img_embedding_feat, inter_feats = self.extract_feat(images.tensor) 
         fpn_features = self.backbone(inter_feats)
         # fpn_features: Dict{'feat0': Tuple[2*Tensor[256,32,32]], 'feat1': Tuple[2*Tensor[256,64,64]], ...}
         # resize the img_size in gt_instances to (1024,1024)
-        proposals, proposal_loss = self.proposal_generator(
+        proposals, proposal_losses = self.proposal_generator(
             images, fpn_features, gt_instances)
         # proposals:max(h,w)=1024,  gt_instance:max(h,w)=1024
         # proposals: List[bz * Instance[1000 * Instances(num_instances, image_height, image_width, fields=[proposal_boxes: Boxes(tensor([1,4])), objectness_logits:tensor[1],])]]
         del images
         _, detector_losses = self.roi_heads(self.sam, img_embedding_feat, fpn_features, proposals, gt_instances)
-        loss = {}
-        loss.update(proposal_loss)
-        loss.update(detector_losses)
-        return loss
+        losses = {}
+        losses.update(detector_losses)
+        losses.update(proposal_losses)
+        return losses
         
 
     def extract_feat(self, batched_inputs):
         # forward sam.image_encoder
-        
-        feat, inter_features = self.sam.image_encoder(batched_inputs)
+        if 'det' in self.backbone_name:
+            feat, inter_features = self.sam.image_encoder.forward_wo_neck(batched_inputs)
+        else:
+            feat, inter_features = self.sam.image_encoder(batched_inputs)
         # feat: Tensor[bz, 256, 64, 64]  inter_feats: List[32*Tensor[bz,64,64,1280]]
         return feat, inter_features
     

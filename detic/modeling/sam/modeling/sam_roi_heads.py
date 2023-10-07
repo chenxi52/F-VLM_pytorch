@@ -12,8 +12,6 @@ from detic.modeling.roi_heads.sam_fast_rcnn import SamRCNNOutputLayers
 from torch import Tensor
 from detic.modeling.custom_poolers import customRoiPooler
 import math
-from detectron2.modeling.poolers import ROIPooler
-
 
 
 @ROI_HEADS_REGISTRY.register()

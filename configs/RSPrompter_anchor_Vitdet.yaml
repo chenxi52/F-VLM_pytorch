@@ -2,33 +2,35 @@ _BASE_: "Base_OVCOCO_C4_1x.yaml"
 MODEL:
   META_ARCHITECTURE: "SamDetector" 
   BACKBONE:
-    NAME: "build_sam_vit_fpn_backbone" #SAM vit_h
+    NAME: "build_sam_vit_det_backbone" #SAM vit_h
     # TYPE: "vit_h"
     TYPE: "vit_b"
   WEIGHTS: "sam_vit_b_01ec64.pth"
   # WEIGHTS: "sam_vit_h_4b8939.pth"
+  # WEIGHTS: "output/Detic-COCO/RSPrompter_anchor/model_0000999.pth"
   FPN:
     OUT_CHANNELS: 256
-    INNER_CHANNELS: 768
+    IN_CHANNELS: [768, 768, 768, 768]
     UP_SAMPLE_SCALE: 4
-    ANCHOR_STRIDE: [8,16,32]
+    ANCHOR_STRIDE: [4, 8, 16, 32, 64]
+    NORM: 'LN'
   PIXEL_MEAN: [123.675, 116.280, 103.530]
   PIXEL_STD: [58.395, 57.12, 57.375]
   ANCHOR_GENERATOR:
     NAME: "DefaultAnchorGenerator"
-    SIZES: [[16,32,64,128,256,512],[32,64,128,256,512,1024],[64,128,256,512,1024,2048]] 
+    SIZES: [[32,64,128],[64,128,256],[128, 256, 512],[256,512,1024],[512,1024,2048]] 
     ASPECT_RATIOS: [[0.5, 1.0, 2.0]]  # Three aspect ratios (same for all in feature maps)
   PROPOSAL_GENERATOR:
     NAME: "RPN"
   RPN:
     HEAD_NAME: "StandardRPNHead"
-    IN_FEATURES: ["feat2", "feat1", "feat0"]
-    PRE_NMS_TOPK_TRAIN: 12000  # Per FPN level
-    PRE_NMS_TOPK_TEST: 6000  # Per FPN level
+    IN_FEATURES: ["feat4","feat3","feat2","feat1","feat0"]
+    PRE_NMS_TOPK_TRAIN: 2000  # Per FPN level
+    PRE_NMS_TOPK_TEST: 1000  # Per FPN level
     # Detectron1 uses 2000 proposals per-batch,
     # (See "modeling/rpn/rpn_outputs.py" for details of this legacy issue)
     # which is approximately 1000 proposals per-image since the default batch size for FPN is 2.
-    POST_NMS_TOPK_TRAIN: 2000
+    POST_NMS_TOPK_TRAIN: 1000
     POST_NMS_TOPK_TEST: 1000
     IOU_THRESHOLDS: [0.3, 0.7]
     BATCH_SIZE_PER_IMAGE: 512 # the sampling num 
@@ -38,7 +40,7 @@ MODEL:
     SMOOTH_L1_BETA: 0.
   ROI_HEADS:
     NAME: "samAnchorPromptRoiHeads" 
-    IN_FEATURES: ["feat2","feat1","feat0"]
+    IN_FEATURES: ["feat4","feat3","feat2","feat1"]
     SCORE_THRESH_TEST: 0.02
     NUM_CLASSES: 80
     NMS_THRESH_TEST: 0.5
@@ -46,7 +48,7 @@ MODEL:
     POSITIVE_FRACTION: 0.25
     IOU_THRESHOLDS: [0.5]
     IOU_LABELS: [0, 1]
-    ALLOW_LOW_QUALITY_MATCHES: True  #
+    ALLOW_LOW_QUALITY_MATCHES: True  
     PROPOSAL_APPEND_GT: True
   ROI_BOX_HEAD:
     NAME: "FastRCNNConvFCHead"  # Shared2FCBBoxHead
@@ -74,7 +76,7 @@ MODEL:
     POOLER_SAMPLING_RATIO: 0
     POOLER_TYPE: "ROIAlignV2"
     PER_QUERY_POINT: 4
-  MASK_ON: False
+  MASK_ON: True
 DATASETS:
   TRAIN: ("coco_2017_train",)
   TEST: ("coco_2017_val",)
@@ -82,7 +84,7 @@ DATALOADER:
   NUM_WORKERS: 16  # num_workers == batchsize_per_gpu
 
 SOLVER:
-  IMS_PER_BATCH: 16  # change  # max 8 imgs per batch
+  IMS_PER_BATCH: 2  # change  # max 8 imgs per batch
   BASE_LR: 0.000024  # change0.000025
   STEPS: (60000, 80000)  # change 
   WARMUP_ITERS: 100  
@@ -109,12 +111,11 @@ INPUT:
   MASK_PAD_VAL: 0.0
   MASK_FORMAT: polygon
 TEST:
-  DETECTIONS_PER_IMAGE: 1000  #test_topk_per_image
+  DETECTIONS_PER_IMAGE: 300  #test_topk_per_image
   MASK_THR_BINARY: 0.5  
   DO_POSTPROCESS: True
   EVAL_PERIOD: 5000  # change
-  IMS_PER_BATCH: 8 #every gpu has most 2 images  # change
-  IMS_PER_BATCH: 8 #every gpu has most 2 images  # change
+  IMS_PER_BATCH: 2 #every gpu has most 2 images  # change
 VERSION: 2
 FP16: True
 OUTPUT_DIR: './output/full_optimize_wo_mask_768'
