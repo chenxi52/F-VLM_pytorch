@@ -5,6 +5,8 @@ MODEL:
     NAME: "build_sam_vit_det_backbone" #SAM vit_h
     # TYPE: "vit_h"
     TYPE: "vit_b"
+  #   TYPE: "vit_t"
+  # WEIGHTS: "mobile_sam.pt"
   WEIGHTS: "sam_vit_b_01ec64.pth"
   # WEIGHTS: "sam_vit_h_4b8939.pth"
   # WEIGHTS: "output/Detic-COCO/RSPrompter_anchor/model_0000999.pth"

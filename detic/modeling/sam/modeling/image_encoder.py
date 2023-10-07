@@ -102,7 +102,8 @@ class ImageEncoderViT(nn.Module):
             ),
             LayerNorm2d(out_chans),
         )
-        self.norm = LayerNorm2d(embed_dim)
+        # input:(N,C, H,W) (*, channel)
+        self.norm = nn.LayerNorm(embed_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = torch.stack([self.preprocess(i)  for i in x], dim=0)
@@ -125,11 +126,10 @@ class ImageEncoderViT(nn.Module):
 
         for blk in self.blocks:
             x = blk(x)
-        # x: tensor(B, H,W,C)
-        x = x.permute(0,3,1,2)
         xp = self.norm(x)
-        x = self.neck(x)
-        # x:b,c,h,w  xp:b,c,h,w
+        xp = xp.permute(0,3,1,2)
+        x = self.neck(x.permute(0,3,1,2))
+        # x:b,c,h,w  xp:b,h,w,c
         return x, xp
 
     def preprocess(self, x: torch.Tensor) -> torch.Tensor:

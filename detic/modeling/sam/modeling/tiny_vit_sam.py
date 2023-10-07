@@ -458,6 +458,7 @@ class LayerNorm2d(nn.Module):
         x = (x - u) / torch.sqrt(s + self.eps)
         x = self.weight[:, None, None] * x + self.bias[:, None, None]
         return x
+    
 class TinyViT(nn.Module):
     def __init__(self, img_size=224, in_chans=3, num_classes=1000,
                  embed_dims=[96, 192, 384, 768], depths=[2, 2, 6, 2],
@@ -549,6 +550,8 @@ class TinyViT(nn.Module):
             ),
             LayerNorm2d(256),
         )
+
+
     def set_layer_lr_decay(self, layer_lr_decay):
         decay_rate = layer_lr_decay
 
@@ -597,6 +600,7 @@ class TinyViT(nn.Module):
         return {'attention_biases'}
 
     def forward_features(self, x):
+        x = torch.stack([self.preprocess(i)  for i in x], dim=0)
         # x: (N, C, H, W)
         x = self.patch_embed(x)
 
@@ -606,19 +610,31 @@ class TinyViT(nn.Module):
         for i in range(start_i, len(self.layers)):
             layer = self.layers[i]
             x = layer(x)
-        B,_,C=x.size()
+        B,_,C = x.size()
         x = x.view(B, 64, 64, C)
-        x=x.permute(0, 3, 1, 2)
-        x=self.neck(x)
         return x
 
     def forward(self, x):
         x = self.forward_features(x)
-        #x = self.norm_head(x)
-        #x = self.head(x)
+        x = x.permute(0, 3, 1, 2)
+        x=self.neck(x)
         return x
-
-
+    
+    def forward_wo_neck(self,x):
+        x = self.forward_features(x)
+        xp = self.norm_head(x)
+        xp = xp.permute(0,3,1,2)
+        x=self.neck(x.permute(0, 3, 1, 2))
+        return x, xp
+    def preprocess(self, x: torch.Tensor) -> torch.Tensor:
+        # Normalize colors have done 
+        # Pad
+        h, w = x.shape[-2:]
+        padh = self.img_size - h
+        padw = self.img_size - w
+        x = F.pad(x, (0, padw, 0, padh))
+        return x
+    
 _checkpoint_url_format = \
     'https://github.com/wkcn/TinyViT-model-zoo/releases/download/checkpoints/{}.pth'
 _provided_checkpoints = {
