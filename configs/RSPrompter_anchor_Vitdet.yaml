@@ -18,7 +18,7 @@ MODEL:
   PIXEL_STD: [58.395, 57.12, 57.375]
   ANCHOR_GENERATOR:
     NAME: "DefaultAnchorGenerator"
-    SIZES: [[32,64,128],[64,128,256],[128, 256, 512],[256,512,1024],[512,1024,2048]] 
+    SIZES: [[32],[64],[128],[256],[512]] 
     ASPECT_RATIOS: [[0.5, 1.0, 2.0]]  # Three aspect ratios (same for all in feature maps)
   PROPOSAL_GENERATOR:
     NAME: "RPN"
