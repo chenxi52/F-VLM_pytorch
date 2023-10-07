@@ -277,6 +277,8 @@ class SAMVitDet(SAMAggregatorNeck):
         self.fpn3 = nn.Identity()
         self.fpn4 = nn.MaxPool2d(kernel_size=2, stride=2)
         self.ops = [self.fpn1, self.fpn2, self.fpn3, self.fpn4]
+        self.apply(self._init_weights)
+        # init_weights for fpns
 
         self.lateral_convs= nn.ModuleList()
         self.fpn_convs= nn.ModuleList()
@@ -301,7 +303,6 @@ class SAMVitDet(SAMAggregatorNeck):
                     )
             self.lateral_convs.append(l_conv)
             self.fpn_convs.append(f_conv)
-        self.apply(self._init_weights)
         
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
