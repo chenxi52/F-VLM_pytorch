@@ -287,7 +287,8 @@ class SAMVitDet(SAMAggregatorNeck):
                         kernel_size=1,
                         padding=0,
                         norm_cfg=self.norm_cfg,
-                        act_cfg=self.act_cfg
+                        act_cfg=self.act_cfg,
+                        inplace=False
                         )
             f_conv = ConvModule(
                         out_channels,
@@ -295,7 +296,8 @@ class SAMVitDet(SAMAggregatorNeck):
                         kernel_size=3,
                         padding=1,
                         norm_cfg=self.norm_cfg,
-                        act_cfg=self.act_cfg
+                        act_cfg=self.act_cfg,
+                        inplace=False
                     )
             self.lateral_convs.append(l_conv)
             self.fpn_convs.append(f_conv)
