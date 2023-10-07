@@ -12,8 +12,7 @@ MODEL:
   # WEIGHTS: "output/Detic-COCO/RSPrompter_anchor/model_0000999.pth"
   FPN:
     OUT_CHANNELS: 256
-    IN_CHANNELS: [320, 320, 320, 320]
-    UP_SAMPLE_SCALE: 4
+    IN_CHANNELS: [256]
     ANCHOR_STRIDE: [4, 8, 16, 32, 64]
     NORM: 'LN'
   PIXEL_MEAN: [123.675, 116.280, 103.530]

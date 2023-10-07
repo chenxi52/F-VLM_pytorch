@@ -238,7 +238,6 @@ class Norm2d(nn.Module):
 class SAMVitDet(SAMAggregatorNeck):
     def __init__(self,
             in_channels=[1280]*16,
-            selected_channels: list=None,
             out_channels=256,
             kernel_size=3,
             stride=1,
@@ -250,29 +249,26 @@ class SAMVitDet(SAMAggregatorNeck):
             use_residual=False,
             num_outs = 5):
         super(SAMAggregatorNeck, self).__init__()
-        self.in_channels = in_channels
         self.kernel_size = kernel_size
         self.norm_cfg = norm_cfg
         self.act_cfg = act_cfg
         self.out_channels = out_channels
         self.stride = stride
-        self.selected_channels = selected_channels
         self.up_sample_scale = up_sample_scale
 
         self._square_pad = square_pad
         self.anchor_stride= anchor_stride
         self.use_residual = use_residual
         self.num_outs = num_outs
-        embed_dim = in_channels[0]
 
         self.fpn1 = nn.Sequential(
-            nn.ConvTranspose2d(embed_dim, embed_dim, kernel_size=2, stride=2),
-            Norm2d(embed_dim),
+            nn.ConvTranspose2d(out_channels, out_channels, kernel_size=2, stride=2),
+            Norm2d(out_channels),
             nn.GELU(),
-            nn.ConvTranspose2d(embed_dim, embed_dim, kernel_size=2, stride=2),
+            nn.ConvTranspose2d(out_channels, out_channels, kernel_size=2, stride=2),
         )
         self.fpn2 = nn.Sequential(
-            nn.ConvTranspose2d(embed_dim, embed_dim, kernel_size=2, stride=2),
+            nn.ConvTranspose2d(out_channels, out_channels, kernel_size=2, stride=2),
         )
         self.fpn3 = nn.Identity()
         self.fpn4 = nn.MaxPool2d(kernel_size=2, stride=2)
@@ -280,29 +276,6 @@ class SAMVitDet(SAMAggregatorNeck):
         self.apply(self._init_weights)
         # init_weights for fpns
 
-        self.lateral_convs= nn.ModuleList()
-        self.fpn_convs= nn.ModuleList()
-        for i in range(len(in_channels)):
-            l_conv = ConvModule(
-                        in_channels[i],
-                        out_channels,
-                        kernel_size=1,
-                        padding=0,
-                        norm_cfg=self.norm_cfg,
-                        act_cfg=self.act_cfg,
-                        inplace=False
-                        )
-            f_conv = ConvModule(
-                        out_channels,
-                        out_channels,
-                        kernel_size=3,
-                        padding=1,
-                        norm_cfg=self.norm_cfg,
-                        act_cfg=self.act_cfg,
-                        inplace=False
-                    )
-            self.lateral_convs.append(l_conv)
-            self.fpn_convs.append(f_conv)
         
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
@@ -330,12 +303,10 @@ class SAMVitDet(SAMAggregatorNeck):
         feature_list = []
         for i in range(len(self.ops)):
             feature_list.append(self.ops[i](features))
-        laterals = [lateral_conv(feature_list[i]) for i, lateral_conv in enumerate(self.lateral_convs)]
-        outputs = [self.fpn_convs[i](laterals[i]) for i in range(len(laterals))]
-        if self.num_outs>len(outputs):
-            for i in range(self.num_outs-len(outputs)):
-                outputs.append(nn.functional.max_pool2d(outputs[-1], 1, stride=2))
-        return { 'feat4':outputs[0], 'feat3': outputs[1], 'feat2':outputs[2], 'feat1':outputs[3], 'feat0':outputs[4]}
+        if self.num_outs>len(feature_list):
+            for i in range(self.num_outs-len(feature_list)):
+                feature_list.append(nn.functional.max_pool2d(feature_list[-1], 1, stride=2))
+        return { 'feat4':feature_list[0], 'feat3': feature_list[1], 'feat2':feature_list[2], 'feat1':feature_list[3], 'feat0':feature_list[4]}
     
     @property
     def output_shape(self):
@@ -371,7 +342,6 @@ def build_sam_vit_det_backbone(cfg, input_shape=None):
     backbone = SAMVitDet(
         in_channels=cfg.MODEL.FPN.IN_CHANNELS,
         out_channels=cfg.MODEL.FPN.OUT_CHANNELS,
-        up_sample_scale=cfg.MODEL.FPN.UP_SAMPLE_SCALE,
         anchor_stride=cfg.MODEL.FPN.ANCHOR_STRIDE,
         norm_cfg=norm_cfg,
     )

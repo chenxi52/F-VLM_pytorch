@@ -212,7 +212,8 @@ class SamDetector(GeneralizedRCNN):
     def extract_feat(self, batched_inputs):
         # forward sam.image_encoder
         if 'det' in self.backbone_name:
-            feat, inter_features = self.sam.image_encoder.forward_wo_neck(batched_inputs)
+            feat = self.sam.image_encoder(batched_inputs)
+            inter_features = feat
         else:
             feat, inter_features = self.sam.image_encoder(batched_inputs)
         # feat: Tensor[bz, 256, 64, 64]  inter_feats: List[32*Tensor[bz,64,64,1280]]

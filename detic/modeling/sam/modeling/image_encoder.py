@@ -103,7 +103,7 @@ class ImageEncoderViT(nn.Module):
             LayerNorm2d(out_chans),
         )
         # input:(N,C, H,W) (*, channel)
-        self.norm = nn.LayerNorm(embed_dim)
+        # self.norm = nn.LayerNorm(embed_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = torch.stack([self.preprocess(i)  for i in x], dim=0)
@@ -117,20 +117,6 @@ class ImageEncoderViT(nn.Module):
 
         x = self.neck(x.permute(0, 3, 1, 2))
         return x, inter_features
-
-    def forward_wo_neck(self, x:torch.Tensor):
-        x = torch.stack([self.preprocess(i)  for i in x], dim=0)
-        x  = self.patch_embed(x)
-        if self.pos_embed is not None:
-            x = x + self.pos_embed
-
-        for blk in self.blocks:
-            x = blk(x)
-        xp = self.norm(x)
-        xp = xp.permute(0,3,1,2)
-        x = self.neck(x.permute(0,3,1,2))
-        # x:b,c,h,w  xp:b,h,w,c
-        return x, xp
 
     def preprocess(self, x: torch.Tensor) -> torch.Tensor:
         # Normalize colors have done 
