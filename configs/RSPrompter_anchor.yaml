@@ -5,7 +5,9 @@ MODEL:
     NAME: "build_sam_vit_fpn_backbone" #SAM vit_h
     # TYPE: "vit_h"
     TYPE: "vit_b"
-  WEIGHTS: "sam_vit_b_01ec64.pth"
+    TYPE: "vit_t"
+  WEIGHTS: "mobile_sam.pt"
+  # WEIGHTS: "sam_vit_b_01ec64.pth"
   # WEIGHTS: "sam_vit_h_4b8939.pth"
   FPN:
     OUT_CHANNELS: 256

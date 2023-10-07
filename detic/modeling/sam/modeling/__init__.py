@@ -10,3 +10,4 @@ from .mask_decoder import MaskDecoder
 from .prompt_encoder import PromptEncoder
 from .transformer import TwoWayTransformer
 from .sam_mask_head import samMaskHead
+from .tiny_vit_sam import TinyViT

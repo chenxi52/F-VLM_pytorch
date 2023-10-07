@@ -133,7 +133,6 @@ class ImageEncoderViT(nn.Module):
         return x, xp
 
     def preprocess(self, x: torch.Tensor) -> torch.Tensor:
-        """Normalize pixel values and pad to a square input."""
         # Normalize colors have done 
         # Pad
         h, w = x.shape[-2:]
