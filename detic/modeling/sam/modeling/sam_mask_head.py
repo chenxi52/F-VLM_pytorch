@@ -122,49 +122,49 @@ class samMaskHead(BaseMaskRCNNHead):
 
         res_img_feat = None
 
-        # low_res_masks, iou_predictions = sam.mask_decoder.forward_batch(
-        #     image_embeddings=img_embeddings,
-        #     image_pe=img_pe,
-        #     sparse_prompt_embeddings=point_emd,
-        #     dense_prompt_embeddings=nomask_dense_embeddings,
-        #     multimask_output=False,
-        #     res_img_feat=res_img_feat,
-        # )
+        low_res_masks, iou_predictions = sam.mask_decoder.forward_batch(
+            image_embeddings=img_embeddings,
+            image_pe=img_pe,
+            sparse_prompt_embeddings=point_emd,
+            dense_prompt_embeddings=nomask_dense_embeddings,
+            multimask_output=False,
+            res_img_feat=res_img_feat,
+        )
         ######################
         # Initialize the result storage lists
-        low_res_masks_list = []
-        iou_predictions_list = []
+        # low_res_masks_list = []
+        # iou_predictions_list = []
 
-        # Decide on the chunk size based on your requirements and memory constraints
-        chunk_size = 100
+        # # Decide on the chunk size based on your requirements and memory constraints
+        # chunk_size = 100
 
-        # Splitting the tensors into smaller chunks
-        point_emd_chunks = torch.split(point_emd, chunk_size, dim=0)
-        img_embeddings_chunks = torch.split(img_embeddings, chunk_size, dim=0)
-        img_pe_chunks = torch.split(img_pe, chunk_size, dim=0)
-        nomask_dense_embeddings_chunks = torch.split(nomask_dense_embeddings, chunk_size, dim=0)
+        # # Splitting the tensors into smaller chunks
+        # point_emd_chunks = torch.split(point_emd, chunk_size, dim=0)
+        # img_embeddings_chunks = torch.split(img_embeddings, chunk_size, dim=0)
+        # img_pe_chunks = torch.split(img_pe, chunk_size, dim=0)
+        # nomask_dense_embeddings_chunks = torch.split(nomask_dense_embeddings, chunk_size, dim=0)
 
-        # Iterate through each chunk
-        for point_emd_chunk, img_embeddings_chunk, img_pe_chunk, nomask_dense_chunk in zip(
-            point_emd_chunks, img_embeddings_chunks, img_pe_chunks, nomask_dense_embeddings_chunks):
+        # # Iterate through each chunk
+        # for point_emd_chunk, img_embeddings_chunk, img_pe_chunk, nomask_dense_chunk in zip(
+        #     point_emd_chunks, img_embeddings_chunks, img_pe_chunks, nomask_dense_embeddings_chunks):
 
-            # Processing each chunk through the mask decoder
-            low_res_masks_chunk, iou_predictions_chunk = sam.mask_decoder.forward_batch(
-                image_embeddings=img_embeddings_chunk,
-                image_pe=img_pe_chunk,
-                sparse_prompt_embeddings=point_emd_chunk,
-                dense_prompt_embeddings=nomask_dense_chunk,
-                multimask_output=False,
-                res_img_feat=None  # As per your previous setup
-            )
+        #     # Processing each chunk through the mask decoder
+        #     low_res_masks_chunk, iou_predictions_chunk = sam.mask_decoder.forward_batch(
+        #         image_embeddings=img_embeddings_chunk,
+        #         image_pe=img_pe_chunk,
+        #         sparse_prompt_embeddings=point_emd_chunk,
+        #         dense_prompt_embeddings=nomask_dense_chunk,
+        #         multimask_output=False,
+        #         res_img_feat=None  # As per your previous setup
+        #     )
 
-            # Append results from this chunk to the result storage lists
-            low_res_masks_list.append(low_res_masks_chunk)
-            iou_predictions_list.append(iou_predictions_chunk)
+        #     # Append results from this chunk to the result storage lists
+        #     low_res_masks_list.append(low_res_masks_chunk)
+        #     iou_predictions_list.append(iou_predictions_chunk)
 
-        # Concatenate the results after processing all chunks
-        low_res_masks = torch.cat(low_res_masks_list, dim=0)
-        iou_predictions = torch.cat(iou_predictions_list, dim=0)
+        # # Concatenate the results after processing all chunks
+        # low_res_masks = torch.cat(low_res_masks_list, dim=0)
+        # iou_predictions = torch.cat(iou_predictions_list, dim=0)
         ######################
         iou_predictions = iou_predictions.squeeze(1)
         # sample pos_ind from box_features, this has been done in the roi's _forward_mask
