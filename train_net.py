@@ -236,7 +236,7 @@ def main(args):
     distributed = comm.get_world_size() > 1
     if distributed:
         model = DistributedDataParallel(
-            model, device_ids=[comm.get_local_rank()], broadcast_buffers=False,
+            model, device_ids=[comm.get_local_rank()], broadcast_buffers=True,
             find_unused_parameters=cfg.FIND_UNUSED_PARAM
         )
 
