@@ -169,8 +169,8 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             # heads. But when `self.train_on_pred_boxes is True`, proposals will contain boxes
             # predicted by the box head. proposal_boxes are replaced by boxes predicted by box_head
             if self.mask_on:
-                # losses.update(loss_mask=self._forward_mask(sam, img_features, x, proposals)['loss_mask'])
-                self._forward_mask(sam, img_features, x, proposals)
+                losses.update(loss_mask=self._forward_mask(sam, img_features, x, proposals)['loss_mask'])
+                # self._forward_mask(sam, img_features, x, proposals)
             return proposals, losses
         else:
             pred_instances = self._forward_box(x, proposals)
