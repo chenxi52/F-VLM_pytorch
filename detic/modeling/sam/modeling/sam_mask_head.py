@@ -121,7 +121,6 @@ class samMaskHead(BaseMaskRCNNHead):
         img_pe = repeat(img_pe, 'b c h w -> (b n) c h w', n=img_embeddings.shape[0])
 
         res_img_feat = None
-        print(point_emd.size())
         low_res_masks, iou_predictions = sam.mask_decoder.forward_batch(
             image_embeddings=img_embeddings,
             image_pe=img_pe,
