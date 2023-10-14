@@ -227,7 +227,7 @@ class samMaskHead(BaseMaskRCNNHead):
         if self.training:
             # TODO: not right
             # return {"loss_mask": self.mask_rcnn_loss(low_res_masks, instances, self.vis_period) * self.loss_weight}
-            return {'loss_mask':None}
+            return None
         else:
             mask_rcnn_inference(low_res_masks, instances)
             return instances
