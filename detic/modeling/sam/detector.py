@@ -20,6 +20,7 @@ import torch.nn.functional as F
 import ipdb
 import matplotlib.pyplot as plt
 import os
+import time
 
 @META_ARCH_REGISTRY.register()
 class SamDetector(GeneralizedRCNN):
@@ -188,6 +189,7 @@ class SamDetector(GeneralizedRCNN):
             return results
         
     def forward(self, batched_inputs: List[Dict[str, torch.Tensor]]):
+        startTime = time.time()
         if not self.training:
             return self.inference(batched_inputs, do_postprocess=self.do_postprocess)
         images = self.preprocess_image(batched_inputs)
@@ -203,6 +205,10 @@ class SamDetector(GeneralizedRCNN):
         # proposals: List[bz * Instance[1000 * Instances(num_instances, image_height, image_width, fields=[proposal_boxes: Boxes(tensor([1,4])), objectness_logits:tensor[1],])]]
         del images
         _, detector_losses = self.roi_heads(self.sam, img_embedding_feat, fpn_features, proposals, gt_instances)
+        end_time = time.time()
+        dua_time = end_time-startTime
+        print('dua_time:',dua_time)
+        
         losses = {}
         losses.update(detector_losses)
         losses.update(proposal_losses)
