@@ -174,3 +174,4 @@ class samMaskHead(BaseMaskRCNNHead):
         else:
             mask_rcnn_inference(low_res_masks, instances)
             return instances
+        
