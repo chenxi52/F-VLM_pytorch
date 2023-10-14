@@ -6,4 +6,4 @@
 # python3 train_net.py --num-gpus 8 \
 #     --config-file configs/RSPrompter_anchor_eval.yaml  --eval-only  #--resume 
 
-CUDA_VISIBLE_DEVICES=4 python train_net.py --num-gpus 1 --config-file configs/RSPrompter_anchor_Vitdet.yaml
+CUDA_VISIBLE_DEVICES=4 python train_net.py --num-gpus 1 --config-file configs/RSPrompter_anchor_tiny_Vitdet.yaml 

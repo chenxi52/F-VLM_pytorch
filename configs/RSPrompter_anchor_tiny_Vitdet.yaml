@@ -7,7 +7,7 @@ MODEL:
     # TYPE: "vit_b"
     TYPE: "vit_t"
   WEIGHTS: "mobile_sam.pt"
-  # WEIGHTS: "sam_vit_b_01ec64.pth"
+  # WEIGHTS: "/opt/tiger/OpenVo-Seg-master/output/wo_mask_with_prompt_encoder_roi_head_withgrad/model_final.pth"
   # WEIGHTS: "sam_vit_h_4b8939.pth"
   # WEIGHTS: "output/Detic-COCO/RSPrompter_anchor/model_0000999.pth"
   FPN:
@@ -62,7 +62,7 @@ MODEL:
     POOLER_TYPE: "ROIAlignV2"
     USE_SIGMOID_CE: False
     BBOX_REG_LOSS_WEIGHT: 1.0
-    TRAIN_ON_PRED_BOXES: False
+    TRAIN_ON_PRED_BOXES: True
     BBOX_REG_WEIGHTS: (10.0, 10.0, 5.0, 5.0)
     SMOOTH_L1_BETA: 0.
     CLS_AGNOSTIC_BBOX_REG: False
@@ -85,15 +85,15 @@ DATALOADER:
   NUM_WORKERS: 16  # num_workers == batchsize_per_gpu
 
 SOLVER:
-  IMS_PER_BATCH: 2  # change  # max 8 imgs per batch
-  BASE_LR: 0.000024  # change0.000025
+  IMS_PER_BATCH: 16  # change  # max 8 imgs per batch
+  BASE_LR: 0.0002  # change0.000025
   STEPS: (60000, 80000)  # change 
   WARMUP_ITERS: 100  
   WARMUP_METHOD : "linear"
-  WARMUP_FACTOR: 0.0001
+  WARMUP_FACTOR: 0.0001 #1.0001
   # LR_SCHEDULER_NAME: "WarmupCosineLR" 
   LR_SCHEDULER_NAME: "WarmupMultiStepLR"
-  WEIGHT_DECAY: 0.001   
+  WEIGHT_DECAY: 0.001  
   MAX_ITER: 90000
   CHECKPOINT_PERIOD: 5000  #  change
   USE_CUSTOM_SOLVER: True
@@ -115,8 +115,8 @@ TEST:
   DETECTIONS_PER_IMAGE: 300  #test_topk_per_image
   MASK_THR_BINARY: 0.5  
   DO_POSTPROCESS: True
-  EVAL_PERIOD: 5000  # change
+  EVAL_PERIOD: 5000 # change
   IMS_PER_BATCH: 2 #every gpu has most 2 images  # change
 VERSION: 2
 FP16: True
-OUTPUT_DIR: './output/full_optimize_wo_mask_768'
+OUTPUT_DIR: './output/with_mask_with_prompt_encoder_roi_head_withgrad_baseline_frozen_mask_decoder'

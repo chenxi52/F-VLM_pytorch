@@ -13,7 +13,6 @@ from torch import Tensor
 from detic.modeling.custom_poolers import customRoiPooler
 import math
 
-
 @ROI_HEADS_REGISTRY.register()
 class samAnchorPromptRoiHeads(StandardROIHeads):
     """
@@ -165,6 +164,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         
         if self.training:
             losses = self._forward_box(x, proposals)
+            print(len(proposals[0].proposal_boxes))
             # Usually the original proposals used by the box head are used by the mask, keypoint
             # heads. But when `self.train_on_pred_boxes is True`, proposals will contain boxes
             # predicted by the box head. proposal_boxes are replaced by boxes predicted by box_head
