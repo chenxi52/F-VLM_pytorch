@@ -65,7 +65,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         pooler_type       = cfg.MODEL.ROI_MASK_HEAD.POOLER_TYPE
         if cfg.MODEL.MASK_ON:
             del ret['mask_pooler']
-
+            
             ret['mask_pooler'] = (
                 customRoiPooler(
                     output_size=pooler_resolution,

@@ -38,7 +38,6 @@ class customRoiPooler(ROIPooler):
         )
         if len(box_lists) == 0:
             return _create_zeros(None, x[0].shape[1], *self.output_size, x[0])
-
         pooler_fmt_boxes = convert_boxes_to_pooler_format(box_lists)
 
         if num_level_assignments == 1:
