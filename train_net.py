@@ -223,7 +223,7 @@ def main(args):
     cfg = setup(args)
 
     model = build_model(cfg)
-    logger.info("Model:\n{}".format(model))
+    # logger.info("Model:\n{}".format(model))
     
     if args.eval_only:
         # for debugging, load fastercnn here
