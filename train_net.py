@@ -88,12 +88,12 @@ def do_test(cfg, model):
 
 def do_train(cfg, model, resume=False):
     model.train()
-    def set_sam_eval():
-        if comm.get_world_size() > 1:
-            model.module.sam.eval()
-        else:
-            model.sam.eval()
-    set_sam_eval()
+    # def set_sam_eval():
+    #     if comm.get_world_size() > 1:
+    #         model.module.sam.eval()
+    #     else:
+    #         model.sam.eval()
+    # set_sam_eval()
     if cfg.SOLVER.USE_CUSTOM_SOLVER:
         # also set requires_grad for module
         optimizer = build_sam_optimizer(cfg, model)

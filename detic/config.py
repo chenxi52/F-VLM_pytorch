@@ -156,7 +156,7 @@ def add_rsprompter_config(cfg):
     _C.SOLVER.LOGGER_FREQ = 20
 
     _C.INPUT.PROMPT_SIZE = (90,4)
-    _C.INPUT.CUSTOM_AUG = ''
+    _C.INPUT.CUSTOM_AUG = 'default'
     _C.INPUT.TRAIN_SIZE = 1024
     _C.INPUT.TEST_SIZE = 1024
     _C.INPUT.SCALE_RANGE = (0.1, 2.)
