@@ -112,7 +112,7 @@ class samMaskHead(BaseMaskRCNNHead):
         )
         # the index must have 
         img_flag_ids = torch.bincount(mask_roi_inds.long())
-        print('img_flag_ids: ',img_flag_ids)
+        # print('img_flag_ids: ',img_flag_ids)
         padding = torch.zeros((len(img_features)-len(img_flag_ids),), device=img_flag_ids.device, dtype=img_flag_ids.dtype)
         # padding: what if no_mask exist in the 
         img_flag_ids = torch.cat([img_flag_ids, padding])
@@ -122,7 +122,7 @@ class samMaskHead(BaseMaskRCNNHead):
         img_pe = repeat(img_pe, 'b c h w -> (b n) c h w', n=img_embeddings.shape[0])
 
         res_img_feat = None
-        print('img_pe device:',img_pe.device,'point_emd device:',point_emd.device, )
+        # print('img_pe device:',img_pe.device,'point_emd device:',point_emd.device, )
         low_res_masks, iou_predictions = sam.mask_decoder.forward_batch(
             image_embeddings=img_embeddings,
             image_pe=img_pe,
@@ -167,7 +167,7 @@ class samMaskHead(BaseMaskRCNNHead):
         # low_res_masks = torch.cat(low_res_masks_list, dim=0)
         # iou_predictions = torch.cat(iou_predictions_list, dim=0)
         ######################
-        low_res_masks = torch.nn.functional.interpolate(low_res_masks, size=(self.train_size, self.train_size), mode='bilinear', align_corners=False)
+        # low_res_masks = torch.nn.functional.interpolate(low_res_masks, size=(self.train_size, self.train_size), mode='bilinear', align_corners=False)
         iou_predictions = iou_predictions.squeeze(1)
         # sample pos_ind from box_features, this has been done in the roi's _forward_mask
         if self.training:

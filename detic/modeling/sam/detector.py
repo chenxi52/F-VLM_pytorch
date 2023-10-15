@@ -207,7 +207,7 @@ class SamDetector(GeneralizedRCNN):
         _, detector_losses = self.roi_heads(self.sam, img_embedding_feat, fpn_features, proposals, gt_instances)
         end_time = time.time()
         dua_time = end_time-startTime
-        print('dua_time:',dua_time, 'device:',torch.distributed.get_rank())
+        # print('dua_time:',dua_time, 'device:',torch.distributed.get_rank())
         
         losses = {}
         losses.update(detector_losses)
