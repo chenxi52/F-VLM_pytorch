@@ -526,9 +526,9 @@ class TinyViT(nn.Module):
             self.layers.append(layer)
 
         # Classifier head
-        self.norm_head = nn.LayerNorm(embed_dims[-1])
-        self.head = nn.Linear(
-            embed_dims[-1], num_classes) if num_classes > 0 else torch.nn.Identity()
+        # self.norm_head = nn.LayerNorm(embed_dims[-1])
+        # self.head = nn.Linear(
+        #     embed_dims[-1], num_classes) if num_classes > 0 else torch.nn.Identity()
 
         # init weights
         self.apply(self._init_weights)
@@ -574,8 +574,8 @@ class TinyViT(nn.Module):
                 layer.downsample.apply(
                     lambda x: _set_lr_scale(x, lr_scales[i - 1]))
         assert i == depth
-        for m in [self.norm_head, self.head]:
-            m.apply(lambda x: _set_lr_scale(x, lr_scales[-1]))
+        # for m in [self.norm_head]:
+        #     m.apply(lambda x: _set_lr_scale(x, lr_scales[-1]))
 
         for k, p in self.named_parameters():
             p.param_name = k

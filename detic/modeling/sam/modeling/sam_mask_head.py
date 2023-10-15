@@ -123,7 +123,7 @@ class samMaskHead(BaseMaskRCNNHead):
 
         res_img_feat = None
         # print('img_pe device:',img_pe.device,'point_emd device:',point_emd.device, )
-        low_res_masks, iou_predictions = sam.mask_decoder.forward_batch(
+        low_res_masks = sam.mask_decoder.forward_batch(
             image_embeddings=img_embeddings,
             image_pe=img_pe,
             sparse_prompt_embeddings=point_emd,
@@ -168,7 +168,7 @@ class samMaskHead(BaseMaskRCNNHead):
         # iou_predictions = torch.cat(iou_predictions_list, dim=0)
         ######################
         # low_res_masks = torch.nn.functional.interpolate(low_res_masks, size=(self.train_size, self.train_size), mode='bilinear', align_corners=False)
-        iou_predictions = iou_predictions.squeeze(1)
+        # iou_predictions = iou_predictions.squeeze(1)
         # sample pos_ind from box_features, this has been done in the roi's _forward_mask
         if self.training:
             # TODO: not right

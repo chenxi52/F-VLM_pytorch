@@ -147,11 +147,12 @@ def do_train(cfg, model, resume=False):
         checkpointer.resume_or_load(cfg.MODEL.WEIGHTS, resume=resume).get("iteration", -1) + 1
     )
 
-    #### set requirs_grad = True for all parameters
-    # for param in model.parameters():
-    #     param.requires_grad = True
-    ####### 
+    ###### set prompter params False
+    # for key, params in model.named_parameters():
+    #     if 'prompter' in key:
+    #         params.requires_grad = False
 
+    ######
     max_iter = cfg.SOLVER.MAX_ITER
 
     periodic_checkpointer = PeriodicCheckpointer(
@@ -200,11 +201,6 @@ def do_train(cfg, model, resume=False):
             scheduler.step()
 
 
-            #####find unused parameters
-            # unused_params = [parma for parma in model.parameters() if not parma]
-            # print("unused_params: ", unused_params)
-            ######
-
             if (
                 cfg.TEST.EVAL_PERIOD > 0
                 and (iteration + 1) % cfg.TEST.EVAL_PERIOD == 0
@@ -248,10 +244,15 @@ def main(args):
         )
         return do_test(cfg, model)
 
+    ##### freeze prompter params
+    for key, params in model.sam.prompt_encoder.named_parameters():
+        params.requires_grad = False
+    ########
+    
     distributed = comm.get_world_size() > 1
     if distributed:
         model = DistributedDataParallel(
-            model, device_ids=[comm.get_local_rank()], broadcast_buffers=False, find_unused_parameters=True
+            model, device_ids=[comm.get_local_rank()], broadcast_buffers=False, find_unused_parameters=False
         )
 
     do_train(cfg, model, resume=args.resume)
