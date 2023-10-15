@@ -148,8 +148,8 @@ def do_train(cfg, model, resume=False):
     )
 
     #### set requirs_grad = True for all parameters
-    for param in model.parameters():
-        param.requires_grad = True
+    # for param in model.parameters():
+    #     param.requires_grad = True
     ####### 
 
     max_iter = cfg.SOLVER.MAX_ITER
@@ -198,6 +198,12 @@ def do_train(cfg, model, resume=False):
             optimizer.step()
             storage.put_scalar("lr", optimizer.param_groups[0]["lr"], smoothing_hint=False)
             scheduler.step()
+
+
+            #####find unused parameters
+            # unused_params = [parma for parma in model.parameters() if not parma]
+            # print("unused_params: ", unused_params)
+            ######
 
             if (
                 cfg.TEST.EVAL_PERIOD > 0
