@@ -48,7 +48,6 @@ def build_custom_augmentation(cfg, is_train, scale=None, size=None, \
         augmentation = [ResizeLongestSizeFlip(size=size, pad_mask=pad_mask, mask_pad_val=mask_pad_val, training=is_train)]
         if is_train:
             augmentation.append(HFlipMaskAug(horizontal=True))
-        # augmentation.append(PadAug(target_size=(size,size)))
     elif cfg.INPUT.CUSTOM_AUG == 'ResizeFlip':
         if is_train:
             size = cfg.INPUT.TRAIN_SIZE

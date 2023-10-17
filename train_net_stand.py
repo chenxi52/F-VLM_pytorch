@@ -57,8 +57,6 @@ from detectron2.utils.events import (
     TensorboardXWriter,
 )
 
-
-from detic.data.build import custom_build_detection_test_loader
 from detic.data.custom_dataset_mapper import CustomDatasetMapper, DetrDatasetMapper, SamDatasetMapper
 from detic.data.custom_build_augmentation import build_custom_augmentation
 from detic.custom_checkpointer import samCheckpointer
@@ -115,7 +113,7 @@ def do_test(cfg, model):
         mapper = None if cfg.INPUT.TEST_INPUT_TYPE == 'default' \
             else SamDatasetMapper(
                 cfg, False, augmentations=build_custom_augmentation(cfg, False))
-        data_loader = custom_build_detection_test_loader(cfg, dataset_name, mapper=mapper)
+        data_loader = build_detection_test_loader(cfg, dataset_name, mapper=mapper)
         #####
         evaluator = get_evaluator(
             cfg, dataset_name, os.path.join(cfg.OUTPUT_DIR, "inference", dataset_name)
@@ -239,7 +237,7 @@ def main(args):
     model = build_model(cfg)
     logger.info("Model:\n{}".format(model))
     if args.eval_only:
-        DetectionCheckpointer(model, save_dir=cfg.OUTPUT_DIR).resume_or_load(
+        samCheckpointer(model, save_dir=cfg.OUTPUT_DIR).resume_or_load(
             cfg.MODEL.WEIGHTS, resume=args.resume
         )
         return do_test(cfg, model)
@@ -248,7 +246,7 @@ def main(args):
     for key, params in model.sam.prompt_encoder.named_parameters():
         params.requires_grad = False
     ########
-    
+
     distributed = comm.get_world_size() > 1
     if distributed:
         model = DistributedDataParallel(
