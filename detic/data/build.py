@@ -45,7 +45,7 @@ def custom_build_detection_test_loader(dataset,mapper,sampler,batch_size,num_wor
         collate_fn=collate_fn)
 
 def train_loader_from_config(cfg, mapper=None, *, dataset=None, sampler=None):
-    config  = _train_loader_from_config(cfg, mapper, dataset, sampler)
+    config = _train_loader_from_config(cfg, mapper=mapper, dataset=dataset, sampler=sampler)
     config['persistent_workers'] = cfg.DATALOADER.PERSISTENT_WORKERS
     return config
 
