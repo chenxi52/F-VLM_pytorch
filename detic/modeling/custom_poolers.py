@@ -15,5 +15,4 @@ class customRoiPooler(ROIPooler):
         """
         output = super().forward(x, box_lists)
         pooler_fmt_boxes = convert_boxes_to_pooler_format(box_lists)
-        import ipdb;ipdb.set_trace()
         return output, pooler_fmt_boxes[:,0]
