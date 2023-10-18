@@ -82,8 +82,8 @@ DATASETS:
   TRAIN: ("coco_2017_train",)
   TEST: ("coco_2017_val",)
 DATALOADER:
-  NUM_WORKERS: 16  # num_workers == batchsize_per_gpu
-
+  NUM_WORKERS: 16 # num_workers == batchsize_per_gpu
+  PERSISTENT_WORKERS: True 
 SOLVER:
   IMS_PER_BATCH: 16  # change  # max 8 imgs per batch
   BASE_LR: 0.0002  # change0.000025

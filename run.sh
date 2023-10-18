@@ -7,4 +7,7 @@
 #     --config-file configs/RSPrompter_anchor_eval.yaml  --eval-only  #--resume 
 
 # python train_net.py --num-gpus 4 --config-file configs/RSPrompter_anchor_tiny_Vitdet.yaml SOLVER.IMS_PER_BATCH 8
-python train_net_stand.py --num-gpus 4 --config-file configs/RSPrompter_anchor_tiny_Vitdet.yaml SOLVER.IMS_PER_BATCH 8
+# CUDA_VISIBLE_DEVICES=1,2,3,4,7 python train_net_stand.py --num-gpus 5 --config-file configs/RSPrompter_anchor_tiny_Vitdet.yaml SOLVER.IMS_PER_BATCH 10
+# python train_net_stand.py --num-gpus 8 --config-file configs/RSPrompter_anchor_tiny_Vitdet.yaml SOLVER.IMS_PER_BATCH 16
+# python3 train_net_stand.py --num-gpus 4 --config-file configs/RSPrompter_anchor_tiny_Vitdet.yaml SOLVER.IMS_PER_BATCH 8
+python3 train_net_stand.py --num-gpus 1 --config-file configs/RSPrompter_anchor_tiny_Vitdet.yaml SOLVER.IMS_PER_BATCH 2

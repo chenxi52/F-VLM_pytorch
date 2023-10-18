@@ -29,11 +29,9 @@ import datetime
 import detectron2.utils.comm as comm
 from detectron2.checkpoint import DetectionCheckpointer, PeriodicCheckpointer
 from detectron2.config import get_cfg
-from detectron2.data import (
-    MetadataCatalog,
-    build_detection_test_loader,
-    build_detection_train_loader,
-)
+from detectron2.data import MetadataCatalog
+
+from detic.data.build import custom_build_detection_test_loader, custom_build_detection_train_loader
 from detectron2.engine import default_argument_parser, default_setup, default_writers, launch
 from detectron2.evaluation import (
     CityscapesInstanceEvaluator,
@@ -113,7 +111,7 @@ def do_test(cfg, model):
         mapper = None if cfg.INPUT.TEST_INPUT_TYPE == 'default' \
             else SamDatasetMapper(
                 cfg, False, augmentations=build_custom_augmentation(cfg, False))
-        data_loader = build_detection_test_loader(cfg, dataset_name, mapper=mapper)
+        data_loader = custom_build_detection_test_loader(cfg, dataset_name, mapper=mapper)
         #####
         evaluator = get_evaluator(
             cfg, dataset_name, os.path.join(cfg.OUTPUT_DIR, "inference", dataset_name)
@@ -176,7 +174,7 @@ def do_train(cfg, model, resume=False):
                 cfg, True, augmentations=build_custom_augmentation(cfg, True))
     #####
     
-    data_loader = build_detection_train_loader(cfg, mapper=mapper)
+    data_loader = custom_build_detection_train_loader(cfg, mapper=mapper)
     
     logger.info("Starting training from iteration {}".format(start_iter))
     with EventStorage(start_iter) as storage:
@@ -197,7 +195,6 @@ def do_train(cfg, model, resume=False):
             optimizer.step()
             storage.put_scalar("lr", optimizer.param_groups[0]["lr"], smoothing_hint=False)
             scheduler.step()
-
 
             if (
                 cfg.TEST.EVAL_PERIOD > 0
