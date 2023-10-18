@@ -177,3 +177,4 @@ def add_rsprompter_config(cfg):
 
     _C.FP16 = False
 
+    _C.DATALOADER.PERSISTENT_WORKERS = False
