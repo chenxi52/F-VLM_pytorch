@@ -10,7 +10,7 @@ from detectron2.modeling.roi_heads.mask_head import mask_rcnn_inference
 from timm.models.layers import trunc_normal_
 from detectron2.utils.events import get_event_storage
 from detectron2.layers import cat
-
+import time
 @ROI_MASK_HEAD_REGISTRY.register()
 class samMaskHead(BaseMaskRCNNHead):
     @configurable
@@ -100,8 +100,9 @@ class samMaskHead(BaseMaskRCNNHead):
             A dict of losses in training. The predicted "instances" in inference(List[Dict['instances': Instances]]).
         """
         batch_size = roi_feature.shape[0]
+        start_time = time.time()
         point_emd = self.point_emb(roi_feature) #prompt head 
-        
+        # print('dual_time1:', time.time()-start_time)
         point_emd = point_emd.view(batch_size, self.per_query_point, -1)
         if self.with_sincos: 
             point_emd = torch.sin(point_emd[..., ::2] + point_emd[..., 1::2])
@@ -110,6 +111,7 @@ class samMaskHead(BaseMaskRCNNHead):
             point_emd.shape[0], -1, *img_features.shape[-2:]
         )
         # the index must have 
+        # print('dual_time2:', time.time()-start_time)
 
         img_flag_ids = torch.tensor([len(i) for i in instances], device=point_emd.device, dtype=torch.long)
         # print('img_flag_ids: ',img_flag_ids)
@@ -120,6 +122,7 @@ class samMaskHead(BaseMaskRCNNHead):
         img_embeddings = torch.repeat_interleave(img_features, img_flag_ids, dim=0)
         img_pe = sam.prompt_encoder.get_dense_pe()
         img_pe = repeat(img_pe, 'b c h w -> (b n) c h w', n=img_embeddings.shape[0])
+        # print('dual_time3:', time.time()-start_time)
 
         # print('img_pe device:',img_pe.device,'point_emd device:',point_emd.device, )
         low_res_masks = sam.mask_decoder.forward_batch(
@@ -129,6 +132,8 @@ class samMaskHead(BaseMaskRCNNHead):
             dense_prompt_embeddings=nomask_dense_embeddings,
             multimask_output=False,
         )
+        print('dual_time2:', time.time()-start_time)
+
         ######################
         # Initialize the result storage lists
         # low_res_masks_list = []
@@ -170,7 +175,10 @@ class samMaskHead(BaseMaskRCNNHead):
         # sample pos_ind from box_features, this has been done in the roi's _forward_mask
         if self.training:
             # TODO: not right
-            return {"loss_mask": mask_rcnn_loss(low_res_masks, instances, self.vis_period) * self.loss_weight}
+            loss ={"loss_mask": mask_rcnn_loss(low_res_masks, instances, self.vis_period) * self.loss_weight}
+            print('dual_time3:', time.time()-start_time)
+            
+            return loss
         else:
             mask_rcnn_inference(low_res_masks, instances)
             return instances
