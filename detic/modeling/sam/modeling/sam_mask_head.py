@@ -173,14 +173,13 @@ class samMaskHead(BaseMaskRCNNHead):
         # low_res_masks = torch.cat(low_res_masks_list, dim=0)
         # iou_predictions = torch.cat(iou_predictions_list, dim=0)
         ######################
-        low_res_masks = torch.nn.functional.interpolate(low_res_masks, size=(self.train_size, self.train_size), mode='bilinear', align_corners=False)
         # iou_predictions = iou_predictions.squeeze(1)
         # sample pos_ind from box_features, this has been done in the roi's _forward_mask
         if self.training:
             # TODO: not right
+            low_res_masks = torch.nn.functional.interpolate(low_res_masks, size=(self.train_size, self.train_size), mode='bilinear', align_corners=False)
             loss ={"loss_mask": mask_rcnn_loss(low_res_masks, instances, self.vis_period) * self.loss_weight}
             # print('dual_time3:', time.time()-start_time)
-            
             return loss
         else:
             mask_rcnn_inference(low_res_masks, instances)

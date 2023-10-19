@@ -31,12 +31,17 @@ def test_loader_from_config(cfg, dataset_name, mapper=None):
         if not isinstance(dataset, torchdata.IterableDataset)
         else None,
         "batch_size": cfg.TEST.IMS_PER_BATCH,
-        "persistent_workers": cfg.DATALOADER.PERSISTENT_WORKERS,
+        # "persistent_workers": cfg.DATALOADER.PERSISTENT_WORKERS,
     }
     
 @configurable(from_config=test_loader_from_config)
-def custom_build_detection_test_loader(dataset,mapper,sampler,batch_size,num_workers,collate_fn: Optional[Callable[[List[Any]], Any]] = None):
-    return build_detection_test_loader( 
+def custom_build_detection_test_loader(dataset,
+                                       mapper,
+                                       sampler,
+                                       batch_size,
+                                       num_workers,
+                                       collate_fn: Optional[Callable[[List[Any]], Any]] = None):
+    return build_detection_test_loader(
         dataset=dataset,
         mapper=mapper,
         sampler=sampler,

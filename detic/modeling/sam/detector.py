@@ -189,9 +189,11 @@ class SamDetector(GeneralizedRCNN):
             return results
         
     def forward(self, batched_inputs: List[Dict[str, torch.Tensor]]):
-        startTime = time.time()
+        # startTime = time.time()
         if not self.training:
             return self.inference(batched_inputs, do_postprocess=self.do_postprocess)
+        # batched_inputs have longes_side=1024, and prepocess need the shortest_side%32==0
+        # images.size() is origin image size
         images = self.preprocess_image(batched_inputs)
         gt_instances = [x["instances"].to(self.device) for x in batched_inputs] #instance have img_Size with longest-size = 1024
         
@@ -205,8 +207,8 @@ class SamDetector(GeneralizedRCNN):
         # proposals: List[bz * Instance[1000 * Instances(num_instances, image_height, image_width, fields=[proposal_boxes: Boxes(tensor([1,4])), objectness_logits:tensor[1],])]]
         del images
         _, detector_losses = self.roi_heads(self.sam, img_embedding_feat, fpn_features, proposals, gt_instances)
-        end_time = time.time()
-        dua_time = end_time-startTime
+        # end_time = time.time()
+        # dua_time = end_time-startTime
         # print('dua_time:',dua_time, 'device:',torch.distributed.get_rank())
         
         losses = {}
@@ -237,8 +239,84 @@ class SamDetector(GeneralizedRCNN):
         for results_per_image, input_per_image in zip(
             instances, batched_inputs
         ):
+            # height, width: input_image_sizes， 原本的 img_size
             height = input_per_image.get("height")
             width = input_per_image.get("width")
+            # results_per_image..image_size(): one is 1024
+            # the mask have zeor padding but image_size indicts that not 
             r = detector_postprocess(results_per_image, height, width, mask_threshold=mask_threshold)
             processed_results.append({"instances": r})
         return processed_results
+
+def custom_detector_postprocess(
+    results: Instances, output_height: int, output_width: int, mask_threshold: float = 0.5
+):
+    """
+    Resize the output instances.
+    The input images are often resized when entering an object detector.
+    As a result, we often need the outputs of the detector in a different
+    resolution from its inputs.
+
+    This function will resize the raw outputs of an R-CNN detector
+    to produce outputs according to the desired output resolution.
+
+    Args:
+        results (Instances): the raw outputs from the detector.
+            `results.image_size` contains the input image resolution the detector sees.
+            This object might be modified in-place.
+        output_height, output_width: the desired output resolution.
+    Returns:
+        Instances: the resized output from the model, based on the output resolution
+    """
+    if isinstance(output_width, torch.Tensor):
+        # This shape might (but not necessarily) be tensors during tracing.
+        # Converts integer tensors to float temporaries to ensure true
+        # division is performed when computing scale_x and scale_y.
+        output_width_tmp = output_width.float()
+        output_height_tmp = output_height.float()
+        new_size = torch.stack([output_height, output_width])
+    else:
+        new_size = (output_height, output_width)
+        output_width_tmp = output_width
+        output_height_tmp = output_height
+
+    results = Instances(new_size, **results.get_fields())
+    if results.has("pred_boxes"):
+        output_boxes = results.pred_boxes
+    elif results.has("proposal_boxes"):
+        output_boxes = results.proposal_boxes
+    else:
+        output_boxes = None
+    assert output_boxes is not None, "Predictions must contain boxes!"
+
+    # resize box from 
+    # output_boxes.scale(scale_x, scale_y)
+    # output_boxes.clip(results.image_size)
+
+    # results = results[output_boxes.nonempty()]
+    #1. paste mask to [1024,1024], original is [1024,1024]
+    # import ipdb; ipdb.set_trace()
+    if results.has("pred_masks"):
+        # if isinstance(results.pred_masks, ROIMasks):
+        #     roi_masks = results.pred_masks
+        # else:
+        #     # pred_masks is a tensor of shape (N, 1, M, M)
+        #     roi_masks = ROIMasks(results.pred_masks[:, 0, :, :])
+        mask_tensor = results.pred_masks
+        # mask_tensor = roi_masks.tensor
+        # results.pred_masks = roi_masks.to_bitmasks(
+        #     results.pred_boxes, 1024, 1024, mask_threshold
+        # ).tensor  # TODO return ROIMasks/BitMask object in the future
+        #2. clip up the paddings
+        mask_tensor = mask_tensor[:,:, :results.image_size[1], :results.image_size[0]]
+
+        #3. resize the box and mask, give it to the results
+        mask_tensor = F.interpolate(mask_tensor, size=new_size, mode="bilinear", align_corners=False)
+        mask_tensor = (mask_tensor>=mask_threshold).to(torch.bool)
+        # roi_masks.tensor = mask_tensor
+        # results.pred_masks = mask_tensor
+    
+    output_boxes.scale(output_width_tmp/results.image_size[1], output_height_tmp/results.image_size[0])
+    # output_boxes.clip(results.image_size)
+    # import ipdb; ipdb.set_trace()
+    return results
