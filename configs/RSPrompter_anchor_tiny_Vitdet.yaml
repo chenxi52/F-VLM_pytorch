@@ -107,7 +107,7 @@ INPUT:
   TEST_INPUT_TYPE: ResizeLongestSize
   PROMPT_SIZE: (90, 4)
   CUSTOM_AUG: ResizeLongestSize
-  FORMAT: RGB
+  FORMAT: "RGB"
   PAD_MASK: True
   MASK_PAD_VAL: 0.0
   MASK_FORMAT: "polygon"
