@@ -63,19 +63,19 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         pooler_scales     = tuple(1.0 / input_shape[k].stride for k in in_features)
         sampling_ratio    = cfg.MODEL.ROI_MASK_HEAD.POOLER_SAMPLING_RATIO
         pooler_type       = cfg.MODEL.ROI_MASK_HEAD.POOLER_TYPE
-        if cfg.MODEL.MASK_ON:
-            del ret['mask_pooler']
+        # if cfg.MODEL.MASK_ON:
+            # del ret['mask_pooler']
             
-            ret['mask_pooler'] = (
-                customRoiPooler(
-                    output_size=pooler_resolution,
-                    scales=pooler_scales,
-                    sampling_ratio=sampling_ratio,
-                    pooler_type=pooler_type,
-                )
-                if pooler_type
-                else None
-            )
+            # ret['mask_pooler'] = (
+            #     customRoiPooler(
+            #         output_size=pooler_resolution,
+            #         scales=pooler_scales,
+            #         sampling_ratio=sampling_ratio,
+            #         pooler_type=pooler_type,
+            #     )
+            #     if pooler_type
+            #     else None
+            # )
 
         del ret['box_predictor']
         # update box_predictor for bbox_loss 
@@ -114,7 +114,8 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             boxes = [i.proposal_boxes if self.training else i.pred_boxes for i in instances]
             # List[bz * List[19*Boxes, 3*Boxes]]
             features = [features[f] for f in self.mask_in_features]
-            features, mask_roi_inds = self.mask_pooler(features, boxes)
+            features = self.mask_pooler(features, boxes)
+            # mask_roi_inds = [box.tensor.size(0).to(box.device) for box in boxes]
             if features.size(0)==0:
                 results_instances = []
                 for ins in instances:
@@ -123,7 +124,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
                 return results_instances
         else:
             features = {f: features[f] for f in self.mask_in_features}
-        return self.mask_head(features, img_features, instances, mask_roi_inds, sam)
+        return self.mask_head(features, img_features, instances, sam)
 
 
     def forward( 

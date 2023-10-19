@@ -84,7 +84,6 @@ class samMaskHead(BaseMaskRCNNHead):
             roi_feature: List[torch.Tensor],
             img_features: torch.Tensor,
             instances: List[Instances],
-            mask_roi_inds: torch.Tensor,
             sam: nn.Module,
         ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -111,11 +110,12 @@ class samMaskHead(BaseMaskRCNNHead):
             point_emd.shape[0], -1, *img_features.shape[-2:]
         )
         # the index must have 
-        img_flag_ids = torch.bincount(mask_roi_inds.long())
+
+        img_flag_ids = torch.tensor([len(i) for i in instances], device=point_emd.device, dtype=torch.long)
         # print('img_flag_ids: ',img_flag_ids)
-        padding = torch.zeros((len(img_features)-len(img_flag_ids),), device=img_flag_ids.device, dtype=img_flag_ids.dtype)
+        # padding = torch.zeros((len(img_features)-len(img_flag_ids),), device=img_flag_ids.device, dtype=img_flag_ids.dtype)
         # padding: what if no_mask exist in the 
-        img_flag_ids = torch.cat([img_flag_ids, padding])
+        # img_flag_ids = torch.cat([img_flag_ids, padding])
         
         img_embeddings = torch.repeat_interleave(img_features, img_flag_ids, dim=0)
         img_pe = sam.prompt_encoder.get_dense_pe()
