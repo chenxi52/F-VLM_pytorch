@@ -228,10 +228,11 @@ def mask_rcnn_loss(pred_mask_logits: torch.Tensor, instances: List[Instances], v
         # ).to(device=pred_mask_logits.device)
         device = instances_per_image.proposal_boxes.device
         # boxes = instances_per_image.proposal_boxes.tensor.to(torch.device('cpu'))
-        gt_masks_per_image = [torch.ones(size=(len(polygons), mask_side_len, mask_side_len))
+        gt_masks_per_image = [torch.ones(size=(mask_side_len, mask_side_len))
                               for i, polygons in enumerate(instances_per_image.gt_masks.polygons)]
         # gt_masks_per_image = [torch.from_numpy(polygons_to_bitmask(copy.deepcopy(polygons), mask_side_len, mask_side_len))
         #                       for i, polygons in enumerate(instances_per_image.gt_masks.polygons)]
+        # import ipdb;ipdb.set_trace()
         if len(gt_masks_per_image) == 0:
             gt_masks_per_image = torch.empty(0, mask_side_len, mask_side_len, device=device, dtype=torch.bool)
         else:
