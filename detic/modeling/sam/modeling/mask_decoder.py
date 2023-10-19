@@ -204,7 +204,6 @@ class MaskDecoder(nn.Module):
         image_pe: torch.Tensor,
         sparse_prompt_embeddings: torch.Tensor,
         dense_prompt_embeddings: torch.Tensor,
-        res_img_feat=None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Predicts masks. See 'forward' for more details."""
         # Concatenate output tokens
@@ -229,8 +228,6 @@ class MaskDecoder(nn.Module):
         src = src.transpose(1, 2).view(b, c, h, w)
 
         # TODO: add residual image feature
-        if res_img_feat is not None:
-            src = src + res_img_feat
         upscaled_embedding = self.output_upscaling(src)
 
         hyper_in_list: List[torch.Tensor] = []

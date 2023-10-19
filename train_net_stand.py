@@ -59,9 +59,7 @@ from detic.data.custom_dataset_mapper import CustomDatasetMapper, DetrDatasetMap
 from detic.data.custom_build_augmentation import build_custom_augmentation
 from detic.custom_checkpointer import samCheckpointer
 from detic.config import add_rsprompter_config
-import warnings
- 
-warnings.filterwarnings("ignore")
+
 logger = logging.getLogger("detectron2")
 
 

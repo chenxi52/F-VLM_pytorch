@@ -121,7 +121,6 @@ class samMaskHead(BaseMaskRCNNHead):
         img_pe = sam.prompt_encoder.get_dense_pe()
         img_pe = repeat(img_pe, 'b c h w -> (b n) c h w', n=img_embeddings.shape[0])
 
-        res_img_feat = None
         # print('img_pe device:',img_pe.device,'point_emd device:',point_emd.device, )
         low_res_masks = sam.mask_decoder.forward_batch(
             image_embeddings=img_embeddings,
@@ -129,7 +128,6 @@ class samMaskHead(BaseMaskRCNNHead):
             sparse_prompt_embeddings=point_emd,
             dense_prompt_embeddings=nomask_dense_embeddings,
             multimask_output=False,
-            res_img_feat=res_img_feat,
         )
         ######################
         # Initialize the result storage lists

@@ -160,7 +160,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         img_feat_pe = self.generator_pe(mask_pe)
 
         for i in range(len(x)):
-            x[i] = x[i] + torch.nn.functional.interpolate(img_feat_pe, size=x[i].shape[-2:], mode='bilinear')
+            x[i] = x[i] + torch.nn.functional.interpolate(img_feat_pe, size=x[i].shape[-2:], mode='bilinear', align_corners=False)
         x = {list(features.keys())[i]: x[i] for i in range(len(features))}
         
         if self.training:
