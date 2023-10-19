@@ -222,11 +222,13 @@ def mask_rcnn_loss(pred_mask_logits: torch.Tensor, instances: List[Instances], v
         ).to(device=pred_mask_logits.device)
         # A tensor of shape (N, M, M), N=#instances in the image; M=mask_side_len
         gt_masks.append(gt_masks_per_image)
+    print('loss_dual_time0:', time.time()-start_)
 
     if len(gt_masks) == 0:
         return pred_mask_logits.sum() * 0
 
     gt_masks = cat(gt_masks, dim=0)
+    print('loss_dual_time1:', time.time()-start_)
 
     if cls_agnostic_mask:
         pred_mask_logits = pred_mask_logits[:, 0]
@@ -241,6 +243,7 @@ def mask_rcnn_loss(pred_mask_logits: torch.Tensor, instances: List[Instances], v
         # Here we allow gt_masks to be float as well (depend on the implementation of rasterize())
         gt_masks_bool = gt_masks > 0.5
     gt_masks = gt_masks.to(dtype=torch.float32)
+    print('loss_dual_time2:', time.time()-start_)
 
     # Log the training accuracy (using gt classes and sigmoid(0.0) == 0.5 threshold)
     mask_incorrect = (pred_mask_logits > 0.0) != gt_masks_bool
@@ -250,6 +253,7 @@ def mask_rcnn_loss(pred_mask_logits: torch.Tensor, instances: List[Instances], v
         gt_masks_bool.numel() - num_positive, 1.0
     )
     false_negative = (mask_incorrect & gt_masks_bool).sum().item() / max(num_positive, 1.0)
+    print('loss_dual_time3:', time.time()-start_)
 
     storage = get_event_storage()
     storage.put_scalar("mask_rcnn/accuracy", mask_accuracy)
@@ -262,9 +266,8 @@ def mask_rcnn_loss(pred_mask_logits: torch.Tensor, instances: List[Instances], v
         for idx, vis_mask in enumerate(vis_masks):
             vis_mask = torch.stack([vis_mask] * 3, axis=0)
             storage.put_image(name + f" ({idx})", vis_mask)
-    print('loss_dual_time1:', time.time()-start_)
+    print('loss_dual_time5:', time.time()-start_)
 
     mask_loss = F.binary_cross_entropy_with_logits(pred_mask_logits, gt_masks, reduction="mean")
-    print('loss_dual_time2:', time.time()-start_)
 
     return mask_loss
