@@ -202,11 +202,12 @@ def mask_rcnn_loss(pred_mask_logits: torch.Tensor, instances: List[Instances], v
     Returns:
         mask_loss (Tensor): A scalar tensor containing the loss.
     """
+    start_ = time.time()
     cls_agnostic_mask = pred_mask_logits.size(1) == 1
     total_num_masks = pred_mask_logits.size(0)
     mask_side_len = pred_mask_logits.size(2)
     assert pred_mask_logits.size(2) == pred_mask_logits.size(3), "Mask prediction must be square!"
-
+    
     gt_classes = []
     gt_masks = []
     for instances_per_image in instances:
@@ -261,6 +262,9 @@ def mask_rcnn_loss(pred_mask_logits: torch.Tensor, instances: List[Instances], v
         for idx, vis_mask in enumerate(vis_masks):
             vis_mask = torch.stack([vis_mask] * 3, axis=0)
             storage.put_image(name + f" ({idx})", vis_mask)
+    print('loss_dual_time1:', time.time()-start_)
 
     mask_loss = F.binary_cross_entropy_with_logits(pred_mask_logits, gt_masks, reduction="mean")
+    print('loss_dual_time2:', time.time()-start_)
+
     return mask_loss
