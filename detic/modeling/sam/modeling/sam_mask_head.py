@@ -228,15 +228,17 @@ def mask_rcnn_loss(pred_mask_logits: torch.Tensor, instances: List[Instances], v
         # ).to(device=pred_mask_logits.device)
         device = instances_per_image.proposal_boxes.device
         # boxes = instances_per_image.proposal_boxes.tensor.to(torch.device('cpu'))
-        gt_masks_per_image = [torch.from_numpy(polygons_to_bitmask(copy.deepcopy(polygons), mask_side_len, mask_side_len))
+        gt_masks_per_image = [torch.ones(size=(len(polygons), mask_side_len, mask_side_len))
                               for i, polygons in enumerate(instances_per_image.gt_masks.polygons)]
+        # gt_masks_per_image = [torch.from_numpy(polygons_to_bitmask(copy.deepcopy(polygons), mask_side_len, mask_side_len))
+        #                       for i, polygons in enumerate(instances_per_image.gt_masks.polygons)]
         if len(gt_masks_per_image) == 0:
             gt_masks_per_image = torch.empty(0, mask_side_len, mask_side_len, device=device, dtype=torch.bool)
         else:
             gt_masks_per_image = torch.stack(gt_masks_per_image, dim=0).to(device=device)
         # A tensor of shape (N, M, M), N=#instances in the image; M=mask_side_len
         gt_masks.append(gt_masks_per_image)
-    # print('loss_dual_time0:', time.time()-start_)
+    print('loss_dual_time0:', time.time()-start_)
 
     if len(gt_masks) == 0:
         return pred_mask_logits.sum() * 0
