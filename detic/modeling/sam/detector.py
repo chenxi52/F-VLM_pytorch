@@ -21,6 +21,7 @@ import ipdb
 import matplotlib.pyplot as plt
 import os
 import time
+from detectron2.modeling.roi_heads.mask_head import mask_rcnn_loss
 
 @META_ARCH_REGISTRY.register()
 class SamDetector(GeneralizedRCNN):

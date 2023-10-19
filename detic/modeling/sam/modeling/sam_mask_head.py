@@ -178,7 +178,7 @@ class samMaskHead(BaseMaskRCNNHead):
         if self.training:
             # TODO: not right
             low_res_masks = torch.nn.functional.interpolate(low_res_masks, size=(self.train_size, self.train_size), mode='bilinear', align_corners=False)
-            loss ={"loss_mask": mask_rcnn_loss(low_res_masks, instances, self.vis_period) * self.loss_weight}
+            loss ={"loss_mask": custom_mask_rcnn_loss(low_res_masks, instances, self.vis_period) * self.loss_weight}
             # print('dual_time3:', time.time()-start_time)
             return loss
         else:
@@ -187,7 +187,7 @@ class samMaskHead(BaseMaskRCNNHead):
 
 
 
-def mask_rcnn_loss(pred_mask_logits: torch.Tensor, instances: List[Instances], vis_period: int = 0):
+def custom_mask_rcnn_loss(pred_mask_logits: torch.Tensor, instances: List[Instances], vis_period: int = 0):
     """
     Compute the mask prediction loss defined in the Mask R-CNN paper.
 
@@ -233,11 +233,13 @@ def mask_rcnn_loss(pred_mask_logits: torch.Tensor, instances: List[Instances], v
         # gt_masks_per_image = [torch.from_numpy(polygons_to_bitmask(copy.deepcopy(polygons), mask_side_len, mask_side_len))
         #                       for i, polygons in enumerate(instances_per_image.gt_masks.polygons)]
         # import ipdb;ipdb.set_trace()
-        if len(gt_masks_per_image) == 0:
-            gt_masks_per_image = torch.empty(0, mask_side_len, mask_side_len, device=device, dtype=torch.bool)
-        else:
-            # gt_masks_per_image = torch.stack(gt_masks_per_image, dim=0).to(device=device)
-            gt_masks_per_image = torch.tensor(torch.ones(size=(len(instances_per_image.gt_masks.polygons), mask_side_len, mask_side_len)),device=device)
+        gt_masks_per_image = torch.tensor(torch.ones(size=(len(instances_per_image.gt_masks.polygons), mask_side_len, mask_side_len)),device=device)
+
+        # if len(gt_masks_per_image) == 0:
+        #     gt_masks_per_image = torch.empty(0, mask_side_len, mask_side_len, device=device, dtype=torch.bool)
+        # else:
+        #     gt_masks_per_image = torch.stack(gt_masks_per_image, dim=0).to(device=device)
+        
         # A tensor of shape (N, M, M), N=#instances in the image; M=mask_side_len
         gt_masks.append(gt_masks_per_image)
     print('loss_dual_time0:', time.time()-start_)
