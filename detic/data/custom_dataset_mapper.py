@@ -155,11 +155,11 @@ class CustomDatasetMapper(DatasetMapper):
                 ),  obj.get("iscrowd", 0))
                 for obj in dataset_dict.pop("annotations")
             ]
+
             annos = [ann[0] for ann in all_annos if ann[1] == 0]
             instances = utils.annotations_to_instances(
                 annos, image_shape, mask_format=self.instance_mask_format
             )
-            
             del all_annos
             if self.recompute_boxes:
                 instances.gt_boxes = instances.gt_masks.get_bounding_boxes()
@@ -352,10 +352,11 @@ class SamDatasetMapper(DatasetMapper):
             for obj in dataset_dict.pop("annotations")
             if obj.get("iscrowd", 0) == 0
         ]
-        instances = utils.annotations_to_instances(
+
+        # pad the instances.gt_mask
+        instances = self.annotations_to_instances(
             annos, image_shape, mask_format=self.instance_mask_format
         )
-        
         del annos
         # After transforms such as cropping are applied, the bounding box may no longer
         # tightly bound the object. As an example, imagine a triangle object
@@ -368,107 +369,69 @@ class SamDatasetMapper(DatasetMapper):
         instances = utils.filter_empty_instances(instances, by_mask=False)
         dataset_dict["instances"] = utils.filter_empty_instances(instances, by_box=False)
         # return dataset_dict
-    
-    # def test_transform_anno(self, dataset_dict, transforms, image_shape):
-    #     # USER: Modify this if you want to keep them for some reason.
-    #     for anno in dataset_dict["annotations"]:
-    #         if not self.use_instance_mask:
-    #             anno.pop("segmentation", None)
-    #         if not self.use_keypoint:
-    #             anno.pop("keypoints", None)
 
-    #     # USER: Implement additional transformations if you have other types of data
-    #     annos = [
-    #         self.instance_annotations(
-    #             obj, image_shape
-    #         )
-    #         for obj in dataset_dict.pop("annotations")
-    #         if obj.get("iscrowd", 0) == 0
-    #     ]
-    #     instances = utils.annotations_to_instances(
-    #         annos, image_shape, mask_format=self.instance_mask_format
-    #     )
-        
-    #     # After transforms such as cropping are applied, the bounding box may no longer
-    #     # tightly bound the object. As an example, imagine a triangle object
-    #     # [(0,0), (2,0), (0,2)] cropped by a box [(1,0),(2,2)] (XYXY format). The tight
-    #     # bounding box of the cropped triangle should be [(1,0),(2,1)], which is not equal to
-    #     # the intersection of original bounding box and the cropping box.
-    #     if self.recompute_boxes:
-    #         instances.gt_boxes = instances.gt_masks.get_bounding_boxes()
+    def annotations_to_instances(self, annos, image_size, mask_format="polygon"):
+        """
+        Create an :class:`Instances` object used by the models,
+        from instance annotations in the dataset dict.
+        """
+        boxes = (
+            np.stack(
+                [BoxMode.convert(obj["bbox"], obj["bbox_mode"], BoxMode.XYXY_ABS) for obj in annos]
+            )
+            if len(annos)
+            else np.zeros((0, 4))
+        )
+        target = Instances(image_size)
+        target.gt_boxes = Boxes(boxes)
 
-    #     instances = self.filter_empty_instances(instances, by_mask=False)
-    #     dataset_dict["instances"] = self.filter_empty_instances(instances, by_box=False)
-    #     # filter out indtances without 'gt_maks'
-    #     return dataset_dict
-    
-    # def filter_empty_instances(self,
-    #     instances, by_box=True, by_mask=True, box_threshold=1e-5, return_mask=False
-    # ):
-    #     """
-    #     Filter out empty instances in an `Instances` object.
+        classes = [int(obj["category_id"]) for obj in annos]
+        classes = torch.tensor(classes, dtype=torch.int64)
+        target.gt_classes = classes
 
-    #     Args:
-    #         instances (Instances):
-    #         by_box (bool): whether to filter out instances with empty boxes
-    #         by_mask (bool): whether to filter out instances with empty masks
-    #         box_threshold (float): minimum width and height to be considered non-empty
-    #         return_mask (bool): whether to return boolean mask of filtered instances
+        if len(annos) and "segmentation" in annos[0]:
+            segms = [obj["segmentation"] for obj in annos]
+            if mask_format == "polygon":
+                try:
+                    masks = PolygonMasks(segms)
+                except ValueError as e:
+                    raise ValueError(
+                        "Failed to use mask_format=='polygon' from the given annotations!"
+                    ) from e
+            else:
+                assert mask_format == "bitmask", mask_format
+                masks = []
+                for segm in segms:
+                    if isinstance(segm, list):
+                        # polygon
+                        # pad the bitmask
+                        np_mask = polygons_to_bitmask(segm, *image_size)
+                        np_mask = np.pad(np_mask, ((0, 1024 - np_mask.shape[0]), (0, 1024 - np_mask.shape[1])), mode='constant')
+                        masks.append(np_mask)
+                    elif isinstance(segm, dict):
+                        # COCO RLE
+                        masks.append(mask_util.decode(segm))
+                    elif isinstance(segm, np.ndarray):
+                        assert segm.ndim == 2, "Expect segmentation of 2 dimensions, got {}.".format(
+                            segm.ndim
+                        )
+                        # mask array
+                        masks.append(segm)
+                    else:
+                        raise ValueError(
+                            "Cannot convert segmentation of type '{}' to BitMasks!"
+                            "Supported types are: polygons as list[list[float] or ndarray],"
+                            " COCO-style RLE as a dict, or a binary segmentation mask "
+                            " in a 2D numpy array of shape HxW.".format(type(segm))
+                        )
+                # torch.from_numpy does not support array with negative stride.
+                masks = BitMasks(
+                    torch.stack([torch.from_numpy(np.ascontiguousarray(x)) for x in masks])
+                )
+            target.gt_masks = masks
 
-    #     Returns:
-    #         Instances: the filtered instances.
-    #         tensor[bool], optional: boolean mask of filtered instances
-    #     """
-    #     assert by_box or by_mask
-    #     r = []
-    #     if by_box:
-    #         r.append(instances.gt_boxes.nonempty(threshold=box_threshold))
-    #     if instances.has("gt_masks") and by_mask:
-    #         r.append(instances.gt_masks.nonempty())
-        
-    #     # TODO: can also filter visible keypoints
+        if len(annos) and "keypoints" in annos[0]:
+            kpts = [obj.get("keypoints", []) for obj in annos]
+            target.gt_keypoints = Keypoints(kpts)
 
-    #     if not r:
-    #         return instances
-    #     m = r[0]
-    #     for x in r[1:]:
-    #         m = m & x
-    #     if return_mask:
-    #         return instances[m], m
-    #     return instances[m]
-    
-
-    # def instance_annotations(self,
-    #     annotation, image_size, 
-    # ):
-       
-    #     # bbox is 1d (per-instance bounding box)
-    #     bbox = BoxMode.convert(annotation["bbox"], annotation["bbox_mode"], BoxMode.XYXY_ABS)
-    #     # clip transformed bbox to image size
-    #     annotation["bbox"] = np.minimum(bbox, list(image_size + image_size)[::-1])
-    #     annotation["bbox_mode"] = BoxMode.XYXY_ABS
-
-    #     if "segmentation" in annotation:
-    #         # each instance contains 1 or more polygons
-    #         segm = annotation["segmentation"]
-    #         if isinstance(segm, list):
-    #             # polygons
-    #             polygons = [np.asarray(p).reshape(-1, 2) for p in segm]
-    #             annotation["segmentation"] = [
-    #                 p.reshape(-1) for p in polygons
-    #             ]
-    #         elif isinstance(segm, dict):
-    #             # RLE
-    #             mask = mask_util.decode(segm)
-    #             assert tuple(mask.shape[:2]) == image_size
-    #             annotation["segmentation"] = mask
-    #         else:
-    #             raise ValueError(
-    #                 "Cannot transform segmentation of type '{}'!"
-    #                 "Supported types are: polygons as list[list[float] or ndarray],"
-    #                 " COCO-style RLE as a dict.".format(type(segm))
-    #             )
-
-    #     return annotation
-
-   
+        return target
