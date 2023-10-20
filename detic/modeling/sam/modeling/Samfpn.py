@@ -193,8 +193,6 @@ class SAMAggregatorNeck(Backbone):
                 mapping from feature map name to FPN feature map tensor
                 in high to low resolution order. 
         """
-        # import ipdb; ipdb.set_trace()
-
         inner_states = [einops.rearrange(features[idx], 'b h w c -> b c h w') for idx in self.selected_channels]
         inner_states = [layer(x) for layer, x in zip(self.down_sample_layers, inner_states)]
         #channel reduce
@@ -299,7 +297,6 @@ class SAMVitDet(SAMAggregatorNeck):
                 mapping from feature map name to FPN feature map tensor
                 in high to low resolution order. 
         """
-        # import ipdb; ipdb.set_trace()
         feature_list = []
         for i in range(len(self.ops)):
             feature_list.append(self.ops[i](features))

@@ -181,7 +181,6 @@ def do_train(cfg, model, resume=False):
     logger.info("Starting training from iteration {}".format(start_iter))
     with EventStorage(start_iter) as storage:
         for data, iteration in zip(data_loader, range(start_iter, max_iter)):
-            # import ipdb;ipdb.set_trace()
             storage.iter = iteration
 
             loss_dict = model(data)

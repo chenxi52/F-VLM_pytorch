@@ -103,9 +103,7 @@ class samMaskHead(BaseMaskRCNNHead):
             A dict of losses in training. The predicted "instances" in inference(List[Dict['instances': Instances]]).
         """
         batch_size = roi_feature.shape[0]
-        # start_time = time.time()
         point_emd = self.point_emb(roi_feature) #prompt head 
-        # print('dual_time1:', time.time()-start_time)
         point_emd = point_emd.view(batch_size, self.per_query_point, -1)
         if self.with_sincos: 
             point_emd = torch.sin(point_emd[..., ::2] + point_emd[..., 1::2])
@@ -113,21 +111,15 @@ class samMaskHead(BaseMaskRCNNHead):
         nomask_dense_embeddings = sam.prompt_encoder.no_mask_embed.weight.reshape(1, -1, 1, 1).expand(
             point_emd.shape[0], -1, *img_features.shape[-2:]
         )
-        # the index must have 
-        # print('dual_time2:', time.time()-start_time)
-
         img_flag_ids = torch.tensor([len(i) for i in instances], device=point_emd.device, dtype=torch.long)
-        # print('img_flag_ids: ',img_flag_ids)
-        # padding = torch.zeros((len(img_features)-len(img_flag_ids),), device=img_flag_ids.device, dtype=img_flag_ids.dtype)
+        padding = torch.zeros((len(img_features)-len(img_flag_ids),), device=img_flag_ids.device, dtype=img_flag_ids.dtype)
         # padding: what if no_mask exist in the 
-        # img_flag_ids = torch.cat([img_flag_ids, padding])
+        img_flag_ids = torch.cat([img_flag_ids, padding])
         
         img_embeddings = torch.repeat_interleave(img_features, img_flag_ids, dim=0)
         img_pe = sam.prompt_encoder.get_dense_pe()
         img_pe = repeat(img_pe, 'b c h w -> (b n) c h w', n=img_embeddings.shape[0])
-        # print('dual_time3:', time.time()-start_time)
 
-        # print('img_pe device:',img_pe.device,'point_emd device:',point_emd.device, )
         low_res_masks = sam.mask_decoder.forward_batch(
             image_embeddings=img_embeddings,
             image_pe=img_pe,
@@ -135,7 +127,6 @@ class samMaskHead(BaseMaskRCNNHead):
             dense_prompt_embeddings=nomask_dense_embeddings,
             multimask_output=False,
         )
-        # print('dual_time2:', time.time()-start_time)
 
         ######################
         # Initialize the result storage lists
@@ -178,9 +169,7 @@ class samMaskHead(BaseMaskRCNNHead):
         if self.training:
             # TODO: not right
             low_res_masks = torch.nn.functional.interpolate(low_res_masks, size=(self.train_size, self.train_size), mode='bilinear', align_corners=False)
-            # import ipdb;ipdb.set_trace()
             loss ={"loss_mask": custom_mask_rcnn_loss(low_res_masks, instances, self.vis_period) * self.loss_weight}
-            # print('dual_time3:', time.time()-start_time)
             return loss
         else:
             mask_rcnn_inference(low_res_masks, instances)
@@ -206,18 +195,12 @@ def custom_mask_rcnn_loss(pred_mask_logits: torch.Tensor, instances: List[Instan
     Returns:
         mask_loss (Tensor): A scalar tensor containing the loss.
     """
-    # start_ = time.time()
     cls_agnostic_mask = pred_mask_logits.size(1) == 1
     total_num_masks = pred_mask_logits.size(0)
-    # mask_side_len = pred_mask_logits.size(2)
     mask_side_len = 1024
-    # assert pred_mask_logits.size(2) == pred_mask_logits.size(3), "Mask prediction must be square!"
-    # print('loss_dual_time1:', time.time()-start_)
     
     gt_classes = []
     gt_masks = []
-    # import ipdb;ipdb.set_trace()
-    # store the gt_mask to gpu first 
     for instances_per_image in instances:
         if len(instances_per_image) == 0:
             continue
@@ -228,31 +211,14 @@ def custom_mask_rcnn_loss(pred_mask_logits: torch.Tensor, instances: List[Instan
         gt_masks_per_image = instances_per_image.gt_masks.crop_and_resize(
             instances_per_image.proposal_boxes.tensor, mask_side_len
         ).to(device=pred_mask_logits.device)
-        ########
-        # device = instances_per_image.proposal_boxes.device
-        # # boxes = instances_per_image.proposal_boxes.tensor.to(torch.device('cpu'))
-        # # gt_masks_per_image = [torch.ones(size=(mask_side_len, mask_side_len))
-        # #                       for i, polygons in enumerate(instances_per_image.gt_masks.polygons)]
-        # # import ipdb;ipdb.set_trace()
-        # gt_masks_per_image = [torch.from_numpy(polygons_to_bitmask(copy.deepcopy(polygons), mask_side_len, mask_side_len))
-                            #   for i, polygons in enumerate(instances_per_image.gt_masks.polygons)]
-        # import ipdb;ipdb.set_trace()
-        # gt_masks_per_image = torch.tensor(torch.ones(size=(len(instances_per_image.gt_masks.polygons), mask_side_len, mask_side_len)),device=device)
-       
-        # if len(gt_masks_per_image) == 0:
-        #     gt_masks_per_image = torch.empty(0, mask_side_len, mask_side_len, device=device, dtype=torch.bool)
-        # else:
-        #     gt_masks_per_image = torch.stack(gt_masks_per_image, dim=0).to(device=device)
-        #########
+      
         # A tensor of shape (N, M, M), N=#instances in the image; M=mask_side_len
         gt_masks.append(gt_masks_per_image)
-    # print('loss_dual_time0:', time.time()-start_)
 
     if len(gt_masks) == 0:
         return pred_mask_logits.sum() * 0
 
     gt_masks = cat(gt_masks, dim=0)
-    # print('loss_dual_time1:', time.time()-start_)
 
     if cls_agnostic_mask:
         pred_mask_logits = pred_mask_logits[:, 0]
@@ -267,7 +233,6 @@ def custom_mask_rcnn_loss(pred_mask_logits: torch.Tensor, instances: List[Instan
         # Here we allow gt_masks to be float as well (depend on the implementation of rasterize())
         gt_masks_bool = gt_masks > 0.5
     gt_masks = gt_masks.to(dtype=torch.float32)
-    # print('loss_dual_time2:', time.time()-start_)
 
     # Log the training accuracy (using gt classes and sigmoid(0.0) == 0.5 threshold)
     mask_incorrect = (pred_mask_logits > 0.0) != gt_masks_bool
@@ -277,7 +242,6 @@ def custom_mask_rcnn_loss(pred_mask_logits: torch.Tensor, instances: List[Instan
         gt_masks_bool.numel() - num_positive, 1.0
     )
     false_negative = (mask_incorrect & gt_masks_bool).sum().item() / max(num_positive, 1.0)
-    # print('loss_dual_time3:', time.time()-start_)
 
     storage = get_event_storage()
     storage.put_scalar("mask_rcnn/accuracy", mask_accuracy)
@@ -290,7 +254,6 @@ def custom_mask_rcnn_loss(pred_mask_logits: torch.Tensor, instances: List[Instan
         for idx, vis_mask in enumerate(vis_masks):
             vis_mask = torch.stack([vis_mask] * 3, axis=0)
             storage.put_image(name + f" ({idx})", vis_mask)
-    # print('loss_dual_time5:', time.time()-start_)
 
     mask_loss = F.binary_cross_entropy_with_logits(pred_mask_logits, gt_masks, reduction="mean")
 

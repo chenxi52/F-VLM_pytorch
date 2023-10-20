@@ -91,7 +91,6 @@ class SamDetector(GeneralizedRCNN):
         images = self.preprocess_image(batched_inputs) #padding and size_divisiable
         img_embedding_feat, inter_feats = self.extract_feat(images.tensor)
         #########################
-        # import ipdb; ipdb.set_trace()
         # gt_instances = [x["instances"].to(self.device) for x in batched_inputs] #instance have img_Size with longest-size = 1024
         # boxes_prompt = gt_instances[0].get("gt_boxes")
         # #sam 
@@ -190,7 +189,6 @@ class SamDetector(GeneralizedRCNN):
             return results
         
     def forward(self, batched_inputs: List[Dict[str, torch.Tensor]]):
-        # startTime = time.time()
         if not self.training:
             return self.inference(batched_inputs, do_postprocess=self.do_postprocess)
         # batched_inputs have longes_side=1024, and prepocess need the shortest_side%32==0
@@ -205,12 +203,8 @@ class SamDetector(GeneralizedRCNN):
         proposals, proposal_losses = self.proposal_generator(
             images, fpn_features, gt_instances)
         # proposals:max(h,w)=1024,  gt_instance:max(h,w)=1024
-        # proposals: List[bz * Instance[1000 * Instances(num_instances, image_height, image_width, fields=[proposal_boxes: Boxes(tensor([1,4])), objectness_logits:tensor[1],])]]
         del images
         _, detector_losses = self.roi_heads(self.sam, img_embedding_feat, fpn_features, proposals, gt_instances)
-        # end_time = time.time()
-        # dua_time = end_time-startTime
-        # print('dua_time:',dua_time, 'device:',torch.distributed.get_rank())
         
         losses = {}
         losses.update(detector_losses)
@@ -296,7 +290,6 @@ def custom_detector_postprocess(
 
     # results = results[output_boxes.nonempty()]
     #1. paste mask to [1024,1024], original is [1024,1024]
-    # import ipdb; ipdb.set_trace()
     if results.has("pred_masks"):
         # if isinstance(results.pred_masks, ROIMasks):
         #     roi_masks = results.pred_masks
@@ -319,5 +312,4 @@ def custom_detector_postprocess(
     
     output_boxes.scale(output_width_tmp/results.image_size[1], output_height_tmp/results.image_size[0])
     # output_boxes.clip(results.image_size)
-    # import ipdb; ipdb.set_trace()
     return results

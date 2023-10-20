@@ -110,7 +110,7 @@ INPUT:
   FORMAT: "RGB"
   PAD_MASK: True
   MASK_PAD_VAL: 0.0
-  MASK_FORMAT: "polygon"
+  MASK_FORMAT: "bitmask"
 TEST:
   DETECTIONS_PER_IMAGE: 300  #test_topk_per_image
   MASK_THR_BINARY: 0.5  
