@@ -299,7 +299,6 @@ class SamDatasetMapper(DatasetMapper):
         # USER: Write your own image loading if it's not from a file
         image = utils.read_image(dataset_dict["file_name"], format=self.image_format)
         utils.check_image_size(dataset_dict, image)
-        import ipdb;ipdb.set_trace()
         # USER: Remove if you don't do semantic/panoptic segmentation.
         if "sem_seg_file_name" in dataset_dict:
             sem_seg_gt = utils.read_image(dataset_dict.pop("sem_seg_file_name"), "L").squeeze(2)
