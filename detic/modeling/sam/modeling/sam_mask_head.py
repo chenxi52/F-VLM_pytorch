@@ -238,12 +238,12 @@ def custom_mask_rcnn_loss(pred_mask_logits: torch.Tensor, instances: List[Instan
                             #   for i, polygons in enumerate(instances_per_image.gt_masks.polygons)]
         # import ipdb;ipdb.set_trace()
         # gt_masks_per_image = torch.tensor(torch.ones(size=(len(instances_per_image.gt_masks.polygons), mask_side_len, mask_side_len)),device=device)
+       
+        # if len(gt_masks_per_image) == 0:
+        #     gt_masks_per_image = torch.empty(0, mask_side_len, mask_side_len, device=device, dtype=torch.bool)
+        # else:
+        #     gt_masks_per_image = torch.stack(gt_masks_per_image, dim=0).to(device=device)
         #########
-        if len(gt_masks_per_image) == 0:
-            gt_masks_per_image = torch.empty(0, mask_side_len, mask_side_len, device=device, dtype=torch.bool)
-        else:
-            gt_masks_per_image = torch.stack(gt_masks_per_image, dim=0).to(device=device)
-        
         # A tensor of shape (N, M, M), N=#instances in the image; M=mask_side_len
         gt_masks.append(gt_masks_per_image)
     # print('loss_dual_time0:', time.time()-start_)
