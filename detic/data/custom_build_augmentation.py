@@ -1,6 +1,6 @@
 # Copyright (c) Facebook, Inc. and its affiliates.
 from detectron2.data import transforms as T
-from .transforms.custom_augmentation_impl import EfficientDetResizeCrop, ResizeLongestSizeFlip, HFlipMaskAug
+from .transforms.custom_augmentation_impl import EfficientDetResizeCrop, ResizeLongestSizeFlip
 
 def build_custom_augmentation(cfg, is_train, scale=None, size=None, \
     min_size=None, max_size=None):
