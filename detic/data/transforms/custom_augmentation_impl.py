@@ -21,7 +21,7 @@ from detectron2.data.transforms import ResizeTransform
 from .custom_transform import EfficientDetResizeCropTransform
 from typing import Tuple
 __all__ = [
-    "EfficientDetResizeCrop",
+    "EfficientDetResizeCrop","ResizeLongestSizeFlip"
 ]
 # Augmentation return transforms
 class EfficientDetResizeCrop(T.Augmentation):
@@ -86,25 +86,3 @@ class ResizeLongestSizeFlip(T.Augmentation):
         neww = int(neww + 0.5)
         newh = int(newh + 0.5)
         return (newh, neww)
-
-# class PadAug(T.Augmentation):
-#     def __init__(self, target_size) -> None:
-#         super().__init__()
-#         self.target_size = target_size
-
-#     def get_transform(self, img) -> Transform:
-#         width, height = img.shape[1], img.shape[0]
-#         return PadTransform(height, width, self.target_size)
-
-# class HFlipMaskAug(T.RandomFlip):
-#     def __init__(self, prob=0.5, *, horizontal=True, vertical=False):
-#         super().__init__(prob, horizontal=horizontal, vertical=vertical)
-    
-#     def get_transform(self, image):
-#         h, w = image.shape[:2]
-#         do = self._rand_range() < self.prob
-#         if do:
-#             return HFlipTransform(w)
-#         else:
-#             return NoOpTransform()
-            
