@@ -83,7 +83,7 @@ DATASETS:
   TEST: ("coco_2017_val",)
 DATALOADER:
   NUM_WORKERS: 16 # num_workers == batchsize_per_gpu
-  PERSISTENT_WORKERS: True 
+  # PERSISTENT_WORKERS: True 
 SOLVER:
   IMS_PER_BATCH: 16  # change  # max 8 imgs per batch
   BASE_LR: 0.0002  # change0.000025
@@ -95,7 +95,7 @@ SOLVER:
   LR_SCHEDULER_NAME: "WarmupMultiStepLR"
   WEIGHT_DECAY: 0.001  
   MAX_ITER: 90000
-  CHECKPOINT_PERIOD: 5000  #  change
+  CHECKPOINT_PERIOD: 20  #  change
   USE_CUSTOM_SOLVER: True
   OPTIMIZER: 'ADAMW'
   LOGGER_FREQ: 20  # the output freq of logger writer
@@ -119,4 +119,4 @@ TEST:
   IMS_PER_BATCH: 2 #every gpu has most 2 images  # change
 VERSION: 2
 FP16: True
-OUTPUT_DIR: './output/with_mask_with_prompt_encoder_roi_head_withgrad_baseline_frozen_mask_decoder'
+OUTPUT_DIR: './output/full_tune_tiny'

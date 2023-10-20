@@ -111,7 +111,7 @@ INPUT:
   FORMAT: RGB
   PAD_MASK: True
   MASK_PAD_VAL: 0.0
-  MASK_FORMAT: polygon
+  MASK_FORMAT: bitmask
 TEST:
   DETECTIONS_PER_IMAGE: 300  #test_topk_per_image
   MASK_THR_BINARY: 0.5  
@@ -120,4 +120,4 @@ TEST:
   IMS_PER_BATCH: 2 #every gpu has most 2 images  # change
 VERSION: 2
 FP16: True
-OUTPUT_DIR: './output/full_optimize_wo_mask_768'
+OUTPUT_DIR: './output/full_optimize_w_mask'

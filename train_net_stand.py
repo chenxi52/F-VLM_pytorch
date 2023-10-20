@@ -154,7 +154,7 @@ def do_train(cfg, model, resume=False):
     max_iter = cfg.SOLVER.MAX_ITER
 
     periodic_checkpointer = PeriodicCheckpointer(
-        checkpointer, cfg.SOLVER.CHECKPOINT_PERIOD, max_iter=max_iter
+        checkpointer, cfg.SOLVER.CHECKPOINT_PERIOD, max_iter=max_iter, max_to_keep=1
     )
 
     # writers = default_writers(cfg.OUTPUT_DIR, max_iter) if comm.is_main_process() else []
