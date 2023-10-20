@@ -5,6 +5,7 @@
 # The original code is under Apache-2.0 License
 import numpy as np
 import sys
+import torch
 from fvcore.transforms.transform import (
     BlendTransform,
     CropTransform,
@@ -17,7 +18,7 @@ from PIL import Image
 
 import detectron2.data.transforms as T
 from detectron2.data.transforms import ResizeTransform
-from .custom_transform import EfficientDetResizeCropTransform, ResizeSegTransform, HFlipPassTransform, PadTransform
+from .custom_transform import EfficientDetResizeCropTransform
 from typing import Tuple
 __all__ = [
     "EfficientDetResizeCrop",
@@ -62,24 +63,19 @@ class EfficientDetResizeCrop(T.Augmentation):
 
 
 class ResizeLongestSizeFlip(T.Augmentation):
-
-    def __init__(self, size, pad_mask, mask_pad_val, interp=Image.BILINEAR, training=True, flip_prob:float=0.5) -> None:
+    @torch.jit.unused
+    def __init__(self, longest_length,interp=Image.BILINEAR) -> None:
         super().__init__()
-        self.target_size = (size, size)
-        self.interp = interp
-        self.pad_mask = pad_mask
-        self.mask_pad_val = mask_pad_val
-        self.training = training 
-        self.flip_prob = flip_prob
+        self._init(locals())
 
+    @torch.jit.unused
     def get_transform(self,img):
         width, height = img.shape[1], img.shape[0]
-        target_size, img_scale = self.get_preprocess_shape(height, width, self.target_size[0])
-        scaled_h, scaled_w = target_size
-        return ResizeSegTransform(height, width, scaled_h, scaled_w, self.interp)
-
+        scaled_h, scaled_w = self.get_output_shape(height, width, self.longest_length)
+        return ResizeTransform(height, width, scaled_h, scaled_w, self.interp)
+    
     @staticmethod
-    def get_preprocess_shape(
+    def get_output_shape(
         oldh: int, oldw: int, long_side_length: int
     ) -> Tuple[int, int]:
         """
@@ -89,26 +85,26 @@ class ResizeLongestSizeFlip(T.Augmentation):
         newh, neww = oldh * scale, oldw * scale
         neww = int(neww + 0.5)
         newh = int(newh + 0.5)
-        return (newh, neww), scale
+        return (newh, neww)
 
-class PadAug(T.Augmentation):
-    def __init__(self, target_size) -> None:
-        super().__init__()
-        self.target_size = target_size
+# class PadAug(T.Augmentation):
+#     def __init__(self, target_size) -> None:
+#         super().__init__()
+#         self.target_size = target_size
 
-    def get_transform(self, img) -> Transform:
-        width, height = img.shape[1], img.shape[0]
-        return PadTransform(height, width, self.target_size)
+#     def get_transform(self, img) -> Transform:
+#         width, height = img.shape[1], img.shape[0]
+#         return PadTransform(height, width, self.target_size)
 
-class HFlipMaskAug(T.RandomFlip):
-    def __init__(self, prob=0.5, *, horizontal=True, vertical=False):
-        super().__init__(prob, horizontal=horizontal, vertical=vertical)
+# class HFlipMaskAug(T.RandomFlip):
+#     def __init__(self, prob=0.5, *, horizontal=True, vertical=False):
+#         super().__init__(prob, horizontal=horizontal, vertical=vertical)
     
-    def get_transform(self, image):
-        h, w = image.shape[:2]
-        do = self._rand_range() < self.prob
-        if do:
-            return HFlipPassTransform(w)
-        else:
-            return NoOpTransform()
+#     def get_transform(self, image):
+#         h, w = image.shape[:2]
+#         do = self._rand_range() < self.prob
+#         if do:
+#             return HFlipTransform(w)
+#         else:
+#             return NoOpTransform()
             

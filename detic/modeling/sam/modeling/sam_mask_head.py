@@ -178,6 +178,7 @@ class samMaskHead(BaseMaskRCNNHead):
         if self.training:
             # TODO: not right
             low_res_masks = torch.nn.functional.interpolate(low_res_masks, size=(self.train_size, self.train_size), mode='bilinear', align_corners=False)
+            import ipdb;ipdb.set_trace()
             loss ={"loss_mask": custom_mask_rcnn_loss(low_res_masks, instances, self.vis_period) * self.loss_weight}
             # print('dual_time3:', time.time()-start_time)
             return loss

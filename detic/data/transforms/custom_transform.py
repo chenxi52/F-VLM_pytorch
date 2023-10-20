@@ -114,30 +114,30 @@ class EfficientDetResizeCropTransform(Transform):
         trans_boxes = np.concatenate((minxy, maxxy), axis=1)
         return trans_boxes
     
-class ResizeSegTransform(ResizeTransform):
-    def __init__(self, h, w, new_h, new_w, interp=None):
-        super().__init__(h, w, new_h, new_w, interp)
+# class ResizeSegTransform(ResizeTransform):
+#     def __init__(self, h, w, new_h, new_w, interp=None):
+#         super().__init__(h, w, new_h, new_w, interp)
 
-    def apply_mask(self, mask):
-        # pad mask to fit self.target_size
-        return mask
+#     def apply_mask(self, mask):
+#         # pad mask to fit self.target_size
+#         return mask
 
 
-class HFlipPassTransform(HFlipTransform):
-    def __init__(self, width: int):
-        super().__init__(width)
+# class HFlipPassTransform(HFlipTransform):
+#     def __init__(self, width: int):
+#         super().__init__(width)
     
-    def apply_mask(self, mask):
-        return mask
+#     def apply_mask(self, mask):
+#         return mask
 
-class PadTransform(NoOpTransform):
-    def __init__(self, new_h, new_w, target_size):
-        super().__init__()
-        self._set_attributes(locals())
+# class PadTransform(NoOpTransform):
+#     def __init__(self, new_h, new_w, target_size):
+#         super().__init__()
+#         self._set_attributes(locals())
         
-    def apply_mask(self, mask):
-        mask = mask.astype(np.uint8)
-        assert mask.shape[:2] == (self.new_h, self.new_w), f'mask.shape: {mask.shape}; (new_h, new_w):({self.new_h, self.new_w})'
-        mask = np.concatenate((mask, np.zeros((self.target_size[0]-self.new_h, self.new_w), dtype=np.uint8)), axis=0)
-        mask = np.concatenate((mask, np.zeros((self.target_size[0], self.target_size[1]-self.new_w), dtype=np.uint8)), axis=1)
-        return mask
+#     def apply_mask(self, mask):
+#         mask = mask.astype(np.uint8)
+#         assert mask.shape[:2] == (self.new_h, self.new_w), f'mask.shape: {mask.shape}; (new_h, new_w):({self.new_h, self.new_w})'
+#         mask = np.concatenate((mask, np.zeros((self.target_size[0]-self.new_h, self.new_w), dtype=np.uint8)), axis=0)
+#         mask = np.concatenate((mask, np.zeros((self.target_size[0], self.target_size[1]-self.new_w), dtype=np.uint8)), axis=1)
+#         return mask

@@ -1,15 +1,6 @@
 # Copyright (c) Facebook, Inc. and its affiliates.
-import logging
-import numpy as np
-import pycocotools.mask as mask_util
-import torch
-from fvcore.common.file_io import PathManager
-from PIL import Image
-
-
 from detectron2.data import transforms as T
-from .transforms.custom_augmentation_impl import EfficientDetResizeCrop, ResizeLongestSizeFlip, PadAug, HFlipMaskAug
-
+from .transforms.custom_augmentation_impl import EfficientDetResizeCrop, ResizeLongestSizeFlip, HFlipMaskAug
 
 def build_custom_augmentation(cfg, is_train, scale=None, size=None, \
     min_size=None, max_size=None):
@@ -43,11 +34,9 @@ def build_custom_augmentation(cfg, is_train, scale=None, size=None, \
             size = cfg.INPUT.TRAIN_SIZE
         else:
             size = cfg.INPUT.TEST_SIZE 
-        pad_mask = cfg.INPUT.PAD_MASK
-        mask_pad_val = cfg.INPUT.MASK_PAD_VAL
-        augmentation = [ResizeLongestSizeFlip(size=size, pad_mask=pad_mask, mask_pad_val=mask_pad_val, training=is_train)]
+        augmentation = [ResizeLongestSizeFlip(longest_length = size)]
         if is_train:
-            augmentation.append(HFlipMaskAug(horizontal=True))
+            augmentation.append(T.RandomFlip(prob=0.5))
     elif cfg.INPUT.CUSTOM_AUG == 'ResizeFlip':
         if is_train:
             size = cfg.INPUT.TRAIN_SIZE
