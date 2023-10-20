@@ -61,6 +61,8 @@ from detic.data.custom_dataset_mapper import CustomDatasetMapper, DetrDatasetMap
 from detic.data.custom_build_augmentation import build_custom_augmentation
 from detic.custom_checkpointer import samCheckpointer
 from detic.config import add_rsprompter_config
+from detectron2.utils.logger import setup_logger
+from detic.custom_solver import build_sam_optimizer
 
 logger = logging.getLogger("detectron2")
 
@@ -130,7 +132,15 @@ def do_test(cfg, model):
 
 def do_train(cfg, model, resume=False):
     model.train()
-    optimizer = build_optimizer(cfg, model)
+    if cfg.SOLVER.USE_CUSTOM_SOLVER:
+        # also set requires_grad for module
+        optimizer = build_sam_optimizer(cfg, model)
+    else:
+        assert cfg.SOLVER.OPTIMIZER == 'SGD'
+        assert cfg.SOLVER.CLIP_GRADIENTS.CLIP_TYPE != 'full_model'
+        assert cfg.SOLVER.BACKBONE_MULTIPLIER == 1.
+        optimizer = build_optimizer(cfg, model)
+        
     scheduler = build_lr_scheduler(cfg, optimizer)
 
     # checkpointer = DetectionCheckpointer(
@@ -176,8 +186,8 @@ def do_train(cfg, model, resume=False):
                 cfg, True, augmentations=build_custom_augmentation(cfg, True))
     #####
     
-    data_loader = custom_build_detection_train_loader(cfg, mapper=mapper)
-    
+    data_loader = build_detection_train_loader(cfg, mapper=mapper)
+
     logger.info("Starting training from iteration {}".format(start_iter))
     with EventStorage(start_iter) as storage:
         for data, iteration in zip(data_loader, range(start_iter, max_iter)):
@@ -227,12 +237,13 @@ def setup(args):
     default_setup(
         cfg, args
     )  # if you don't like any of the default setup, write your own setup code
+    setup_logger(output=cfg.OUTPUT_DIR, \
+        distributed_rank=comm.get_rank(), name="detic")
     return cfg
 
 
 def main(args):
     cfg = setup(args)
-
     model = build_model(cfg)
     logger.info("Model:\n{}".format(model))
     if args.eval_only:

@@ -86,11 +86,10 @@ def build_sam_optimizer(cfg: CfgNode, model: torch.nn.Module) -> torch.optim.Opt
     memo: Set[torch.nn.parameter.Parameter] = set()
     optimizer_type = cfg.SOLVER.OPTIMIZER
 
-    # print(f'all Params: ')
     for key, value in model.named_parameters(recurse=True):
-        if not value.requires_grad:
-            continue
-        # Avoid duplicating parameters
+        # if not value.requires_grad:
+        #     continue
+        # # Avoid duplicating parameters
         if value in memo:
             continue
         memo.add(value)

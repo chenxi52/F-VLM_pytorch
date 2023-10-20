@@ -108,8 +108,8 @@ INPUT:
   PROMPT_SIZE: (90, 4)
   CUSTOM_AUG: ResizeLongestSize
   FORMAT: "RGB"
-  PAD_MASK: True
-  MASK_PAD_VAL: 0.0
+  # PAD_MASK: True
+  # MASK_PAD_VAL: 0.0
   MASK_FORMAT: "bitmask"
 TEST:
   DETECTIONS_PER_IMAGE: 300  #test_topk_per_image
