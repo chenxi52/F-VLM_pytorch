@@ -95,7 +95,7 @@ SOLVER:
   LR_SCHEDULER_NAME: "WarmupMultiStepLR"
   WEIGHT_DECAY: 0.001  
   MAX_ITER: 90000
-  CHECKPOINT_PERIOD: 20  #  change
+  CHECKPOINT_PERIOD: 5000  #  change
   USE_CUSTOM_SOLVER: True
   OPTIMIZER: 'ADAMW'
   LOGGER_FREQ: 20  # the output freq of logger writer
