@@ -103,7 +103,7 @@ class samMaskHead(BaseMaskRCNNHead):
             A dict of losses in training. The predicted "instances" in inference(List[Dict['instances': Instances]]).
         """
         batch_size = roi_feature.shape[0]
-        start_time = time.time()
+        # start_time = time.time()
         point_emd = self.point_emb(roi_feature) #prompt head 
         # print('dual_time1:', time.time()-start_time)
         point_emd = point_emd.view(batch_size, self.per_query_point, -1)
@@ -205,7 +205,7 @@ def custom_mask_rcnn_loss(pred_mask_logits: torch.Tensor, instances: List[Instan
     Returns:
         mask_loss (Tensor): A scalar tensor containing the loss.
     """
-    start_ = time.time()
+    # start_ = time.time()
     cls_agnostic_mask = pred_mask_logits.size(1) == 1
     total_num_masks = pred_mask_logits.size(0)
     # mask_side_len = pred_mask_logits.size(2)
@@ -216,6 +216,7 @@ def custom_mask_rcnn_loss(pred_mask_logits: torch.Tensor, instances: List[Instan
     gt_classes = []
     gt_masks = []
     # import ipdb;ipdb.set_trace()
+    # store the gt_mask to gpu first 
     for instances_per_image in instances:
         if len(instances_per_image) == 0:
             continue
@@ -230,19 +231,20 @@ def custom_mask_rcnn_loss(pred_mask_logits: torch.Tensor, instances: List[Instan
         # boxes = instances_per_image.proposal_boxes.tensor.to(torch.device('cpu'))
         # gt_masks_per_image = [torch.ones(size=(mask_side_len, mask_side_len))
         #                       for i, polygons in enumerate(instances_per_image.gt_masks.polygons)]
-        # gt_masks_per_image = [torch.from_numpy(polygons_to_bitmask(copy.deepcopy(polygons), mask_side_len, mask_side_len))
-        #                       for i, polygons in enumerate(instances_per_image.gt_masks.polygons)]
         # import ipdb;ipdb.set_trace()
-        gt_masks_per_image = torch.tensor(torch.ones(size=(len(instances_per_image.gt_masks.polygons), mask_side_len, mask_side_len)),device=device)
+        gt_masks_per_image = [torch.from_numpy(polygons_to_bitmask(copy.deepcopy(polygons), mask_side_len, mask_side_len))
+                              for i, polygons in enumerate(instances_per_image.gt_masks.polygons)]
+        # import ipdb;ipdb.set_trace()
+        # gt_masks_per_image = torch.tensor(torch.ones(size=(len(instances_per_image.gt_masks.polygons), mask_side_len, mask_side_len)),device=device)
 
-        # if len(gt_masks_per_image) == 0:
-        #     gt_masks_per_image = torch.empty(0, mask_side_len, mask_side_len, device=device, dtype=torch.bool)
-        # else:
-        #     gt_masks_per_image = torch.stack(gt_masks_per_image, dim=0).to(device=device)
+        if len(gt_masks_per_image) == 0:
+            gt_masks_per_image = torch.empty(0, mask_side_len, mask_side_len, device=device, dtype=torch.bool)
+        else:
+            gt_masks_per_image = torch.stack(gt_masks_per_image, dim=0).to(device=device)
         
         # A tensor of shape (N, M, M), N=#instances in the image; M=mask_side_len
         gt_masks.append(gt_masks_per_image)
-    print('loss_dual_time0:', time.time()-start_)
+    # print('loss_dual_time0:', time.time()-start_)
 
     if len(gt_masks) == 0:
         return pred_mask_logits.sum() * 0
@@ -291,3 +293,19 @@ def custom_mask_rcnn_loss(pred_mask_logits: torch.Tensor, instances: List[Instan
     mask_loss = F.binary_cross_entropy_with_logits(pred_mask_logits, gt_masks, reduction="mean")
 
     return mask_loss
+
+# def polygons_to_bitmask(polygons: List[np.ndarray], height: int, width: int) -> np.ndarray:
+#     """
+#     Args:
+#         polygons (list[ndarray]): each array has shape (Nx2,)
+#         height, width (int)
+
+#     Returns:
+#         ndarray: a bool mask of shape (height, width)
+#     """
+#     if len(polygons) == 0:
+#         # COCOAPI does not support empty polygons
+#         return np.zeros((height, width)).astype(bool)
+#     rles = mask_util.frPyObjects(polygons, height, width)
+#     rle = mask_util.merge(rles)
+#     return mask_util.decode(rle).astype(bool)
