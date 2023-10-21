@@ -222,7 +222,7 @@ def main(args):
     cfg = setup(args)
     TIMESTAMP = "{0:%Y-%m-%dT%H-%M-%S/}".format(datetime.datetime.now())
     if comm.is_main_process():
-        wandb.init(project='SamDetector', entity=TIMESTAMP, config=cfg)
+        wandb.init(project='SamDetector', name=TIMESTAMP, config=cfg)
 
     model = build_model(cfg)
     logger.info("Model:\n{}".format(model))
