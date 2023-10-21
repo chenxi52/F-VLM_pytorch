@@ -185,6 +185,7 @@ class SamDetector(GeneralizedRCNN):
             # return self._postprocess(
             #     instances=results, ori_sizes=ori_sizes, image_sizes=img_input_sizes)
             return self._postprocess(instances=results, batched_inputs=batched_inputs, mask_threshold=self.mask_thr_binary)
+            # return self.sam.postprocess_masks()
         else:
             return results
         
@@ -237,8 +238,6 @@ class SamDetector(GeneralizedRCNN):
             # height, width: input_image_sizes， 原本的 img_size
             height = input_per_image.get("height")
             width = input_per_image.get("width")
-            # results_per_image..image_size(): one is 1024
-            # the mask have zeor padding but image_size indicts that not 
             r = custom_detector_postprocess(results_per_image, height, width, mask_threshold=mask_threshold)
             processed_results.append({"instances": r})
         return processed_results
@@ -247,21 +246,9 @@ def custom_detector_postprocess(
     results: Instances, output_height: int, output_width: int, mask_threshold: float = 0.5
 ):
     """
-    Resize the output instances.
-    The input images are often resized when entering an object detector.
-    As a result, we often need the outputs of the detector in a different
-    resolution from its inputs.
-
-    This function will resize the raw outputs of an R-CNN detector
-    to produce outputs according to the desired output resolution.
-
-    Args:
-        results (Instances): the raw outputs from the detector.
-            `results.image_size` contains the input image resolution the detector sees.
-            This object might be modified in-place.
-        output_height, output_width: the desired output resolution.
-    Returns:
-        Instances: the resized output from the model, based on the output resolution
+    Inputs:
+        results: the pred_masks of (1024,1024),results.image_size: (1024, x) or (x,1024)
+        output_height, output_width: the original img sie 
     """
     if isinstance(output_width, torch.Tensor):
         # This shape might (but not necessarily) be tensors during tracing.
@@ -275,6 +262,7 @@ def custom_detector_postprocess(
         output_width_tmp = output_width
         output_height_tmp = output_height
 
+    input_size = results.image_size
     results = Instances(new_size, **results.get_fields())
     if results.has("pred_boxes"):
         output_boxes = results.pred_boxes
@@ -288,7 +276,7 @@ def custom_detector_postprocess(
     # output_boxes.scale(scale_x, scale_y)
     # output_boxes.clip(results.image_size)
 
-    # results = results[output_boxes.nonempty()]
+    results = results[output_boxes.nonempty()]
     #1. paste mask to [1024,1024], original is [1024,1024]
     if results.has("pred_masks"):
         # if isinstance(results.pred_masks, ROIMasks):
@@ -302,14 +290,12 @@ def custom_detector_postprocess(
         #     results.pred_boxes, 1024, 1024, mask_threshold
         # ).tensor  # TODO return ROIMasks/BitMask object in the future
         #2. clip up the paddings
-        mask_tensor = mask_tensor[:,:, :results.image_size[1], :results.image_size[0]]
-
+        mask_tensor = mask_tensor[:,:, :input_size[0], :input_size[1]]
         #3. resize the box and mask, give it to the results
-        mask_tensor = F.interpolate(mask_tensor, size=new_size, mode="bilinear", align_corners=False)
+        mask_tensor = F.interpolate(mask_tensor, size=new_size, mode="bilinear", align_corners=False).squeeze(1)
         mask_tensor = (mask_tensor>=mask_threshold).to(torch.bool)
-        # roi_masks.tensor = mask_tensor
-        # results.pred_masks = mask_tensor
+        results.pred_masks = mask_tensor
     
-    output_boxes.scale(output_width_tmp/results.image_size[1], output_height_tmp/results.image_size[0])
+    output_boxes.scale(output_width_tmp/input_size[1], output_height_tmp/input_size[0])
     # output_boxes.clip(results.image_size)
     return results

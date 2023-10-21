@@ -132,7 +132,7 @@ def inference_context(model):
     model.eval()
     yield
     model.train(training_mode)
-    if training_mode and get_world_size()>1:
-        model.module.sam.eval()
-    else:
-        model.sam.eval()
+    # if training_mode and get_world_size()>1:
+        # model.module.sam.eval()
+    # else:
+        # model.sam.eval()

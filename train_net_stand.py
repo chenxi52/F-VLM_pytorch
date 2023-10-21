@@ -57,7 +57,7 @@ from detectron2.utils.events import (
     TensorboardXWriter,
 )
 
-from detic.data.custom_dataset_mapper import CustomDatasetMapper, DetrDatasetMapper, SamDatasetMapper
+from detic.data.custom_dataset_mapper import SamDatasetMapper
 from detic.data.custom_build_augmentation import build_custom_augmentation
 from detic.custom_checkpointer import samCheckpointer
 from detic.config import add_rsprompter_config
@@ -67,59 +67,32 @@ from detic.custom_solver import build_sam_optimizer
 logger = logging.getLogger("detectron2")
 
 
-def get_evaluator(cfg, dataset_name, output_folder=None):
-    """
-    Create evaluator(s) for a given dataset.
-    This uses the special metadata "evaluator_type" associated with each builtin dataset.
-    For your own dataset, you can simply create an evaluator manually in your
-    script and do not have to worry about the hacky if-else logic here.
-    """
-    if output_folder is None:
-        output_folder = os.path.join(cfg.OUTPUT_DIR, "inference")
-    evaluator_list = []
-    evaluator_type = MetadataCatalog.get(dataset_name).evaluator_type
-    if evaluator_type in ["sem_seg", "coco_panoptic_seg"]:
-        evaluator_list.append(
-            SemSegEvaluator(
-                dataset_name,
-                distributed=True,
-                output_dir=output_folder,
-            )
-        )
-    if evaluator_type in ["coco", "coco_panoptic_seg"]:
-        evaluator_list.append(COCOEvaluator(dataset_name, output_dir=output_folder))
-    if evaluator_type == "coco_panoptic_seg":
-        evaluator_list.append(COCOPanopticEvaluator(dataset_name, output_folder))
-    if evaluator_type == "cityscapes_instance":
-        return CityscapesInstanceEvaluator(dataset_name)
-    if evaluator_type == "cityscapes_sem_seg":
-        return CityscapesSemSegEvaluator(dataset_name)
-    if evaluator_type == "pascal_voc":
-        return PascalVOCDetectionEvaluator(dataset_name)
-    if evaluator_type == "lvis":
-        return LVISEvaluator(dataset_name, cfg, True, output_folder)
-    if len(evaluator_list) == 0:
-        raise NotImplementedError(
-            "no Evaluator for the dataset {} with the type {}".format(dataset_name, evaluator_type)
-        )
-    if len(evaluator_list) == 1:
-        return evaluator_list[0]
-    return DatasetEvaluators(evaluator_list)
-
 
 def do_test(cfg, model):
     results = OrderedDict()
     for dataset_name in cfg.DATASETS.TEST:
-        data_loader = build_detection_test_loader(cfg, dataset_name)
+        # data_loader = build_detection_test_loader(cfg, dataset_name)
         #####
-        # mapper = None if cfg.INPUT.TEST_INPUT_TYPE == 'default' \
-        #     else SamDatasetMapper(
-        #         cfg, False, augmentations=build_custom_augmentation(cfg, False))
-        # data_loader = custom_build_detection_test_loader(cfg, dataset_name, mapper=mapper)
+        mapper = None if cfg.INPUT.TEST_INPUT_TYPE == 'default' \
+            else SamDatasetMapper(
+                cfg, False, augmentations=build_custom_augmentation(cfg, False))
+        data_loader = custom_build_detection_test_loader(cfg, dataset_name, mapper=mapper)
         #####
-        evaluator = get_evaluator(
-            cfg, dataset_name, os.path.join(cfg.OUTPUT_DIR, "inference", dataset_name)
-        )
+        output_folder = os.path.join(
+            cfg.OUTPUT_DIR, "inference_{}".format(dataset_name))
+        evaluator_type = MetadataCatalog.get(dataset_name).evaluator_type
+
+        if evaluator_type == "lvis" :
+            evaluator = LVISEvaluator(dataset_name, cfg, True, output_folder)
+        elif evaluator_type == 'coco':
+            # if dataset_name == 'coco_generalized_zeroshot_val':
+            #     # Additionally plot mAP for 'seen classes' and 'unseen classes'
+            #     evaluator = CustomCOCOEvaluator(dataset_name, cfg, True, output_folder)
+            # else:
+            evaluator = COCOEvaluator(dataset_name, cfg, True, output_folder)
+        else:
+            assert 0, evaluator_type
+        
         results_i = inference_on_dataset(model, data_loader, evaluator)
         results[dataset_name] = results_i
         if comm.is_main_process():

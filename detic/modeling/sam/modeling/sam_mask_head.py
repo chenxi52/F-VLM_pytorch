@@ -167,12 +167,15 @@ class samMaskHead(BaseMaskRCNNHead):
         ######################
         # iou_predictions = iou_predictions.squeeze(1)
         # sample pos_ind from box_features, this has been done in the roi's _forward_mask
+        # low_res_masks = torch.nn.functional.interpolate(low_res_masks, size=(self.train_size, self.train_size), mode='bilinear', align_corners=False)
+        low_res_masks = torch.nn.functional.interpolate(low_res_masks, size=(self.train_size, self.train_size), mode='bilinear', align_corners=False)
+
         if self.training:
             # TODO: not right
-            low_res_masks = torch.nn.functional.interpolate(low_res_masks, size=(self.train_size, self.train_size), mode='bilinear', align_corners=False)
             loss ={"loss_mask": custom_mask_rcnn_loss(low_res_masks, instances, self.vis_period) * self.loss_weight}
             return loss
         else:
+            # low_res_masks = torch.nn.functional.interpolate(low_res_masks, size=(self.train_size, self.train_size), mode='bilinear', align_corners=False)
             mask_rcnn_inference(low_res_masks, instances)
             return instances
         
@@ -184,8 +187,8 @@ def custom_mask_rcnn_loss(pred_mask_logits: torch.Tensor, instances: List[Instan
     # start_ = time.time()
     cls_agnostic_mask = pred_mask_logits.size(1) == 1
     total_num_masks = pred_mask_logits.size(0)
-    mask_side_len = pred_mask_logits.size(2)
-    mask_side_len = 1024
+    # mask_side_len = pred_mask_logits.size(2)
+    # mask_side_len = 1024
     # assert pred_mask_logits.size(2) == pred_mask_logits.size(3), "Mask prediction must be square!"
     # print('loss_dual_time1:', time.time()-start_)
     
@@ -223,9 +226,8 @@ def custom_mask_rcnn_loss(pred_mask_logits: torch.Tensor, instances: List[Instan
         #     gt_masks_per_image = torch.stack(gt_masks_per_image, dim=0).to(device=device)
         
         # A tensor of shape (N, M, M), N=#instances in the image; M=mask_side_len
-        gt_masks_per_image = instances_per_image.gt_masks.tensor.to(device=pred_mask_logits.device)
+        gt_masks_per_image = instances_per_image.gt_masks.tensor
         gt_masks.append(gt_masks_per_image)
-    # print('loss_dual_time0:', time.time()-start_)
 
     if len(gt_masks) == 0:
         return pred_mask_logits.sum() * 0
