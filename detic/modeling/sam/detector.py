@@ -239,7 +239,7 @@ class SamDetector(GeneralizedRCNN):
             width = input_per_image.get("width")
             # results_per_image..image_size(): one is 1024
             # the mask have zeor padding but image_size indicts that not 
-            r = detector_postprocess(results_per_image, height, width, mask_threshold=mask_threshold)
+            r = custom_detector_postprocess(results_per_image, height, width, mask_threshold=mask_threshold)
             processed_results.append({"instances": r})
         return processed_results
 
