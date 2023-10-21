@@ -1,0 +1,34 @@
+Exception ignored in: <function _MultiProcessingDataLoaderIter.__del__ at 0x7f0efbc9f430>
+Traceback (most recent call last):
+  File "/home/xchen/anaconda3/envs/Agri/lib/python3.8/site-packages/torch/utils/data/dataloader.py", line 1328, in __del__
+    self._shutdown_workers()
+  File "/home/xchen/anaconda3/envs/Agri/lib/python3.8/site-packages/torch/utils/data/dataloader.py", line 1301, in _shutdown_workers
+    w.join(timeout=_utils.MP_STATUS_CHECK_INTERVAL)
+  File "/home/xchen/anaconda3/envs/Agri/lib/python3.8/multiprocessing/process.py", line 149, in join
+    res = self._popen.wait(timeout)
+  File "/home/xchen/anaconda3/envs/Agri/lib/python3.8/multiprocessing/popen_fork.py", line 44, in wait
+    if not wait([self.sentinel], timeout):
+  File "/home/xchen/anaconda3/envs/Agri/lib/python3.8/multiprocessing/connection.py", line 931, in wait
+    ready = selector.select(timeout)
+  File "/home/xchen/anaconda3/envs/Agri/lib/python3.8/selectors.py", line 415, in select
+    fd_event_list = self._selector.poll(timeout)
+KeyboardInterrupt:
+Error in atexit._run_exitfuncs:
+Traceback (most recent call last):
+  File "/home/xchen/anaconda3/envs/Agri/lib/python3.8/site-packages/wandb/analytics/sentry.py", line 43, in wrapper
+    return func(self, *args, **kwargs)
+  File "/home/xchen/anaconda3/envs/Agri/lib/python3.8/site-packages/wandb/analytics/sentry.py", line 178, in end_session
+    client.flush()
+  File "/home/xchen/anaconda3/envs/Agri/lib/python3.8/site-packages/sentry_sdk/client.py", line 646, in flush
+    self.transport.flush(timeout=timeout, callback=callback)
+  File "/home/xchen/anaconda3/envs/Agri/lib/python3.8/site-packages/sentry_sdk/transport.py", line 550, in flush
+    self._worker.flush(timeout, callback)
+  File "/home/xchen/anaconda3/envs/Agri/lib/python3.8/site-packages/sentry_sdk/worker.py", line 95, in flush
+    self._wait_flush(timeout, callback)
+  File "/home/xchen/anaconda3/envs/Agri/lib/python3.8/site-packages/sentry_sdk/worker.py", line 105, in _wait_flush
+    if not self._timed_queue_join(initial_timeout):
+  File "/home/xchen/anaconda3/envs/Agri/lib/python3.8/site-packages/sentry_sdk/worker.py", line 56, in _timed_queue_join
+    queue.all_tasks_done.wait(timeout=delay)
+  File "/home/xchen/anaconda3/envs/Agri/lib/python3.8/threading.py", line 306, in wait
+    gotit = waiter.acquire(True, timeout)
+KeyboardInterrupt

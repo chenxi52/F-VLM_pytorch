@@ -67,7 +67,6 @@ import wandb
 logger = logging.getLogger("detectron2")
 
 
-
 def do_test(cfg, model):
     results = OrderedDict()
     for dataset_name in cfg.DATASETS.TEST:
@@ -137,7 +136,7 @@ def do_train(cfg, model, resume=False):
     max_iter = cfg.SOLVER.MAX_ITER
 
     periodic_checkpointer = PeriodicCheckpointer(
-        checkpointer, cfg.SOLVER.CHECKPOINT_PERIOD, max_iter=max_iter, max_to_keep=1
+        checkpointer, cfg.SOLVER.CHECKPOINT_PERIOD, max_iter=max_iter
     )
 
     # writers = default_writers(cfg.OUTPUT_DIR, max_iter) if comm.is_main_process() else []
@@ -194,6 +193,11 @@ def do_train(cfg, model, resume=False):
             ):
                 for writer in writers:
                     writer.write()
+                if comm.is_main_process():
+                    loss_dict_reduced['lr'] = optimizer.param_groups[0]["lr"]
+                    loss_dict_reduced['iteration'] = iteration
+                    loss_dict_reduced['total_loss'] = losses_reduced
+                    wandb.log(loss_dict_reduced)
             periodic_checkpointer.step(iteration)
 
 
@@ -216,6 +220,10 @@ def setup(args):
 
 def main(args):
     cfg = setup(args)
+    TIMESTAMP = "{0:%Y-%m-%dT%H-%M-%S/}".format(datetime.datetime.now())
+    if comm.is_main_process():
+        wandb.init(project='SamDetector', entity=TIMESTAMP, config=cfg)
+
     model = build_model(cfg)
     logger.info("Model:\n{}".format(model))
     if args.eval_only:
@@ -250,3 +258,4 @@ if __name__ == "__main__":
         dist_url=args.dist_url,
         args=(args,),
     )
+    wandb.finish()
