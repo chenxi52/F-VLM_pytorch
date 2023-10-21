@@ -63,7 +63,7 @@ from detic.custom_checkpointer import samCheckpointer
 from detic.config import add_rsprompter_config
 from detectron2.utils.logger import setup_logger
 from detic.custom_solver import build_sam_optimizer
-
+import wandb
 logger = logging.getLogger("detectron2")
 
 

@@ -295,7 +295,8 @@ def custom_detector_postprocess(
         mask_tensor = F.interpolate(mask_tensor, size=new_size, mode="bilinear", align_corners=False).squeeze(1)
         mask_tensor = (mask_tensor>=mask_threshold).to(torch.bool)
         results.pred_masks = mask_tensor
-    
+    import ipdb;ipdb.set_trace()
     output_boxes.scale(output_width_tmp/input_size[1], output_height_tmp/input_size[0])
+    results.pred_boxes = output_boxes
     # output_boxes.clip(results.image_size)
     return results
