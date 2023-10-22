@@ -193,12 +193,14 @@ def do_train(cfg, model, resume=False):
             ):
                 for writer in writers:
                     writer.write()
-                if comm.is_main_process():
+                if comm.is_main_process() and cfg.WANDB:
                     loss_dict_reduced['lr'] = optimizer.param_groups[0]["lr"]
                     loss_dict_reduced['iteration'] = iteration
                     loss_dict_reduced['total_loss'] = losses_reduced
                     wandb.log(loss_dict_reduced)
             periodic_checkpointer.step(iteration)
+        if comm.is_main_process() and cfg.WANDB:
+            wandb.finish()
 
 
 def setup(args):
@@ -221,7 +223,7 @@ def setup(args):
 def main(args):
     cfg = setup(args)
     TIMESTAMP = "{0:%Y-%m-%dT%H-%M-%S/}".format(datetime.datetime.now())
-    if comm.is_main_process():
+    if comm.is_main_process() and cfg.WANDB:
         wandb.init(project='SamDetector', name=TIMESTAMP, config=cfg)
 
     model = build_model(cfg)
@@ -258,4 +260,4 @@ if __name__ == "__main__":
         dist_url=args.dist_url,
         args=(args,),
     )
-    wandb.finish()
+    

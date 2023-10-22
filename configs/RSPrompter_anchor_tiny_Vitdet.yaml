@@ -120,3 +120,4 @@ TEST:
 VERSION: 2
 FP16: True
 OUTPUT_DIR: './output/full_tune_tiny'
+WANDB: False
