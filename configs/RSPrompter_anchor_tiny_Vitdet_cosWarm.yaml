@@ -86,13 +86,13 @@ DATALOADER:
   # PERSISTENT_WORKERS: True 
 SOLVER:
   IMS_PER_BATCH: 16  # change  # max 8 imgs per batch
-  BASE_LR: 0.0002  # change0.000025
+  BASE_LR: 0.0005  # change0.000025
   STEPS: (60000, 80000)  # change 
-  WARMUP_ITERS: 100  
+  WARMUP_ITERS: 7500  
   WARMUP_METHOD : "linear"
   WARMUP_FACTOR: 0.0001 #1.0001
-  # LR_SCHEDULER_NAME: "WarmupCosineLR" 
-  LR_SCHEDULER_NAME: "WarmupMultiStepLR"
+  LR_SCHEDULER_NAME: "WarmupCosineLR" 
+  # LR_SCHEDULER_NAME: "WarmupMultiStepLR"
   WEIGHT_DECAY: 0.001  
   MAX_ITER: 90000
   CHECKPOINT_PERIOD: 5000  #  change
@@ -120,3 +120,4 @@ TEST:
 VERSION: 2
 FP16: True
 OUTPUT_DIR: './output/full_tune_tiny'
+WANDB: False
