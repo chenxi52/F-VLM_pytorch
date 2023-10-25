@@ -1,22 +1,9 @@
 #!/usr/bin/env python
 # Copyright (c) Facebook, Inc. and its affiliates.
 """
-Detectron2 training script with a plain training loop.
+send the box to sam propmter and test the maskAp
+1. change prompter to sam prompter
 
-This script reads a given config file and runs the training or evaluation.
-It is an entry point that is able to train standard models in detectron2.
-
-In order to let one script support training of many models,
-this script contains logic that are specific to these built-in models and therefore
-may not be suitable for your own project.
-For example, your research project perhaps only needs a single "evaluator".
-
-Therefore, we recommend you to use detectron2 as a library and take
-this file as an example of how to use the library.
-You may want to write your own script with your datasets and other customizations.
-
-Compared to "train_net.py", this script supports fewer default features.
-It also includes fewer abstraction, therefore is easier to add custom logic.
 """
 
 import logging

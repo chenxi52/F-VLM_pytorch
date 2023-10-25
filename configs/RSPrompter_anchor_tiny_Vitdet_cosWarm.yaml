@@ -71,7 +71,7 @@ MODEL:
     NUM_CONV: 4
     CLS_AGNOSTIC_MASK: True
     WITH_SINCOS: True
-    MASK_LOSS_TYPE: "ce" 
+    MASK_LOSS_TYPE: "focal_dice" # focal+dice, ce, 
     MASK_LOSS_WEIGHT: 1.0
     POOLER_RESOLUTION: 14
     POOLER_SAMPLING_RATIO: 0
