@@ -199,8 +199,8 @@ def do_train(cfg, model, resume=False):
                     loss_dict_reduced['total_loss'] = losses_reduced
                     wandb.log(loss_dict_reduced)
             periodic_checkpointer.step(iteration)
-        if comm.is_main_process() and cfg.WANDB:
-            wandb.finish()
+        # if comm.is_main_process() and cfg.WANDB:
+        #     wandb.finish()
 
 
 def setup(args):
@@ -229,6 +229,8 @@ def main(args):
     model = build_model(cfg)
     logger.info("Model:\n{}".format(model))
     if args.eval_only:
+        for key, params in model.named_parameters():
+            params.requires_grad = False
         samCheckpointer(model, save_dir=cfg.OUTPUT_DIR).resume_or_load(
             cfg.MODEL.WEIGHTS, resume=args.resume
         )

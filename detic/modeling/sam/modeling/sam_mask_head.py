@@ -34,18 +34,18 @@ class samMaskHead(BaseMaskRCNNHead):
         else:
             sincos = 1
         # Prompt encoder
-        point_emb = nn.Sequential(
-            nn.Conv2d(256, 256, 3, stride=2, padding=1),
-            nn.BatchNorm2d(256),
-            nn.ReLU(inplace=True),
-            nn.Flatten(),
-            nn.Linear(7*7*256, 256),
-            nn.ReLU(inplace=True),
-            nn.Linear(256, 256),
-            nn.ReLU(inplace=True),
-            nn.Linear(256, 256*sincos*per_query_point)
-        )
-        self.point_emb = point_emb
+        # point_emb = nn.Sequential(
+        #     nn.Conv2d(256, 256, 3, stride=2, padding=1),
+        #     nn.BatchNorm2d(256),
+        #     nn.ReLU(inplace=True),
+        #     nn.Flatten(),
+        #     nn.Linear(7*7*256, 256),
+        #     nn.ReLU(inplace=True),
+        #     nn.Linear(256, 256),
+        #     nn.ReLU(inplace=True),
+        #     nn.Linear(256, 256*sincos*per_query_point)
+        # )
+        # self.point_emb = point_emb
         self.class_agnostic = class_agnostic
         self.per_query_point = per_query_point
         self.with_sincos = with_sincos
@@ -53,7 +53,7 @@ class samMaskHead(BaseMaskRCNNHead):
         self.num_classes = num_classes
         self.vis_period = vis_period
 
-        self._init_weights(self.point_emb)
+        # self._init_weights(self.point_emb)
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
@@ -85,7 +85,7 @@ class samMaskHead(BaseMaskRCNNHead):
     
     def forward(
             self,
-            roi_feature: List[torch.Tensor],
+            roi_boxes,
             img_features: torch.Tensor,
             instances: List[Instances],
             sam: nn.Module,
@@ -103,16 +103,21 @@ class samMaskHead(BaseMaskRCNNHead):
         Returns:
             A dict of losses in training. The predicted "instances" in inference(List[Dict['instances': Instances]]).
         """
-        batch_size = roi_feature.shape[0]
-        point_emd = self.point_emb(roi_feature) #prompt head 
-        point_emd = point_emd.view(batch_size, self.per_query_point, -1)
-        if self.with_sincos: 
-            point_emd = torch.sin(point_emd[..., ::2] + point_emd[..., 1::2])
-        #::2, 从 0 列开始+2 取列， 1::2, 从 1 列开始+2 取列
-        nomask_dense_embeddings = sam.prompt_encoder.no_mask_embed.weight.reshape(1, -1, 1, 1).expand(
-            point_emd.shape[0], -1, *img_features.shape[-2:]
+        # import ipdb;ipdb.set_trace()
+        sparse_embeddings, dense_embeddings = sam.prompt_encoder.forward(
+            points = None,
+            boxes = roi_boxes, 
+            masks = None
         )
-        img_flag_ids = torch.tensor([len(i) for i in instances], device=point_emd.device, dtype=torch.long)
+        # point_emd = self.point_emb(roi_feature) #prompt head 
+        # point_emd = point_emd.view(batch_size, self.per_query_point, -1)
+        # if self.with_sincos: 
+        #     point_emd = torch.sin(point_emd[..., ::2] + point_emd[..., 1::2])
+        # #::2, 从 0 列开始+2 取列， 1::2, 从 1 列开始+2 取列
+        # nomask_dense_embeddings = sam.prompt_encoder.no_mask_embed.weight.reshape(1, -1, 1, 1).expand(
+        #     point_emd.shape[0], -1, *img_features.shape[-2:]
+        # )
+        img_flag_ids = torch.tensor([len(i) for i in instances], device=sparse_embeddings.device, dtype=torch.long)
         padding = torch.zeros((len(img_features)-len(img_flag_ids),), device=img_flag_ids.device, dtype=img_flag_ids.dtype)
         # padding: what if no_mask exist in the 
         img_flag_ids = torch.cat([img_flag_ids, padding])
@@ -124,8 +129,8 @@ class samMaskHead(BaseMaskRCNNHead):
         low_res_masks = sam.mask_decoder.forward_batch(
             image_embeddings=img_embeddings,
             image_pe=img_pe,
-            sparse_prompt_embeddings=point_emd,
-            dense_prompt_embeddings=nomask_dense_embeddings,
+            sparse_prompt_embeddings=sparse_embeddings,
+            dense_prompt_embeddings=dense_embeddings,
             multimask_output=False,
         )
 

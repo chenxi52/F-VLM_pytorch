@@ -109,22 +109,23 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             # head is only trained on positive proposals.
             instances, _ = select_foreground_proposals(instances, self.num_classes)
             # len(instances) = bz
-        if self.mask_pooler is not None:
+        boxes = [i.proposal_boxes.tensor if self.training else i.pred_boxes.tensor for i in instances]
+        boxes = torch.cat(boxes, dim=0)
+        # if self.mask_pooler is not None:
             # the box here are fused together, but will be assigned to each level in mask_pooler
-            boxes = [i.proposal_boxes if self.training else i.pred_boxes for i in instances]
-            # List[bz * List[19*Boxes, 3*Boxes]]
-            features = [features[f] for f in self.mask_in_features]
-            features = self.mask_pooler(features, boxes)
-            # mask_roi_inds = [box.tensor.size(0).to(box.device) for box in boxes]
-            if features.size(0)==0:
-                results_instances = []
-                for ins in instances:
-                    ins.pred_masks = torch.tensor([], device=ins.pred_classes.device)
-                    results_instances.append(ins)
-                return results_instances
-        else:
-            features = {f: features[f] for f in self.mask_in_features}
-        return self.mask_head(features, img_features, instances, sam)
+        
+            # features = [features[f] for f in self.mask_in_features]
+            # features = self.mask_pooler(features, boxes)
+            # # mask_roi_inds = [box.tensor.size(0).to(box.device) for box in boxes]
+            # if features.size(0)==0:
+            #     results_instances = []
+            #     for ins in instances:
+            #         ins.pred_masks = torch.tensor([], device=ins.pred_classes.device)
+            #         results_instances.append(ins)
+            #     return results_instances
+        # else:
+        #     features = {f: features[f] for f in self.mask_in_features}
+        return self.mask_head(boxes, img_features, instances, sam)
 
 
     def forward( 
