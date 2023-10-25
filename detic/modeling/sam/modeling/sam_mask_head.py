@@ -277,51 +277,51 @@ class samMaskHead(BaseMaskRCNNHead):
         if self.mask_loss_type == 'ce':
             mask_loss = F.binary_cross_entropy_with_logits(pred_mask_logits, gt_masks, reduction="mean")
         elif self.mask_loss_type == 'focal_dice':
-            focal_loss = sigmoid_focal_loss_jit(pred_mask_logits, 
+            focalLoss = sigmoid_focal_loss_jit(pred_mask_logits, 
                                             gt_masks,
                                             alpha=0.25,
                                             gamma=2.0,
                                             reduction="mean")
-            dice_loss = dice_loss(pred_mask_logits,
+            diceLoss = dice_loss(pred_mask_logits,
                                 gt_masks)
-            mask_loss = focal_loss + dice_loss
+            mask_loss = focalLoss + diceLoss
         else:
             assert False, 'mask loss type not supported'
         return mask_loss
 
 
-    def dice_loss(self, pred,
-                target,
-                weight=None,
-                eps=1e-3,
-                reduction='mean',
-                avg_factor=None):
-        """
-        Args:
-            pred (torch.Tensor): The prediction, has a shape (n, *)
-            target (torch.Tensor): The learning label of the prediction,
-                shape (n, *), same shape of pred.
-            weight (torch.Tensor, optional): The weight of loss for each
-                prediction, has a shape (n,). Defaults to None.
-            eps (float): Avoid dividing by zero. Default: 1e-3.
-            reduction (str, optional): The method used to reduce the loss into
-                a scalar. Defaults to 'mean'.
-                Options are "none", "mean" and "sum".
-            avg_factor (int, optional): Average factor that is used to average
-                the loss. Defaults to None.
-        """
-        input = pred.flatten(1)
-        target = target.flatten(1).float()
-        a = torch.sum(input * target, 1)
-        b = torch.sum(input * input, 1) + eps
-        c = torch.sum(target * target, 1) + eps
-        d = (2 * a) / (b + c)
-        loss = 1 - d
-        if weight is not None:
-            assert weight.ndim == loss.ndim
-            assert len(weight) == len(pred)
-        loss = weight_reduce_loss(loss, weight, reduction, avg_factor)
-        return loss
+def dice_loss(pred,
+            target,
+            weight=None,
+            eps=1e-3,
+            reduction='mean',
+            avg_factor=None):
+    """
+    Args:
+        pred (torch.Tensor): The prediction, has a shape (n, *)
+        target (torch.Tensor): The learning label of the prediction,
+            shape (n, *), same shape of pred.
+        weight (torch.Tensor, optional): The weight of loss for each
+            prediction, has a shape (n,). Defaults to None.
+        eps (float): Avoid dividing by zero. Default: 1e-3.
+        reduction (str, optional): The method used to reduce the loss into
+            a scalar. Defaults to 'mean'.
+            Options are "none", "mean" and "sum".
+        avg_factor (int, optional): Average factor that is used to average
+            the loss. Defaults to None.
+    """
+    input = pred.flatten(1)
+    target = target.flatten(1).float()
+    a = torch.sum(input * target, 1)
+    b = torch.sum(input * input, 1) + eps
+    c = torch.sum(target * target, 1) + eps
+    d = (2 * a) / (b + c)
+    loss = 1 - d
+    if weight is not None:
+        assert weight.ndim == loss.ndim
+        assert len(weight) == len(pred)
+    loss = weight_reduce_loss(loss, weight, reduction, avg_factor)
+    return loss
 
 def weight_reduce_loss(loss, weight=None, reduction='mean', avg_factor=None):
     # if weight is specified, apply element-wise weight
