@@ -229,11 +229,11 @@ def main(args):
     model = build_model(cfg)
     logger.info("Model:\n{}".format(model))
     if args.eval_only:
-        for key, params in model.named_parameters():
-            params.requires_grad = False
         samCheckpointer(model, save_dir=cfg.OUTPUT_DIR).resume_or_load(
             cfg.MODEL.WEIGHTS, resume=args.resume
         )
+        for key, params in model.named_parameters():
+            params.requires_grad = False
         return do_test(cfg, model)
 
     ##### freeze prompter params
