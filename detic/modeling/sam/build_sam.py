@@ -87,7 +87,7 @@ def build_sam_vit_t(checkpoint=None):
     if checkpoint is not None:
         with open(checkpoint, "rb") as f:
             state_dict = torch.load(f)
-        mobile_sam.load_state_dict(state_dict)
+        mobile_sam.load_state_dict(state_dict,strict=False)
     return mobile_sam
 
 sam_model_registry = {
