@@ -285,6 +285,11 @@ class samMaskHead(BaseMaskRCNNHead):
             diceLoss = dice_loss(pred_mask_logits,
                                 gt_masks)
             mask_loss = focalLoss + diceLoss
+        elif self.mask_loss_type == 'ce_dice':
+            ceLoss = F.binary_cross_entropy_with_logits(pred_mask_logits, gt_masks, reduction="mean")
+            diceLoss = dice_loss(pred_mask_logits,
+                                gt_masks)
+            mask_loss = ceLoss + diceLoss
         else:
             assert False, 'mask loss type not supported'
         return mask_loss
