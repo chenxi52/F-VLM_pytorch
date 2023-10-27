@@ -310,7 +310,7 @@ def dice_loss(pred,
         avg_factor (int, optional): Average factor that is used to average
             the loss. Defaults to None.
     """
-    input = pred.flatten(1)
+    input = pred.sigmoid().flatten(1)
     target = target.flatten(1).float()
     a = torch.sum(input * target, 1)
     b = torch.sum(input * input, 1) + eps
