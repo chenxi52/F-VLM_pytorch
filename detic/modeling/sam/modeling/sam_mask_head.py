@@ -199,7 +199,6 @@ def custom_mask_rcnn_loss(pred_mask_logits: torch.Tensor, instances: List[Instan
     
     gt_classes = []
     gt_masks = []
-    # import ipdb;ipdb.set_trace()
     # store the gt_mask to gpu first 
     for instances_per_image in instances:
         if len(instances_per_image) == 0:

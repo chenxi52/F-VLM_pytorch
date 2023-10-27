@@ -71,7 +71,7 @@ def main(args,dicts,pred_by_image):
         for dic in tqdm.tqdm(dicts):
             img = cv2.imread(dic["file_name"], cv2.IMREAD_COLOR)[:, :, ::-1]
             basename = os.path.basename(dic["file_name"])
-            predictions , box_instances= create_instances(args, pred_by_image[dic["image_id"]], img.shape[:2], dic["image_id"], basename)
+            predictions , box_instances= create_instances(args, pred_by_image[dic["image_id"]], img.shape[:2], basename, dic["image_id"])
             boxes = box_instances.pred_boxes.tensor
             predictor.set_image(img,image_format='RGB')
             predictor.features = predictor.features[0]
@@ -87,11 +87,9 @@ def main(args,dicts,pred_by_image):
                                         return_logits=True)
                 output_instance = create_output_instances(masks, img.shape[:2], box_instances, index)
                 evalutor.process([predictions],[output_instance])
-
     results = evalutor.evaluate()
-    if comm.is_main_process():
-        logger.info("Evaluation results for {} in csv format:".format(args.dataset))
-        print_csv_format(results)
+    logger.info("Evaluation results for {} in csv format:".format(args.dataset))
+    print_csv_format(results)
 
 def dataset_id_map(args,ds_id):
     metadata = MetadataCatalog.get(args.dataset)
@@ -125,7 +123,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    logger = setup_logger()
+    logger = setup_logger(output=args.output)
 
     with PathManager.open(args.input, "r") as f:
         predictions = json.load(f)
