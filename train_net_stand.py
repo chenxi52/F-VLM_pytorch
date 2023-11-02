@@ -64,6 +64,8 @@ from detic.config import add_rsprompter_config
 from detectron2.utils.logger import setup_logger
 from detic.custom_solver import build_sam_optimizer
 import wandb
+from detic.evaluation.custom_evaluator import custom_inference_on_dataset
+
 logger = logging.getLogger("detectron2")
 
 
@@ -92,7 +94,7 @@ def do_test(cfg, model):
         else:
             assert 0, evaluator_type
         
-        results_i = inference_on_dataset(model, data_loader, evaluator)
+        results_i = custom_inference_on_dataset(model, data_loader, evaluator, frozen=cfg.MODEL.SAM_FROZEN)
         results[dataset_name] = results_i
         if comm.is_main_process():
             logger.info("Evaluation results for {} in csv format:".format(dataset_name))
@@ -104,6 +106,18 @@ def do_test(cfg, model):
 
 def do_train(cfg, model, resume=False):
     model.train()
+    ##### set prompter params False
+    if cfg.MODEL.SAM_FROZEN:
+        for key, params in model.named_parameters():
+            if 'sam.' in key:
+                params.requires_grad = False
+        def set_sam_eval():
+            if comm.get_world_size() > 1:
+                model.module.sam.eval()
+            else:
+                model.sam.eval()
+        set_sam_eval()
+    #####
     if cfg.SOLVER.USE_CUSTOM_SOLVER:
         # also set requires_grad for module
         optimizer = build_sam_optimizer(cfg, model)
@@ -120,19 +134,13 @@ def do_train(cfg, model, resume=False):
     # )
     ######
     checkpointer = samCheckpointer(
-        model, cfg.OUTPUT_DIR, optimizer=optimizer, scheduler=scheduler
+        model, cfg.OUTPUT_DIR, optimizer=optimizer, scheduler=scheduler, 
     )
     ######
     start_iter = (
         checkpointer.resume_or_load(cfg.MODEL.WEIGHTS, resume=resume).get("iteration", -1) + 1
     )
 
-    ###### set prompter params False
-    # for key, params in model.named_parameters():
-    #     if 'prompter' in key:
-    #         params.requires_grad = False
-
-    ######
     max_iter = cfg.SOLVER.MAX_ITER
 
     periodic_checkpointer = PeriodicCheckpointer(
@@ -221,6 +229,7 @@ def setup(args):
 
 
 def main(args):
+    import ipdb;ipdb.set_trace()
     cfg = setup(args)
     TIMESTAMP = "{0:%Y-%m-%dT%H-%M-%S/}".format(datetime.datetime.now())
     if comm.is_main_process() and cfg.WANDB:
@@ -242,7 +251,7 @@ def main(args):
     distributed = comm.get_world_size() > 1
     if distributed:
         model = DistributedDataParallel(
-            model, device_ids=[comm.get_local_rank()], broadcast_buffers=False, find_unused_parameters=False
+            model, device_ids=[comm.get_local_rank()], broadcast_buffers=True, find_unused_parameters=True
         )
 
     do_train(cfg, model, resume=args.resume)

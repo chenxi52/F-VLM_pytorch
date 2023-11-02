@@ -78,6 +78,7 @@ MODEL:
     POOLER_TYPE: "ROIAlignV2"
     PER_QUERY_POINT: 4
   MASK_ON: True
+  SAM_FROZEN: True
 DATASETS:
   TRAIN: ("coco_2017_train",)
   TEST: ("coco_2017_val",)

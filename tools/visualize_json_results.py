@@ -89,5 +89,5 @@ if __name__ == "__main__":
         concat = np.concatenate((vis_pred, vis_gt), axis=1)
         cv2.imwrite(os.path.join(args.output, basename), concat[:, :, ::-1])
         num+=1
-        # if num>20:
-        #     break
+        if num>40:
+            break

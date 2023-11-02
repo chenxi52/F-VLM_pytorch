@@ -13,7 +13,7 @@ from detectron2.utils.logger import log_every_n_seconds
 from detectron2.evaluation import DatasetEvaluator, DatasetEvaluators
 
 def custom_inference_on_dataset(
-    model, data_loader, evaluator: Union[DatasetEvaluator, List[DatasetEvaluator], None]
+    model, data_loader, evaluator: Union[DatasetEvaluator, List[DatasetEvaluator], None], frozen=False
 ):
     """
     Run model on the data_loader and evaluate the metrics with evaluator.
@@ -54,7 +54,7 @@ def custom_inference_on_dataset(
     total_eval_time = 0
     with ExitStack() as stack:
         if isinstance(model, nn.Module):
-            stack.enter_context(inference_context(model))
+            stack.enter_context(inference_context(model, frozen))
         stack.enter_context(torch.no_grad())
 
         start_data_time = time.perf_counter()
@@ -120,7 +120,7 @@ def custom_inference_on_dataset(
 
 
 @contextmanager
-def inference_context(model):
+def inference_context(model, frozen):
     """
     A context where the model is temporarily changed to eval mode,
     and restored to previous mode afterwards.
@@ -132,7 +132,8 @@ def inference_context(model):
     model.eval()
     yield
     model.train(training_mode)
-    # if training_mode and get_world_size()>1:
-        # model.module.sam.eval()
-    # else:
-        # model.sam.eval()
+    if frozen:
+        if isinstance(model, torch.nn.parallel.DistributedDataParallel):
+            model.module.sam.eval()
+        else:
+            model.sam.eval()
