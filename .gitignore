@@ -74,5 +74,5 @@ test.py
 detectron2/
 
 wandb/
-clip/
-CLIP-*
+
+CLIP-main
