@@ -376,10 +376,10 @@ class SamOpenDetector(SamDetector):
         resized_images = [F.interpolate(x.unsqueeze(0), size=target_size, mode='bilinear', align_corners=False).squeeze(1) for x in images]
         # Resize
         # Apply normalization
-        normalize_mean = torch.tensor([0.48145466, 0.4578275, 0.40821073]).unsqueeze(1).unsqueeze(2)
-        normalize_std = torch.tensor([0.26862954, 0.26130258, 0.27577711]).unsqueeze(1).unsqueeze(2)
+        normalize_mean = torch.tensor([0.48145466, 0.4578275, 0.40821073], device=images[0].device).unsqueeze(1).unsqueeze(2)
+        normalize_std = torch.tensor([0.26862954, 0.26130258, 0.27577711], device=images[0].device).unsqueeze(1).unsqueeze(2)
         resized_images = [(x - normalize_mean) / normalize_std for x in resized_images]
-        resized_images = [self._move_to_current_device(x) for x in resized_images]
+        # resized_images = [self._move_to_current_device(x) for x in resized_images]
 
         return torch.cat(resized_images,dim=0)
     

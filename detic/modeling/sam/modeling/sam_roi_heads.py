@@ -192,8 +192,6 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
 
         instances = self._forward_mask(sam, img_features, features, instances, clip, clip_images, clip_texts)
         # NMS , this is semantic token classification
-        import ipdb;ipdb.set_trace()
-        
         return instances
 
 

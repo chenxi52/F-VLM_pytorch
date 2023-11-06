@@ -256,7 +256,7 @@ def main(args):
     distributed = comm.get_world_size() > 1
     if distributed:
         model = DistributedDataParallel(
-            model, device_ids=[comm.get_local_rank()], broadcast_buffers=False, find_unused_parameters=False
+            model, device_ids=[comm.get_local_rank()], broadcast_buffers=False, find_unused_parameters=True
         )
 
     do_train(cfg, model, resume=args.resume)
