@@ -1,11 +1,10 @@
 # _BASE_: "Base_OVCOCO_C4_1x.yaml"
 MODEL:
-  META_ARCHITECTURE: "SamDetector" 
+  META_ARCHITECTURE: "SamOpenDetector" 
   BACKBONE:
     NAME: "build_sam_vit_det_backbone" #SAM vit_h
-    # TYPE: "vit_h"
-    # TYPE: "vit_b"
     TYPE: "vit_t"
+    CLIP_TYPE: "ViT-B/16"
   WEIGHTS: "mobile_sam.pt"
   # WEIGHTS: "/opt/tiger/OpenVo-Seg-master/output/wo_mask_with_prompt_encoder_roi_head_withgrad/model_final.pth"
   # WEIGHTS: "sam_vit_h_4b8939.pth"
@@ -32,7 +31,7 @@ MODEL:
     # (See "modeling/rpn/rpn_outputs.py" for details of this legacy issue)
     # which is approximately 1000 proposals per-image since the default batch size for FPN is 2.
     POST_NMS_TOPK_TRAIN: 1000
-    POST_NMS_TOPK_TEST: 1000
+    POST_NMS_TOPK_TEST: 300
     IOU_THRESHOLDS: [0.3, 0.7]
     BATCH_SIZE_PER_IMAGE: 512 # the sampling num 
     POSITIVE_FRACTION: 0.5
@@ -65,7 +64,7 @@ MODEL:
     TRAIN_ON_PRED_BOXES: True
     BBOX_REG_WEIGHTS: (10.0, 10.0, 5.0, 5.0)
     SMOOTH_L1_BETA: 0.
-    CLS_AGNOSTIC_BBOX_REG: False
+    CLS_AGNOSTIC_BBOX_REG: True
   ROI_MASK_HEAD:
     NAME: "samMaskHead"
     NUM_CONV: 4
@@ -119,5 +118,5 @@ TEST:
   IMS_PER_BATCH: 2 #every gpu has most 2 images  # change
 VERSION: 2
 FP16: True
-OUTPUT_DIR: './output/full_tune_tiny'
+OUTPUT_DIR: './output/wo_box_cls'
 WANDB: False

@@ -17,6 +17,8 @@ You may want to write your own script with your datasets and other customization
 
 Compared to "train_net.py", this script supports fewer default features.
 It also includes fewer abstraction, therefore is easier to add custom logic.
+
+add CLIP model
 """
 
 import logging
@@ -56,6 +58,7 @@ from detectron2.utils.events import (
     JSONWriter,
     TensorboardXWriter,
 )
+from torch.cuda.amp import GradScaler
 
 from detic.data.custom_dataset_mapper import SamDatasetMapper
 from detic.data.custom_build_augmentation import build_custom_augmentation
@@ -64,6 +67,7 @@ from detic.config import add_rsprompter_config
 from detectron2.utils.logger import setup_logger
 from detic.custom_solver import build_sam_optimizer
 import wandb
+from detic.modeling.clip import clip
 logger = logging.getLogger("detectron2")
 
 
@@ -159,13 +163,16 @@ def do_train(cfg, model, resume=False):
     #####
     
     data_loader = build_detection_train_loader(cfg, mapper=mapper)
-
+    if cfg.FP16:
+        scaler = GradScaler()
     logger.info("Starting training from iteration {}".format(start_iter))
     with EventStorage(start_iter) as storage:
         for data, iteration in zip(data_loader, range(start_iter, max_iter)):
             storage.iter = iteration
-            loss_dict = model(data)
-            losses = sum(loss_dict.values())
+            if cfg.SOLVER.AMP.ENABLED:
+                with torch.cuda.amp.autocast():
+                    loss_dict = model(data)
+                    losses = sum(loss_dict.values())
             assert torch.isfinite(losses).all(), loss_dict
 
             loss_dict_reduced = {k: v.item() for k, v in comm.reduce_dict(loss_dict).items()}
@@ -174,8 +181,13 @@ def do_train(cfg, model, resume=False):
                 storage.put_scalars(total_loss=losses_reduced, **loss_dict_reduced)
 
             optimizer.zero_grad()
-            losses.backward()
-            optimizer.step()
+            if cfg.SOLVER.AMP.ENABLED:
+                scaler.scale(losses).backward()
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                losses.backward()
+                optimizer.step()
             storage.put_scalar("lr", optimizer.param_groups[0]["lr"], smoothing_hint=False)
             scheduler.step()
 

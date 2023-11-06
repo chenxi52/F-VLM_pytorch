@@ -57,26 +57,6 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
                 cfg.MODEL.ROI_HEADS.IOU_LABELS,
                 allow_low_quality_matches=cfg.MODEL.ROI_HEADS.ALLOW_LOW_QUALITY_MATCHES,
             )
-        
-        in_features       = cfg.MODEL.ROI_HEADS.IN_FEATURES
-        pooler_resolution = cfg.MODEL.ROI_MASK_HEAD.POOLER_RESOLUTION
-        pooler_scales     = tuple(1.0 / input_shape[k].stride for k in in_features)
-        sampling_ratio    = cfg.MODEL.ROI_MASK_HEAD.POOLER_SAMPLING_RATIO
-        pooler_type       = cfg.MODEL.ROI_MASK_HEAD.POOLER_TYPE
-        # if cfg.MODEL.MASK_ON:
-            # del ret['mask_pooler']
-            
-            # ret['mask_pooler'] = (
-            #     customRoiPooler(
-            #         output_size=pooler_resolution,
-            #         scales=pooler_scales,
-            #         sampling_ratio=sampling_ratio,
-            #         pooler_type=pooler_type,
-            #     )
-            #     if pooler_type
-            #     else None
-            # )
-
         del ret['box_predictor']
         # update box_predictor for bbox_loss 
         ret.update(cls.init_box_head(ret['box_head'].output_shape, cfg))
@@ -89,8 +69,8 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             "box_predictor": box_predictor,
         }
 
-    def _forward_mask(self, sam: nn.Module, img_features: torch.Tensor, features: Dict[str, torch.Tensor], 
-                      instances: List[Instances]):
+    def _forward_mask(self, sam: nn.Module,  img_features: torch.Tensor,features: Dict[str, torch.Tensor],
+                      instances: List[Instances], clip:nn.Module, clip_images: torch.Tensor, clip_texts: torch.Tensor):
         """
         Forward logic of the mask prediction branch.
         Args:
@@ -108,24 +88,22 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         if self.training:
             # head is only trained on positive proposals.
             instances, _ = select_foreground_proposals(instances, self.num_classes)
-            # len(instances) = bz
-        boxes = [i.proposal_boxes.tensor if self.training else i.pred_boxes.tensor for i in instances]
-        boxes = torch.cat(boxes, dim=0)
-        # if self.mask_pooler is not None:
-            # the box here are fused together, but will be assigned to each level in mask_pooler
+        boxes = [i.proposal_boxes if self.training else i.pred_boxes for i in instances]
         
-            # features = [features[f] for f in self.mask_in_features]
-            # features = self.mask_pooler(features, boxes)
-            # # mask_roi_inds = [box.tensor.size(0).to(box.device) for box in boxes]
-            # if features.size(0)==0:
-            #     results_instances = []
-            #     for ins in instances:
-            #         ins.pred_masks = torch.tensor([], device=ins.pred_classes.device)
-            #         results_instances.append(ins)
-            #     return results_instances
-        # else:
-        #     features = {f: features[f] for f in self.mask_in_features}
-        return self.mask_head(boxes, img_features, instances, sam)
+        if self.mask_pooler is not None:
+            # the box here are fused together, but will be assigned to each level in mask_pooler
+            features = [features[f] for f in self.mask_in_features]
+            features = self.mask_pooler(features, boxes)
+            # mask_roi_inds = [box.tensor.size(0).to(box.device) for box in boxes]
+            if features.size(0)==0:
+                results_instances = []
+                for ins in instances:
+                    ins.pred_masks = torch.tensor([], device=ins.pred_classes.device)
+                    results_instances.append(ins)
+                return results_instances
+        else:
+            features = [features[f] for f in self.mask_in_features]
+        return self.mask_head(features, img_features, instances, sam, clip, clip_images, clip_texts)
 
 
     def forward( 
@@ -135,6 +113,9 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             features: Dict[str, torch.Tensor],
             proposals: List[Instances],
             targets: Optional[List[Instances]] = None,
+            clip: nn.Module=None,
+            clip_images: torch.Tensor=None,
+            clip_texts: torch.Tensor=None,
             )-> Tuple[List[Instances], Dict[str, torch.Tensor]]:
         """
             img_features: output of image_encoder
@@ -170,21 +151,23 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             # Usually the original proposals used by the box head are used by the mask, keypoint
             # heads. But when `self.train_on_pred_boxes is True`, proposals will contain boxes
             # predicted by the box head. proposal_boxes are replaced by boxes predicted by box_head
-            if self.mask_on:
-                losses.update(loss_mask=self._forward_mask(sam, img_features, x, proposals)['loss_mask'])
-                # self._forward_mask(sam, img_features, x, proposals)
+            losses.update(self._forward_mask(sam, img_features, x, proposals, clip, clip_images, clip_texts))
+            # self._forward_mask(sam, img_features, x, proposals)
+
             return proposals, losses
         else:
+            # dscard the nms from fast_rcnn
             pred_instances = self._forward_box(x, proposals)
+
             # pred_boxes = Boxes(boxes)   result.scores = scores  pred_classes
             # During inference cascaded prediction is used: the mask and keypoints heads are only
             # applied to the top scoring box detections.
-            if self.mask_on:
-                pred_instances = self.forward_with_given_boxes(sam, img_features, x, pred_instances)
+            pred_instances = self.forward_with_given_boxes(sam, img_features, x, pred_instances, clip, clip_images, clip_texts)
             return pred_instances, {}
     
     def forward_with_given_boxes(
-        self, sam: nn.Module, img_features: torch.Tensor, features: Dict[str, torch.Tensor], instances: List[Instances]
+        self, sam: nn.Module, img_features: torch.Tensor, features: Dict[str, torch.Tensor], instances: List[Instances],
+        clip:nn.Module, clip_images: torch.Tensor, clip_texts: torch.Tensor
         ) -> List[Instances]:
         """
         Use the given boxes in `instances` to produce other (non-box) per-ROI outputs.
@@ -205,10 +188,13 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
                 fields such as `pred_masks` or `pred_keypoints`.
         """
         assert not self.training
-        assert instances[0].has("pred_boxes") and instances[0].has("pred_classes")
-        instances = self._forward_mask(sam, img_features, features, instances)
-        return instances
+        assert instances[0].has("pred_boxes")
 
+        instances = self._forward_mask(sam, img_features, features, instances, clip, clip_images, clip_texts)
+        # NMS , this is semantic token classification
+        import ipdb;ipdb.set_trace()
+        
+        return instances
 
 
 class SinePositionalEncoding(nn.Module):

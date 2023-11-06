@@ -135,7 +135,8 @@ def add_detic_config(cfg):
 def add_rsprompter_config(cfg):
     _C = cfg
     _C.MODEL.BACKBONE.TYPE = 'vit_h'
-    
+    _C.MODEL.BACKBONE.CLIP_TYPE = 'RN50'
+
     _C.MODEL.FPN.INNER_CHANNELS  = 32
     _C.MODEL.FPN.UP_SAMPLE_SCALE = 4
     _C.MODEL.FPN.ANCHOR_STRIDE = [8, 16, 32]
@@ -180,3 +181,4 @@ def add_rsprompter_config(cfg):
     _C.DATALOADER.PERSISTENT_WORKERS = False
 
     _C.WANDB = False
+    

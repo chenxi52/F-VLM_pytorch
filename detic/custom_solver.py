@@ -87,28 +87,20 @@ def build_sam_optimizer(cfg: CfgNode, model: torch.nn.Module) -> torch.optim.Opt
     optimizer_type = cfg.SOLVER.OPTIMIZER
 
     for key, value in model.named_parameters(recurse=True):
-        # if not value.requires_grad:
-        #     continue
-        # # Avoid duplicating parameters
-        if value in memo:
+        if not value.requires_grad:
             continue
-        memo.add(value)
+        # # Avoid duplicating parameters
+        if key in memo:
+            continue
+        memo.add(key)
         lr = cfg.SOLVER.BASE_LR
         weight_decay = cfg.SOLVER.WEIGHT_DECAY
-        if 'xxx.' not in key:
-            value.requires_grad_(True)
-            param = {"params": [value], "lr": lr}
-            if optimizer_type != 'ADAMW':
-                param['weight_decay'] = weight_decay
+        param = {"params": [value], "lr": lr}
+        if optimizer_type != 'ADAMW':
+            param['weight_decay'] = weight_decay
             params += [param]
         else:
-            value.requires_grad_(False)
-        # print(key)
-    # print('*'*50)
-    # print('Optimzed Params are: ')
-    # for key, value in model.named_parameters(recurse=True):
-    #     if value.requires_grad == True:
-            # print(key)
+            params += [param]
 
     def maybe_add_full_model_gradient_clipping(optim):  # optim: the optimizer class
         # detectron2 doesn't have full model gradient clipping now
