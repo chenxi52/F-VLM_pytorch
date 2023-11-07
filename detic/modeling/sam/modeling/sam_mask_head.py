@@ -246,7 +246,7 @@ def custom_mask_rcnn_inference(pred_mask_logits: torch.Tensor, pred_instances: L
     num_boxes_per_image = [len(i) for i in pred_instances]
     mask_probs_pred = mask_probs_pred.split(num_boxes_per_image, dim=0)
     logits_image = logits_image.split(num_boxes_per_image, dim=0)
-    return inference_single_image(mask_probs_pred, logits_image, pred_instances,score_thresh,top_per_instance, nms_thresh )
+    return inference_single_image(mask_probs_pred, logits_image, pred_instances, score_thresh, top_per_instance, nms_thresh )
 
 
 def inference_single_image(mask_probs_pred, logits_image, pred_instances, score_thresh, top_per_instance, nms_thresh):
@@ -276,7 +276,7 @@ def inference_single_image(mask_probs_pred, logits_image, pred_instances, score_
         new_instance.scores = scores
         new_instance.pred_classes = filter_inds[:,1]
         new_instance.pred_masks = masks[filter_inds[:,0]]
-    instance_list.append(new_instance)
+        instance_list.append(new_instance)
 
     return instance_list
 
