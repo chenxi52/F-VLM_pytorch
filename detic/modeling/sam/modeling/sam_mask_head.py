@@ -253,23 +253,23 @@ def inference_single_image(mask_probs_pred, logits_image, pred_instances, score_
     instance_list = []
     
     for prob, logits, instances in zip(mask_probs_pred, logits_image, pred_instances):
-        new_instance = Instances(instances.image_size).to(instances.device)
+        new_instance = Instances(instances.image_size).to(logits.device)
         scores = F.softmax(logits, dim=-1)
         boxes = instances.pred_boxes.tensor
         masks = prob
         filter_mask = scores>score_thresh
         num_bbox_reg_classes = boxes.shape[1] // 4
         filter_inds = filter_mask.nonzero()
-
+        boxes = boxes.view(-1, num_bbox_reg_classes, 4)
         if num_bbox_reg_classes == 1:
-            new_boxes = boxes[filter_inds[:, 0]]
+            boxes = boxes[filter_inds[:, 0], 0]
         else:
-            new_boxes = boxes[filter_mask]
+            boxes = boxes[filter_mask]
         scores = scores[filter_mask]
         keep = batched_nms(boxes, scores, filter_inds[:, 1], nms_thresh)
         if top_per_instance >= 0:
             keep = keep[:top_per_instance]
-        new_boxes, scores, filter_inds = new_boxes[keep], scores[keep], filter_inds[keep]
+        boxes, scores, filter_inds = boxes[keep], scores[keep], filter_inds[keep]
 
         new_instance.pred_boxes = Boxes(boxes)  # (1, Hmask, Wmask)
         new_instance.scores = scores
