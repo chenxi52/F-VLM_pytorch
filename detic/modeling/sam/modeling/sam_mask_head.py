@@ -182,7 +182,8 @@ class samMaskHead(BaseMaskRCNNHead):
             gt_classes = (
                 cat([p.gt_classes for p in instances], dim=0) if len(instances) else torch.empty(0)
                 )
-            _log_classification_stats(logits_image, gt_classes)
+            
+            _log_classification_stats(logits_image, gt_classes, 'fast_rcnn')
             # TODO: not right
             loss ={"loss_mask": custom_mask_rcnn_loss(low_res_masks, instances, self.vis_period) * self.loss_weight,
                    "loss_class": cross_entropy(logits_image, gt_classes, reduction='mean')}
@@ -244,16 +245,15 @@ def custom_mask_rcnn_inference(pred_mask_logits: torch.Tensor, pred_instances: L
     num_boxes_per_image = [len(i) for i in pred_instances]
     mask_probs_pred = mask_probs_pred.split(num_boxes_per_image, dim=0)
     logits_image = logits_image.split(num_boxes_per_image, dim=0)
-    import ipdb;ipdb.set_trace()
     return inference_single_image(mask_probs_pred, logits_image, pred_instances,score_thresh,top_per_instance, nms_thresh )
 
 
 def inference_single_image(mask_probs_pred, logits_image, pred_instances, score_thresh, top_per_instance, nms_thresh):
-    # batch nms for single instance
+    # batch nms for single instance, class-wisely
     instance_list = []
     
     for prob, logits, instances in zip(mask_probs_pred, logits_image, pred_instances):
-        new_instance = Instances(instances.image_size)
+        new_instance = Instances(instances.image_size).to(instances.device)
         scores = F.softmax(logits, dim=-1)
         boxes = instances.pred_boxes.tensor
         masks = prob
@@ -262,20 +262,19 @@ def inference_single_image(mask_probs_pred, logits_image, pred_instances, score_
         filter_inds = filter_mask.nonzero()
 
         if num_bbox_reg_classes == 1:
-            boxes = boxes[filter_inds[:, 0]]
+            new_boxes = boxes[filter_inds[:, 0]]
         else:
-            boxes = boxes[filter_mask]
+            new_boxes = boxes[filter_mask]
         scores = scores[filter_mask]
         keep = batched_nms(boxes, scores, filter_inds[:, 1], nms_thresh)
         if top_per_instance >= 0:
             keep = keep[:top_per_instance]
-        boxes, scores, filter_inds = boxes[keep], scores[keep], filter_inds[keep]
+        new_boxes, scores, filter_inds = new_boxes[keep], scores[keep], filter_inds[keep]
 
         new_instance.pred_boxes = Boxes(boxes)  # (1, Hmask, Wmask)
         new_instance.scores = scores
         new_instance.pred_classes = filter_inds[:,1]
         new_instance.pred_masks = masks[filter_inds[:,0]]
-        import ipdb;ipdb.set_trace()
     instance_list.append(new_instance)
 
     return instance_list

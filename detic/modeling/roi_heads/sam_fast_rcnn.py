@@ -8,7 +8,9 @@ from detectron2.config import configurable
 from detectron2.layers import ShapeSpec, batched_nms, cat, cross_entropy, nonzero_tuple
 from detectron2.structures import Boxes, Instances
 from fvcore.nn import giou_loss, smooth_l1_loss
-from detectron2.modeling.roi_heads.fast_rcnn import _log_classification_stats, FastRCNNOutputLayers
+from detectron2.modeling.roi_heads.fast_rcnn import FastRCNNOutputLayers
+from detectron2.utils.events import get_event_storage
+
 __all__ = ["SamRCNNOutputLayers"]
 
 logger = logging.getLogger(__name__)
@@ -50,7 +52,7 @@ class SamRCNNOutputLayers(FastRCNNOutputLayers):
             cat([p.gt_classes for p in proposals], dim=0) if len(proposals) else torch.empty(0)
         )
 
-        _log_classification_stats(scores, gt_classes)
+        # log_classification_stats(scores, gt_classes)
 
         # parse box regression outputs
         if len(proposals):
@@ -66,11 +68,6 @@ class SamRCNNOutputLayers(FastRCNNOutputLayers):
             )
         else:
             proposal_boxes = gt_boxes = torch.empty((0, 4), device=proposal_deltas.device)
-
-        # if self.use_sigmoid_ce:
-        #     loss_cls = self.sigmoid_cross_entropy_loss(scores, gt_classes) #mean
-        # else:
-        #     loss_cls = cross_entropy(scores, gt_classes, reduction="mean")
 
         losses = {
             # "loss_cls": loss_cls,
@@ -200,6 +197,35 @@ def fast_rcnn_inference(
         for scores_per_image, boxes_per_image, image_shape in zip(scores, boxes, image_shapes)
     ]
     return result_per_image, None
+
+def log_classification_stats(pred_logits, gt_classes, prefix="fast_rcnn"):
+    """
+    Log the classification metrics to EventStorage.
+
+    Args:
+        pred_logits: Rx(K+1) logits. The last column is for background class.
+        gt_classes: R labels
+    """
+    num_instances = gt_classes.numel()
+    if num_instances == 0:
+        return
+    pred_classes = pred_logits.argmax(dim=1)
+    bg_class_ind = pred_logits.shape[1] - 1
+
+    fg_inds = (gt_classes >= 0) & (gt_classes < bg_class_ind)
+    num_fg = fg_inds.nonzero().numel()
+    fg_gt_classes = gt_classes[fg_inds]
+    fg_pred_classes = pred_classes[fg_inds]
+
+    num_false_negative = (fg_pred_classes == bg_class_ind).nonzero().numel()
+    num_accurate = (pred_classes == gt_classes).nonzero().numel()
+    fg_num_accurate = (fg_pred_classes == fg_gt_classes).nonzero().numel()
+
+    storage = get_event_storage()
+    storage.put_scalar(f"{prefix}/cls_accuracy", num_accurate / num_instances)
+    if num_fg > 0:
+        storage.put_scalar(f"{prefix}/fg_cls_accuracy", fg_num_accurate / num_fg)
+        storage.put_scalar(f"{prefix}/false_negative", num_false_negative / num_fg)
 
 
 def fast_rcnn_inference_single_image(

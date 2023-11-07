@@ -273,6 +273,7 @@ class SamOpenDetector(SamDetector):
             params.requires_grad = False
         for name, params in self.clip.named_parameters():
             params.requires_grad = False
+        logit_scale = self.clip.logit_scale.exp()
         self.register_buffer("clip_pixel_mean", torch.tensor([0.48145466, 0.4578275, 0.40821073]).unsqueeze(1).unsqueeze(2), False)
         self.register_buffer("clip_pixel_std", torch.tensor([0.26862954, 0.26130258, 0.27577711]).unsqueeze(1).unsqueeze(2), False)
 

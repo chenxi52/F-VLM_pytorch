@@ -118,5 +118,5 @@ TEST:
   IMS_PER_BATCH: 2 #every gpu has most 2 images  # change
 VERSION: 2
 FP16: True
-OUTPUT_DIR: './output/wo_box_cls'
+OUTPUT_DIR: './output/w_clip'
 WANDB: False
