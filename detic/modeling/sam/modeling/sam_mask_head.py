@@ -255,7 +255,7 @@ def inference_single_image(mask_probs_pred, logits_image, pred_instances, score_
     
     for prob, logits, instances in zip(mask_probs_pred, logits_image, pred_instances):
         new_instance = Instances(instances.image_size).to(logits.device)
-        scores = F.softmax(logits, dim=-1)
+        scores = logits.sigmoid()
         boxes = instances.pred_boxes.tensor
         masks = prob
         filter_mask = scores>score_thresh
