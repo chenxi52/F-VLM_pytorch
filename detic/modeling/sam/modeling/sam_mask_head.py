@@ -174,7 +174,8 @@ class samMaskHead(BaseMaskRCNNHead):
             logit_scale = clip.logit_scale.exp()
             semantic_token = self.contextformer(mask_tokens, clip_img_embeddings)#(batch_size, 4, self.clip_dim)
             semantic_token = self.projector(semantic_token)
-        
+            
+            clip_texts = move_device_like(clip_texts, semantic_token)
             logits_image, logits_text = self.get_logits(semantic_token, clip_texts, logit_scale)
             logits_image = logits_image.squeeze(1) 
         low_res_masks = torch.nn.functional.interpolate(low_res_masks, size=(self.train_size, self.train_size), mode='bilinear', align_corners=False)
