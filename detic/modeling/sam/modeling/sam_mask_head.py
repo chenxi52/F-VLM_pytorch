@@ -8,7 +8,7 @@ from detectron2.structures import Instances, ImageList, Boxes
 import torch.nn.functional as F
 from timm.models.layers import trunc_normal_
 from detectron2.utils.events import get_event_storage
-from detectron2.layers import cat, cross_entropy
+from detectron2.layers import cat, cross_entropy, batched_nms
 import time
 from detectron2.layers.wrappers import move_device_like
 from detectron2.structures.masks import polygons_to_bitmask
@@ -32,6 +32,8 @@ class samMaskHead(BaseMaskRCNNHead):
             clip_type: str = 'CLIP_400M_Large',
             d_model: int=1024,
             score_thresh: float=0.02,
+            top_per_instance: int=100,
+            test_nms_thresh: float=0.5,
             ) -> None:
         super().__init__()
         if with_sincos:
@@ -76,6 +78,8 @@ class samMaskHead(BaseMaskRCNNHead):
         self._init_weights(self.point_emb)
         self._init_weights(self.to_clip)
         self.score_thresh = score_thresh
+        self.top_per_instance = top_per_instance
+        self.test_nms_thresh = test_nms_thresh
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
@@ -106,7 +110,9 @@ class samMaskHead(BaseMaskRCNNHead):
                 'num_classes': num_classes,
                 'vis_period': cfg.VIS_PERIOD,
                 'clip_type': clip_type,
-                'score_thresh': cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST
+                'score_thresh': cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST,
+                'top_per_instance': cfg.TEST.DETECTIONS_PER_IMAGE,
+                'test_nms_thresh': cfg.MODEL.ROI_HEADS.NMS_THRESH_TEST,
                 }
     
     def forward(
@@ -183,9 +189,9 @@ class samMaskHead(BaseMaskRCNNHead):
             return loss
 
         else:
-            # low_res_masks = torch.nn.functional.interpolate(low_res_masks, size=(self.train_size, self.train_size), mode='bilinear', align_corners=False)
-            custom_mask_rcnn_inference(low_res_masks, instances, logits_image, self.score_thresh)
-            return instances
+            new_instances = custom_mask_rcnn_inference(low_res_masks, instances, logits_image, self.score_thresh, self.top_per_instance, self.test_nms_thresh)
+            del instances
+            return new_instances
         
     def get_logits(self, region_features, text_features, logit_scale):
         # 计算image_features @ text_features.T相似度矩阵
@@ -196,7 +202,7 @@ class samMaskHead(BaseMaskRCNNHead):
   
 
 def custom_mask_rcnn_inference(pred_mask_logits: torch.Tensor, pred_instances: List[Instances], logits_image: torch.Tensor,
-                               score_thresh: torch.Tensor):
+                               score_thresh: float, top_per_instance: int = 100, nms_thresh: float = 0.5):
     """
     Convert pred_mask_logits to estimated foreground probability masks while also
     extracting only the masks for the predicted classes in pred_instances. For each
@@ -238,28 +244,38 @@ def custom_mask_rcnn_inference(pred_mask_logits: torch.Tensor, pred_instances: L
     num_boxes_per_image = [len(i) for i in pred_instances]
     mask_probs_pred = mask_probs_pred.split(num_boxes_per_image, dim=0)
     logits_image = logits_image.split(num_boxes_per_image, dim=0)
-    return inference_single_image(mask_probs_pred, logits_image, pred_instances,score_thresh )
+    import ipdb;ipdb.set_trace()
+    return inference_single_image(mask_probs_pred, logits_image, pred_instances,score_thresh,top_per_instance, nms_thresh )
 
-def inference_single_image(mask_probs_pred, logits_image, pred_instances, score_thresh):
+
+def inference_single_image(mask_probs_pred, logits_image, pred_instances, score_thresh, top_per_instance, nms_thresh):
     # batch nms for single instance
     instance_list = []
     
     for prob, logits, instances in zip(mask_probs_pred, logits_image, pred_instances):
         new_instance = Instances(instances.image_size)
         scores = F.softmax(logits, dim=-1)
-        boxes = instances.pred_boxes
-        pred_class = logits.argmax(dim=1)
+        boxes = instances.pred_boxes.tensor
         masks = prob
         filter_mask = scores>score_thresh
-    
-        boxes = boxes[filter_mask]
+        num_bbox_reg_classes = boxes.shape[1] // 4
+        filter_inds = filter_mask.nonzero()
+
+        if num_bbox_reg_classes == 1:
+            boxes = boxes[filter_inds[:, 0]]
+        else:
+            boxes = boxes[filter_mask]
         scores = scores[filter_mask]
-        masks = masks[filter_mask]
-        pred_class = pred_class[filter_mask]
+        keep = batched_nms(boxes, scores, filter_inds[:, 1], nms_thresh)
+        if top_per_instance >= 0:
+            keep = keep[:top_per_instance]
+        boxes, scores, filter_inds = boxes[keep], scores[keep], filter_inds[keep]
+
         new_instance.pred_boxes = Boxes(boxes)  # (1, Hmask, Wmask)
         new_instance.scores = scores
-        new_instance.pred_classes = pred_class
-        new_instance.pred_masks = masks
+        new_instance.pred_classes = filter_inds[:,1]
+        new_instance.pred_masks = masks[filter_inds[:,0]]
+        import ipdb;ipdb.set_trace()
     instance_list.append(new_instance)
 
     return instance_list
@@ -268,13 +284,8 @@ def custom_mask_rcnn_loss(pred_mask_logits: torch.Tensor, instances: List[Instan
     """
     remove gt_masks.crop_and_resize from original mask_rcnn_loss 
     """
-    # start_ = time.time()
     cls_agnostic_mask = pred_mask_logits.size(1) == 1
     total_num_masks = pred_mask_logits.size(0)
-    # mask_side_len = pred_mask_logits.size(2)
-    # mask_side_len = 1024
-    # assert pred_mask_logits.size(2) == pred_mask_logits.size(3), "Mask prediction must be square!"
-    # print('loss_dual_time1:', time.time()-start_)
     
     gt_classes = []
     gt_masks = []
@@ -314,9 +325,7 @@ def custom_mask_rcnn_loss(pred_mask_logits: torch.Tensor, instances: List[Instan
 
     if len(gt_masks) == 0:
         return pred_mask_logits.sum() * 0
-
     gt_masks = cat(gt_masks, dim=0)
-    # print('loss_dual_time1:', time.time()-start_)
 
     if cls_agnostic_mask:
         pred_mask_logits = pred_mask_logits[:, 0]
@@ -331,7 +340,6 @@ def custom_mask_rcnn_loss(pred_mask_logits: torch.Tensor, instances: List[Instan
         # Here we allow gt_masks to be float as well (depend on the implementation of rasterize())
         gt_masks_bool = gt_masks > 0.5
     gt_masks = gt_masks.to(dtype=torch.float32)
-    # print('loss_dual_time2:', time.time()-start_)
 
     # Log the training accuracy (using gt classes and sigmoid(0.0) == 0.5 threshold)
     mask_incorrect = (pred_mask_logits > 0.0) != gt_masks_bool
@@ -341,7 +349,6 @@ def custom_mask_rcnn_loss(pred_mask_logits: torch.Tensor, instances: List[Instan
         gt_masks_bool.numel() - num_positive, 1.0
     )
     false_negative = (mask_incorrect & gt_masks_bool).sum().item() / max(num_positive, 1.0)
-    # print('loss_dual_time3:', time.time()-start_)
 
     storage = get_event_storage()
     storage.put_scalar("mask_rcnn/accuracy", mask_accuracy)
@@ -354,7 +361,6 @@ def custom_mask_rcnn_loss(pred_mask_logits: torch.Tensor, instances: List[Instan
         for idx, vis_mask in enumerate(vis_masks):
             vis_mask = torch.stack([vis_mask] * 3, axis=0)
             storage.put_image(name + f" ({idx})", vis_mask)
-    # print('loss_dual_time5:', time.time()-start_)
 
     mask_loss = F.binary_cross_entropy_with_logits(pred_mask_logits, gt_masks, reduction="mean")
 

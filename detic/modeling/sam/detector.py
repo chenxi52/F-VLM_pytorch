@@ -46,8 +46,6 @@ class SamDetector(GeneralizedRCNN):
             backbone: Backbone,
             proposal_generator: nn.Module,
             roi_heads: nn.Module,
-            pixel_mean: Tuple[float],
-            pixel_std: Tuple[float],
             input_format: Optional[str] = None,
             vis_period: int = 0,
         """
@@ -275,6 +273,8 @@ class SamOpenDetector(SamDetector):
             params.requires_grad = False
         for name, params in self.clip.named_parameters():
             params.requires_grad = False
+        self.register_buffer("clip_pixel_mean", torch.tensor([0.48145466, 0.4578275, 0.40821073]).unsqueeze(1).unsqueeze(2), False)
+        self.register_buffer("clip_pixel_std", torch.tensor([0.26862954, 0.26130258, 0.27577711]).unsqueeze(1).unsqueeze(2), False)
 
     @classmethod
     def from_config(cls, cfg):
@@ -339,7 +339,6 @@ class SamOpenDetector(SamDetector):
         else:
             # tiny image encoder are not implemented now
             feat, inter_features = self.sam.image_encoder(batched_inputs)
-        
         clip_img = self.clip.encode_image_feature(resized_images)
     
         # feat: Tensor[bz, 256, 64, 64]  inter_feats: List[32*Tensor[bz,64,64,1280]]
@@ -372,15 +371,10 @@ class SamOpenDetector(SamDetector):
             
     def resize_norm(self, batched_inputs, target_size=(224, 224)):
         # Convert the numpy image to a torch tensor and ensure it is in CxHxW format
-        images = [(x["image"]/255.).to(torch.float) for x in batched_inputs]
+        images = [self._move_to_current_device((x["image"]/255.).to(torch.float)) for x in batched_inputs]
         resized_images = [F.interpolate(x.unsqueeze(0), size=target_size, mode='bilinear', align_corners=False).squeeze(1) for x in images]
-        # Resize
         # Apply normalization
-        normalize_mean = torch.tensor([0.48145466, 0.4578275, 0.40821073], device=images[0].device).unsqueeze(1).unsqueeze(2)
-        normalize_std = torch.tensor([0.26862954, 0.26130258, 0.27577711], device=images[0].device).unsqueeze(1).unsqueeze(2)
-        resized_images = [(x - normalize_mean) / normalize_std for x in resized_images]
-        # resized_images = [self._move_to_current_device(x) for x in resized_images]
-
+        resized_images = [(x - self.clip_pixel_mean) / self.clip_pixel_std for x in resized_images]
         return torch.cat(resized_images,dim=0)
     
     @torch.no_grad()

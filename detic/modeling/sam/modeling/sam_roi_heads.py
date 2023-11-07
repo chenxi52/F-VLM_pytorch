@@ -163,6 +163,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             # During inference cascaded prediction is used: the mask and keypoints heads are only
             # applied to the top scoring box detections.
             pred_instances = self.forward_with_given_boxes(sam, img_features, x, pred_instances, clip, clip_images, clip_texts)
+            import ipdb; ipdb.set_trace()
             return pred_instances, {}
     
     def forward_with_given_boxes(
