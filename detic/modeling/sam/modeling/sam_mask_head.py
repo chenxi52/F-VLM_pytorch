@@ -187,7 +187,7 @@ class samMaskHead(BaseMaskRCNNHead):
             gt_classes = (
                 cat([p.gt_classes for p in instances], dim=0) if len(instances) else torch.empty(0)
                 )
-            logits_image = logits_image.squeeze()
+            logits_image = logits_image.squeeze(dim=1)
             target_classes_onehot = torch.zeros(logits_image.shape, dtype=logits_image.dtype, device=logits_image.device)
             target_classes_onehot.scatter_(1, gt_classes.unsqueeze(-1), 1)
             _log_classification_stats(logits_image, gt_classes, 'fast_rcnn')

@@ -110,7 +110,7 @@ def do_train(cfg, model, resume=False):
     model.train()
     if cfg.SOLVER.USE_CUSTOM_SOLVER:
         # also set requires_grad for module
-        optimizer = build_sam_optimizer(cfg, model)
+        optimizer = build_sam_optimizer(cfg, model, logger)
     else:
         assert cfg.SOLVER.OPTIMIZER == 'SGD'
         assert cfg.SOLVER.CLIP_GRADIENTS.CLIP_TYPE != 'full_model'

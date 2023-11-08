@@ -5,7 +5,8 @@ from typing import Any, Callable, Dict, Iterable, List, Set, Type, Union
 import torch
 
 from detectron2.config import CfgNode
-
+import detectron2.utils.comm as comm
+from pprint import pformat
 from detectron2.solver.build import maybe_add_gradient_clipping
 
 def match_name_keywords(n, name_keywords):
@@ -78,7 +79,7 @@ def build_custom_optimizer(cfg: CfgNode, model: torch.nn.Module) -> torch.optim.
     return optimizer
 
 
-def build_sam_optimizer(cfg: CfgNode, model: torch.nn.Module) -> torch.optim.Optimizer:
+def build_sam_optimizer(cfg: CfgNode, model: torch.nn.Module, logger) -> torch.optim.Optimizer:
     """
     Build an optimizer from config.
     """
@@ -101,7 +102,8 @@ def build_sam_optimizer(cfg: CfgNode, model: torch.nn.Module) -> torch.optim.Opt
             params += [param]
         else:
             params += [param]
-
+    if comm.is_main_process():
+        logger.info('Optimized parameters:\n%s', pformat(memo))
     def maybe_add_full_model_gradient_clipping(optim):  # optim: the optimizer class
         # detectron2 doesn't have full model gradient clipping now
         clip_norm_val = cfg.SOLVER.CLIP_GRADIENTS.CLIP_VALUE
