@@ -192,7 +192,6 @@ class samMaskHead(BaseMaskRCNNHead):
                 )
             logits_image = logits_image.squeeze(dim=1)
             # gt_class has index 81; logits_image has index 80
-            import ipdb;ipdb.set_trace()
             log_classification_stats(logits_image, gt_classes, 'fast_rcnn')
             
             target_classes_onehot = torch.zeros(logits_image.shape, dtype=logits_image.dtype, device=logits_image.device)
@@ -233,31 +232,34 @@ class samMaskHead(BaseMaskRCNNHead):
         """
         cls_agnostic_mask = pred_mask_logits.size(1) == 1
         total_num_masks = pred_mask_logits.size(0)
-        
+
         gt_classes = []
         gt_masks = []
+        fg_inds_list = []
+        num_instance_list = []
         # store the gt_mask to gpu first 
         for instances_per_image in instances:
             gt_classes_per_image = instances_per_image.gt_classes.to(dtype=torch.int64)
             fg_inds = nonzero_tuple((gt_classes_per_image >= 0) & (gt_classes_per_image < self.data_classes))[0]
-            if len(instances_per_image) == 0:
-                continue
-            if not cls_agnostic_mask:
-                gt_classes.append(gt_classes_per_image[fg_inds])
+
+            gt_classes.append(gt_classes_per_image[fg_inds])
             # A tensor of shape (N, M, M), N=#instances in the image; M=mask_side_len
             gt_masks_per_image = instances_per_image.gt_masks.tensor[fg_inds]
             gt_masks.append(gt_masks_per_image)
-
+            fg_inds_list.append(fg_inds)
+            num_instance_list.append(len(instances_per_image))
+        pred_mask_per_logits = pred_mask_logits.split(num_instance_list, dim=0)
+        pred_mask_logits_list = [pred_mask_per_logits[i][fg_inds_list[i]] for i in range(len(fg_inds_list))]
+        pred_mask_logits = torch.cat(pred_mask_logits_list, dim=0)
         if len(gt_masks) == 0:
             return pred_mask_logits.sum() * 0
         gt_masks = cat(gt_masks, dim=0)
-
         if cls_agnostic_mask:
-            pred_mask_logits = pred_mask_logits[:, 0][fg_inds]
+            pred_mask_logits = pred_mask_logits[:, 0]
         else:
             indices = torch.arange(total_num_masks)
             gt_classes = cat(gt_classes, dim=0)
-            pred_mask_logits = pred_mask_logits[indices, gt_classes][fg_inds]
+            pred_mask_logits = pred_mask_logits[indices, gt_classes]
 
         if gt_masks.dtype == torch.bool:
             gt_masks_bool = gt_masks
