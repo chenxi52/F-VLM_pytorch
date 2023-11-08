@@ -85,9 +85,6 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         """
         if not self.mask_on:
             return {} if self.training else instances
-        if self.training:
-            # head is only trained on positive proposals.
-            instances, _ = select_foreground_proposals(instances, self.num_classes)
         boxes = [i.proposal_boxes if self.training else i.pred_boxes for i in instances]
         
         if self.mask_pooler is not None:

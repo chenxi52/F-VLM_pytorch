@@ -91,100 +91,17 @@ class SamDetector(GeneralizedRCNN):
         # batched_inputs is a dict
         images = self.preprocess_image(batched_inputs) #padding and size_divisiable
         img_embedding_feat, inter_feats = self.extract_feat(images.tensor)
-        #########################
-        # gt_instances = [x["instances"].to(self.device) for x in batched_inputs] #instance have img_Size with longest-size = 1024
-        # boxes_prompt = gt_instances[0].get("gt_boxes")
-        # #sam 
-        # sparse_embeddings, dense_embeddings = self.sam.prompt_encoder(
-        #         points=None,
-        #         boxes=boxes_prompt.tensor,
-        #         masks=None,
-        #     )
-        # low_res_masks, iou_predictions = self.sam.mask_decoder(
-        #     image_embeddings=img_embedding_feat,
-        #     image_pe=self.sam.prompt_encoder.get_dense_pe(),
-        #     sparse_prompt_embeddings=sparse_embeddings,
-        #     dense_prompt_embeddings=dense_embeddings,
-        #     multimask_output=True,
-        # )
-        # masks = F.interpolate(
-        #     low_res_masks,
-        #     (self.sam.image_encoder.img_size, self.sam.image_encoder.img_size),
-        #     mode="bilinear",
-        #     align_corners=False,
-        # )
-        # masks = masks > self.sam.mask_threshold
-        # # Assuming img_tensor is your normalized image tensor with shape [3, 1024, 1024]
-        # # Define a directory to save the images and masks
-        # save_dir = "visualized_results"
-        # if not os.path.exists(save_dir):
-        #     os.makedirs(save_dir)
-
-        # # Convert normalized tensor to range [0, 1] for image visualization
-        # img_np = images[0].cpu().numpy().transpose(1, 2, 0)
-        # img_np = img_np.clip(0, 1)
-        # # Save the image
-        # img_filename = os.path.join(save_dir, "image.png")
-        # # import ipdb; ipdb.set_trace()
-        # # plt.imsave(img_filename,  img_np)
-        # plt.figure(figsize=(10,10))
-        # plt.imshow(img_np)
-        # plt.axis('on')
-        # plt.show()
-        # plt.close()
-
-
-        # fig, ax = plt.subplots(figsize=(10,10))
-        # ax.imshow(img_np)
-
-        # # Now, save each of the 20 masks
-        # for idx in range(masks.shape[0]):
-        #     # Extract mask
-        #     mask_np = masks[idx].cpu().numpy().transpose(1, 2, 0)
-            
-        #     # Normalize mask to range [0, 1] 
-        #     # mask_np = (mask_np - mask_np.min()) / (mask_np.max() - mask_np.min() + 1e-5)  # added small epsilon to avoid division by zero
-            
-        #     # Ensure mask is in range [0, 1]
-        #     mask_np = mask_np.clip(0, 1)
-        #     # Convert to float
-        #     mask_np = mask_np.astype(float)
-        #     ax.imshow(mask_np)
-        #     # Save the mask
-        #     # mask_filename = os.path.join(save_dir, f"mask_{idx+1}.png")
-        #     # plt.imsave(mask_filename, mask_np)
-        # ax.axis('off')
-        # plt.show()
-        # # Saving the image with points before mask
-        # fig.savefig('result.png')
-        # plt.close(fig)
-
-        # save_image(images.tensor[0], 'output_image.png') # nrow determines the number of images in a row
-        # #########################
-
-        # sssss
         fpn_features = self.backbone(inter_feats)
         # proposal_generator need to be trained before testing
         proposals, _ = self.proposal_generator(images, fpn_features, None) #samFpn # proposals: img_height=img_width=1024
 
         results, _ = self.roi_heads(self.sam, img_embedding_feat, fpn_features, proposals)
-        # gt_instances = [x["instances"].to(self.device) for x in batched_inputs] #instance have img_Size with longest-size = 1024
-        ###########################
-        # Replacing content for each pair of gt_instance and result
-        # Assuming results and gt_instances are lists of Instances and have the same length
-        
-
-        # This will give you a list of results in the desired format
         ###########################
         # batched_inputs have ori_image_sizes
         # images.image_sizes have input_image_sizes
-        # img_input_sizes = [(inp['input_height'], inp['input_width']) for inp in batched_inputs]
-        # ori_sizes = [(inp['height'], inp['width']) for inp in batched_inputs]
         if do_postprocess:
             assert not torch.jit.is_scripting(), \
                 "Scripting is not supported for postprocess."
-            # return self._postprocess(
-            #     instances=results, ori_sizes=ori_sizes, image_sizes=img_input_sizes)
             return self._postprocess(instances=results, batched_inputs=batched_inputs, mask_threshold=self.mask_thr_binary)
             # return self.sam.postprocess_masks()
         else:
@@ -273,7 +190,6 @@ class SamOpenDetector(SamDetector):
             params.requires_grad = False
         for name, params in self.clip.named_parameters():
             params.requires_grad = False
-        logit_scale = self.clip.logit_scale.exp()
         self.register_buffer("clip_pixel_mean", torch.tensor([0.48145466, 0.4578275, 0.40821073]).unsqueeze(1).unsqueeze(2), False)
         self.register_buffer("clip_pixel_std", torch.tensor([0.26862954, 0.26130258, 0.27577711]).unsqueeze(1).unsqueeze(2), False)
 
@@ -398,7 +314,8 @@ class SamOpenDetector(SamDetector):
         for clss in class_names:
             txts = [template.format(clss.replace('-other','').replace('-merged','').replace('-stuff','')) for template in templates]
             clss_embeddings.append(extract_mean_emb(txts))
-
+        txts = ['background']
+        clss_embeddings.append(extract_mean_emb(txts))
         text_emb = torch.stack(clss_embeddings, dim=0)
         text_emb /= text_emb.norm(dim=-1, keepdim=True) 
     

@@ -16,6 +16,7 @@ import torch.cuda.amp as amp
 from detectron2.modeling.roi_heads.mask_head import mask_rcnn_loss
 from detic.modeling.ContextFormer import build_contextformer
 from detectron2.modeling.roi_heads.fast_rcnn import _log_classification_stats
+from detectron2.layers import nonzero_tuple
 from fvcore.nn import sigmoid_focal_loss_jit
 # add classification with clip text
 @ROI_MASK_HEAD_REGISTRY.register()
@@ -36,6 +37,7 @@ class samMaskHead(BaseMaskRCNNHead):
             top_per_instance: int=100,
             test_nms_thresh: float=0.5,
             mask_loss_type: str='ce_dice',
+            data_classes: int=80,
             ) -> None:
         super().__init__()
         if with_sincos:
@@ -83,7 +85,7 @@ class samMaskHead(BaseMaskRCNNHead):
         self.top_per_instance = top_per_instance
         self.test_nms_thresh = test_nms_thresh
         self.mask_loss_type = mask_loss_type
-
+        self.data_classes  = data_classes
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
             trunc_normal_(m.weight, std=.02)
@@ -117,6 +119,7 @@ class samMaskHead(BaseMaskRCNNHead):
                 'top_per_instance': cfg.TEST.DETECTIONS_PER_IMAGE,
                 'test_nms_thresh': cfg.MODEL.ROI_HEADS.NMS_THRESH_TEST,
                 'mask_loss_type': cfg.MODEL.ROI_MASK_HEAD.MASK_LOSS_TYPE,
+                'data_classes': cfg.MODEL.ROI_HEADS.NUM_CLASSES,
                 }
     
     def forward(
@@ -188,9 +191,12 @@ class samMaskHead(BaseMaskRCNNHead):
                 cat([p.gt_classes for p in instances], dim=0) if len(instances) else torch.empty(0)
                 )
             logits_image = logits_image.squeeze(dim=1)
+            # gt_class has index 81; logits_image has index 80
+            import ipdb;ipdb.set_trace()
+            log_classification_stats(logits_image, gt_classes, 'fast_rcnn')
+            
             target_classes_onehot = torch.zeros(logits_image.shape, dtype=logits_image.dtype, device=logits_image.device)
             target_classes_onehot.scatter_(1, gt_classes.unsqueeze(-1), 1)
-            _log_classification_stats(logits_image, gt_classes, 'fast_rcnn')
             # TODO: not right
             loss ={"loss_mask": self.custom_mask_rcnn_loss(low_res_masks, instances, self.vis_period) * self.loss_weight,
                    "loss_cls": self.sigmoid_focal_loss(logits_image, target_classes_onehot, num_boxes=batch_size)}
@@ -223,6 +229,7 @@ class samMaskHead(BaseMaskRCNNHead):
     def custom_mask_rcnn_loss(self, pred_mask_logits: torch.Tensor, instances: List[Instances], vis_period: int = 0):
         """
         remove gt_masks.crop_and_resize from original mask_rcnn_loss 
+        with foreground selection
         """
         cls_agnostic_mask = pred_mask_logits.size(1) == 1
         total_num_masks = pred_mask_logits.size(0)
@@ -231,36 +238,14 @@ class samMaskHead(BaseMaskRCNNHead):
         gt_masks = []
         # store the gt_mask to gpu first 
         for instances_per_image in instances:
+            gt_classes_per_image = instances_per_image.gt_classes.to(dtype=torch.int64)
+            fg_inds = nonzero_tuple((gt_classes_per_image >= 0) & (gt_classes_per_image < self.data_classes))[0]
             if len(instances_per_image) == 0:
                 continue
             if not cls_agnostic_mask:
-                gt_classes_per_image = instances_per_image.gt_classes.to(dtype=torch.int64)
-                gt_classes.append(gt_classes_per_image)
-            # the mask are sampled by box grid with repspect to the mask_size_len when the gt_maks=polygonMask
-            # no need the crop_and_resize
-            # if gt_mask is bitMask, the crop_and_resize have align_ratio=1, and resize the roi to mask_side_len, which is totally wrong!!!
-            # instances.gt_masks.tensor = torch.nn.functional.pad(instances.gt_masks.tensor, (0, mask_side_len-instances.gt_masks.tensor.shape[-1], 0, mask_side_len-instances.gt_masks.tensor.shape[-2]))
-            
-            
-            # gt_masks_per_image = instances_per_image.gt_masks.crop_and_resize(
-            #     instances_per_image.proposal_boxes.tensor, mask_side_len
-            # ).to(device=pred_mask_logits.device)
-            ########
-            # device = instances_per_image.proposal_boxes.device
-
-            # # here the gt_mask is bitmask
-            # gt_masks_per_image = [torch.from_numpy(polygons_to_bitmask(copy.deepcopy(polygons), mask_side_len, mask_side_len))
-            #                       for i, polygons in enumerate(instances_per_image.gt_masks.polygons)]
-            # import ipdb;ipdb.set_trace()
-            # gt_masks_per_image = torch.tensor(torch.ones(size=(len(instances_per_image.gt_masks.polygons), mask_side_len, mask_side_len)),device=device)
-            #########
-            # if len(gt_masks_per_image) == 0:
-            #     gt_masks_per_image = torch.empty(0, mask_side_len, mask_side_len, device=device, dtype=torch.bool)
-            # else:
-            #     gt_masks_per_image = torch.stack(gt_masks_per_image, dim=0).to(device=device)
-            
+                gt_classes.append(gt_classes_per_image[fg_inds])
             # A tensor of shape (N, M, M), N=#instances in the image; M=mask_side_len
-            gt_masks_per_image = instances_per_image.gt_masks.tensor
+            gt_masks_per_image = instances_per_image.gt_masks.tensor[fg_inds]
             gt_masks.append(gt_masks_per_image)
 
         if len(gt_masks) == 0:
@@ -268,11 +253,11 @@ class samMaskHead(BaseMaskRCNNHead):
         gt_masks = cat(gt_masks, dim=0)
 
         if cls_agnostic_mask:
-            pred_mask_logits = pred_mask_logits[:, 0]
+            pred_mask_logits = pred_mask_logits[:, 0][fg_inds]
         else:
             indices = torch.arange(total_num_masks)
             gt_classes = cat(gt_classes, dim=0)
-            pred_mask_logits = pred_mask_logits[indices, gt_classes]
+            pred_mask_logits = pred_mask_logits[indices, gt_classes][fg_inds]
 
         if gt_masks.dtype == torch.bool:
             gt_masks_bool = gt_masks
@@ -459,3 +444,32 @@ def reduce_loss(loss, reduction):
     elif reduction_enum == 2:
         return loss.sum()
 
+
+def log_classification_stats(pred_logits, gt_classes, prefix="fast_rcnn"):
+    """
+    Log the classification metrics to EventStorage.
+
+    Args:
+        pred_logits: Rx(K) logits. The last column is for background class.
+        gt_classes: R labels
+    """
+    num_instances = gt_classes.numel()
+    if num_instances == 0:
+        return
+    pred_classes = pred_logits.argmax(dim=1)
+    bg_class_ind = pred_logits.shape[1]
+
+    fg_inds = (gt_classes >= 0) & (gt_classes < bg_class_ind)
+    num_fg = fg_inds.nonzero().numel()
+    fg_gt_classes = gt_classes[fg_inds]
+    fg_pred_classes = pred_classes[fg_inds]
+
+    num_false_negative = (fg_pred_classes == bg_class_ind).nonzero().numel()
+    num_accurate = (pred_classes == gt_classes).nonzero().numel()
+    fg_num_accurate = (fg_pred_classes == fg_gt_classes).nonzero().numel()
+
+    storage = get_event_storage()
+    storage.put_scalar(f"{prefix}/cls_accuracy", num_accurate / num_instances)
+    if num_fg > 0:
+        storage.put_scalar(f"{prefix}/fg_cls_accuracy", fg_num_accurate / num_fg)
+        storage.put_scalar(f"{prefix}/false_negative", num_false_negative / num_fg)
