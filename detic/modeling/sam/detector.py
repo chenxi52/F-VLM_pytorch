@@ -17,10 +17,7 @@ from detectron2.data.detection_utils import convert_image_to_rgb
 from detectron2.modeling import build_backbone, build_proposal_generator, build_roi_heads, build_mask_head
 from detic.modeling.sam import sam_model_registry
 import torch.nn.functional as F
-import ipdb
 import matplotlib.pyplot as plt
-import os
-import time
 from detectron2.modeling.roi_heads.mask_head import mask_rcnn_loss
 from detic.modeling.clip import clip
 from detic.prompt_engineering import get_prompt_templates
@@ -102,8 +99,7 @@ class SamDetector(GeneralizedRCNN):
         if do_postprocess:
             assert not torch.jit.is_scripting(), \
                 "Scripting is not supported for postprocess."
-            return self._postprocess(instances=results, batched_inputs=batched_inputs, mask_threshold=self.mask_thr_binary)
-            # return self.sam.postprocess_masks()
+            return self.postprocess(pred_instances=results, batched_inputs=batched_inputs, mask_threshold=self.mask_thr_binary)
         else:
             return results
         
@@ -143,8 +139,7 @@ class SamDetector(GeneralizedRCNN):
         # feat: Tensor[bz, 256, 64, 64]  inter_feats: List[32*Tensor[bz,64,64,1280]]
         return feat, inter_features
     
-    @staticmethod
-    def _postprocess(instances, batched_inputs: List[Dict[str, torch.Tensor]], mask_threshold:float):
+    def postprocess(self, pred_instances, batched_inputs: List[Dict[str, torch.Tensor]], mask_threshold:float):
         """
         Rescale the output instances to the target size.
         image_sizes should be the origin size of images
@@ -152,7 +147,7 @@ class SamDetector(GeneralizedRCNN):
         # note: private function; subject to changes
         processed_results = []
         for results_per_image, input_per_image in zip(
-            instances, batched_inputs
+            pred_instances, batched_inputs
         ):
             # height, width: input_image_sizes， 原本的 img_size
             height = input_per_image.get("height")
@@ -235,16 +230,12 @@ class SamOpenDetector(SamDetector):
         proposals, _ = self.proposal_generator(images, fpn_features, None) #samFpn # proposals: img_height=img_width=1024
         results, _ = self.roi_heads(self.sam, img_embedding_feat, fpn_features, proposals, targets=None,
                                     clip=self.clip, clip_images=clip_images, clip_texts=self.text_feats )
-        # gt_instances = [x["instances"].to(self.device) for x in batched_inputs] #instance have img_Size with longest-size = 1024
         # batched_inputs have ori_image_sizes
         # images.image_sizes have input_image_sizes
         if do_postprocess:
             assert not torch.jit.is_scripting(), \
                 "Scripting is not supported for postprocess."
-            # return self._postprocess(
-            #     instances=results, ori_sizes=ori_sizes, image_sizes=img_input_sizes)
-            return self._postprocess(instances=results, batched_inputs=batched_inputs, mask_threshold=self.mask_thr_binary)
-            # return self.sam.postprocess_masks()
+            return self.postprocess(pred_instances=results, batched_inputs=batched_inputs, mask_threshold=self.mask_thr_binary)
         else:
             return results
         
@@ -376,5 +367,4 @@ def custom_detector_postprocess(
         results.pred_masks = mask_tensor
     output_boxes.scale(output_width_tmp/input_size[1], output_height_tmp/input_size[0])
     results.pred_boxes = output_boxes
-    # output_boxes.clip(results.image_size)
     return results

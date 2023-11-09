@@ -11,9 +11,8 @@ from detectron2.utils.events import get_event_storage
 from detectron2.layers import cat, cross_entropy, batched_nms
 import time
 from detectron2.layers.wrappers import move_device_like
-from detectron2.structures.masks import polygons_to_bitmask
 import torch.cuda.amp as amp
-from detectron2.modeling.roi_heads.mask_head import mask_rcnn_loss
+from detectron2.modeling.roi_heads.roi_heads import select_foreground_proposals
 from detic.modeling.ContextFormer import build_contextformer
 from detectron2.modeling.roi_heads.fast_rcnn import _log_classification_stats
 from detectron2.layers import nonzero_tuple
@@ -86,6 +85,7 @@ class samMaskHead(BaseMaskRCNNHead):
         self.test_nms_thresh = test_nms_thresh
         self.mask_loss_type = mask_loss_type
         self.data_classes  = data_classes
+
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
             trunc_normal_(m.weight, std=.02)
@@ -186,11 +186,12 @@ class samMaskHead(BaseMaskRCNNHead):
             clip_texts = move_device_like(clip_texts, semantic_token)
             logits_image, logits_text = self.get_logits(semantic_token, clip_texts, logit_scale)
         low_res_masks = torch.nn.functional.interpolate(low_res_masks, size=(self.train_size, self.train_size), mode='bilinear', align_corners=False)
+        logits_image = logits_image.squeeze(dim=1)
+        
         if self.training:
             gt_classes = (
                 cat([p.gt_classes for p in instances], dim=0) if len(instances) else torch.empty(0)
                 )
-            logits_image = logits_image.squeeze(dim=1)
             # gt_class has index 81; logits_image has index 80
             _log_classification_stats(logits_image, gt_classes, 'fast_rcnn')
             
@@ -202,7 +203,7 @@ class samMaskHead(BaseMaskRCNNHead):
             return loss
 
         else:
-            new_instances = custom_mask_rcnn_inference(low_res_masks, instances, logits_image, self.score_thresh, self.top_per_instance, self.test_nms_thresh)
+            new_instances = self.custom_mask_rcnn_inference(low_res_masks, instances, logits_image[:,:-1], self.score_thresh, self.top_per_instance, self.test_nms_thresh)
             del instances
             return new_instances
         
@@ -309,82 +310,113 @@ class samMaskHead(BaseMaskRCNNHead):
             assert False, 'mask loss type not supported'
         return mask_loss
 
-def custom_mask_rcnn_inference(pred_mask_logits: torch.Tensor, pred_instances: List[Instances], logits_image: torch.Tensor,
-                               score_thresh: float, top_per_instance: int = 100, nms_thresh: float = 0.5):
+    def custom_mask_rcnn_inference(self, pred_mask_logits: torch.Tensor, pred_instances: List[Instances], logits_image: torch.Tensor,
+                                score_thresh: float, top_per_instance: int = 100, nms_thresh: float = 0.5):
+        """
+        Convert pred_mask_logits to estimated foreground probability masks while also
+        extracting only the masks for the predicted classes in pred_instances. For each
+        predicted box, the mask of the same class is attached to the instance by adding a
+        new "pred_masks" field to pred_instances.
+
+        Args:
+            pred_mask_logits (Tensor): A tensor of shape (B, C, Hmask, Wmask) or (B, 1, Hmask, Wmask)
+                for class-specific or class-agnostic, where B is the total number of predicted masks
+                in all images, C is the number of foreground classes, and Hmask, Wmask are the height
+                and width of the mask predictions. The values are logits.
+            pred_instances (list[Instances]): A list of N Instances, where N is the number of images
+                in the batch. Each Instances must have field "pred_classes".
+
+        Returns:
+            None. pred_instances will contain an extra "pred_masks" field storing a mask of size (Hmask,
+                Wmask) for predicted class. Note that the masks are returned as a soft (non-quantized)
+                masks the resolution predicted by the network; post-processing steps, such as resizing
+                the predicted masks to the original image resolution and/or binarizing them, is left
+                to the caller.
+        """
+        cls_agnostic_mask = pred_mask_logits.size(1) == 1
+
+        if cls_agnostic_mask:
+            mask_probs_pred = pred_mask_logits.sigmoid()
+        else:
+            # Select masks corresponding to the predicted classes
+            num_masks = pred_mask_logits.shape[0]
+            class_pred = cat([i.pred_classes for i in pred_instances])
+            device = (
+                class_pred.device
+                if torch.jit.is_scripting()
+                else ("cpu" if torch.jit.is_tracing() else class_pred.device)
+            )
+            indices = move_device_like(torch.arange(num_masks, device=device), class_pred)
+            mask_probs_pred = pred_mask_logits[indices, class_pred][:, None].sigmoid()
+        # mask_probs_pred.shape: (B, 1, Hmask, Wmask)
+
+        num_boxes_per_image = [len(i) for i in pred_instances]
+        mask_probs_pred = mask_probs_pred.split(num_boxes_per_image, dim=0)
+
+        logits_image = logits_image.split(num_boxes_per_image, dim=0)
+        return self.inference_single_image(mask_probs_pred, logits_image, pred_instances, score_thresh, top_per_instance, nms_thresh )
+
+
+    def inference_single_image(self, mask_probs_pred, logits_image, pred_instances, score_thresh, top_per_instance, nms_thresh):
+        # batch nms for single instance, class-wisely
+        instance_list = []
+        for prob, logits, instances in zip(mask_probs_pred, logits_image, pred_instances):
+            new_instance = Instances(instances.image_size).to(logits.device)
+            scores = logits.softmax(dim=1)
+            boxes = instances.pred_boxes.tensor
+            masks = prob
+            filter_mask = scores>score_thresh
+            num_bbox_reg_classes = boxes.shape[1] // 4
+            filter_inds = filter_mask.nonzero()
+            boxes = boxes.view(-1, num_bbox_reg_classes, 4)
+            if num_bbox_reg_classes == 1:
+                boxes = boxes[filter_inds[:, 0], 0]
+            else:
+                boxes = boxes[filter_mask]
+            scores = scores[filter_mask]
+            keep = batched_nms(boxes, scores, filter_inds[:, 1], nms_thresh)
+            if top_per_instance >= 0:
+                keep = keep[:top_per_instance]
+            boxes, scores, filter_inds = boxes[keep], scores[keep], filter_inds[keep]
+
+            new_instance.pred_boxes = Boxes(boxes)  # (1, Hmask, Wmask)
+            new_instance.scores = scores
+            new_instance.pred_classes = filter_inds[:,1]
+            new_instance.pred_masks = masks[filter_inds[:,0]]
+            instance_list.append(new_instance)
+        # instance_list,_ = select_foreground_proposals(instance_list, bg_label=self.data_classes)
+        return instance_list
+    
+def select_foreground_predictions(
+    proposals: List[Instances], bg_label: int
+) -> Tuple[List[Instances], List[torch.Tensor]]:
     """
-    Convert pred_mask_logits to estimated foreground probability masks while also
-    extracting only the masks for the predicted classes in pred_instances. For each
-    predicted box, the mask of the same class is attached to the instance by adding a
-    new "pred_masks" field to pred_instances.
+    Given a list of N Instances (for N images), each containing a `gt_classes` field,
+    return a list of Instances that contain only instances with `gt_classes != -1 &&
+    gt_classes != bg_label`.
 
     Args:
-        pred_mask_logits (Tensor): A tensor of shape (B, C, Hmask, Wmask) or (B, 1, Hmask, Wmask)
-            for class-specific or class-agnostic, where B is the total number of predicted masks
-            in all images, C is the number of foreground classes, and Hmask, Wmask are the height
-            and width of the mask predictions. The values are logits.
-        pred_instances (list[Instances]): A list of N Instances, where N is the number of images
-            in the batch. Each Instances must have field "pred_classes".
+        proposals (list[Instances]): A list of N Instances, where N is the number of
+            images in the batch.
+        bg_label: label index of background class.
 
     Returns:
-        None. pred_instances will contain an extra "pred_masks" field storing a mask of size (Hmask,
-            Wmask) for predicted class. Note that the masks are returned as a soft (non-quantized)
-            masks the resolution predicted by the network; post-processing steps, such as resizing
-            the predicted masks to the original image resolution and/or binarizing them, is left
-            to the caller.
+        list[Instances]: N Instances, each contains only the selected foreground instances.
+        list[Tensor]: N boolean vector, correspond to the selection mask of
+            each Instances object. True for selected instances.
     """
-    cls_agnostic_mask = pred_mask_logits.size(1) == 1
+    assert isinstance(proposals, (list, tuple))
+    assert isinstance(proposals[0], Instances)
+    fg_proposals = []
+    fg_selection_masks = []
+    for proposals_per_image in proposals:
+        gt_classes = proposals_per_image.gt_classes
+        fg_selection_mask = (gt_classes != -1) & (gt_classes != bg_label)
+        fg_idxs = fg_selection_mask.nonzero().squeeze(1)
+        fg_proposals.append(proposals_per_image[fg_idxs])
+        fg_selection_masks.append(fg_selection_mask)
+    return fg_proposals, fg_selection_masks
 
-    if cls_agnostic_mask:
-        mask_probs_pred = pred_mask_logits.sigmoid()
-    else:
-        # Select masks corresponding to the predicted classes
-        num_masks = pred_mask_logits.shape[0]
-        class_pred = cat([i.pred_classes for i in pred_instances])
-        device = (
-            class_pred.device
-            if torch.jit.is_scripting()
-            else ("cpu" if torch.jit.is_tracing() else class_pred.device)
-        )
-        indices = move_device_like(torch.arange(num_masks, device=device), class_pred)
-        mask_probs_pred = pred_mask_logits[indices, class_pred][:, None].sigmoid()
-    # mask_probs_pred.shape: (B, 1, Hmask, Wmask)
-
-    num_boxes_per_image = [len(i) for i in pred_instances]
-    mask_probs_pred = mask_probs_pred.split(num_boxes_per_image, dim=0)
-    logits_image = logits_image.split(num_boxes_per_image, dim=0)
-    return inference_single_image(mask_probs_pred, logits_image, pred_instances, score_thresh, top_per_instance, nms_thresh )
-
-
-def inference_single_image(mask_probs_pred, logits_image, pred_instances, score_thresh, top_per_instance, nms_thresh):
-    # batch nms for single instance, class-wisely
-    instance_list = []
-    
-    for prob, logits, instances in zip(mask_probs_pred, logits_image, pred_instances):
-        new_instance = Instances(instances.image_size).to(logits.device)
-        scores = logits.sigmoid()
-        boxes = instances.pred_boxes.tensor
-        masks = prob
-        filter_mask = scores>score_thresh
-        num_bbox_reg_classes = boxes.shape[1] // 4
-        filter_inds = filter_mask.nonzero()
-        boxes = boxes.view(-1, num_bbox_reg_classes, 4)
-        if num_bbox_reg_classes == 1:
-            boxes = boxes[filter_inds[:, 0], 0]
-        else:
-            boxes = boxes[filter_mask]
-        scores = scores[filter_mask]
-        keep = batched_nms(boxes, scores, filter_inds[:, 1], nms_thresh)
-        if top_per_instance >= 0:
-            keep = keep[:top_per_instance]
-        boxes, scores, filter_inds = boxes[keep], scores[keep], filter_inds[keep]
-
-        new_instance.pred_boxes = Boxes(boxes)  # (1, Hmask, Wmask)
-        new_instance.scores = scores
-        new_instance.pred_classes = filter_inds[:,1]
-        new_instance.pred_masks = masks[filter_inds[:,0]]
-        instance_list.append(new_instance)
-
-    return instance_list
 
 def dice_loss(pred,
             target,

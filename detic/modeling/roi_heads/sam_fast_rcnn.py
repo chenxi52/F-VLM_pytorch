@@ -145,8 +145,12 @@ class SamRCNNOutputLayers(FastRCNNOutputLayers):
             list[Instances]: same as `fast_rcnn_inference`.
             list[Tensor]: same as `fast_rcnn_inference`.
         """
-        boxes = self.predict_boxes(predictions, proposals)
-        scores = self.predict_probs(predictions, proposals)
+        if self.loss_weight["loss_box_reg"] == 0.:
+            boxes = [p.proposal_boxes.tensor for p in proposals]
+            scores = [torch.zeros(len(p), self.num_classes, device=p.proposal_boxes.device) for p in proposals]
+        else:
+            boxes = self.predict_boxes(predictions, proposals)
+            scores = self.predict_probs(predictions, proposals)
         image_shapes = [x.image_size for x in proposals]
         return fast_rcnn_inference(
             boxes,
@@ -247,7 +251,6 @@ def fast_rcnn_inference_single_image(
     
     result = Instances(image_shape)
     result.pred_boxes = Boxes(boxes)
-    # result.scores = scores
     return result
 
 def log_classification_stats(pred_logits, gt_classes, prefix="fast_rcnn"):
