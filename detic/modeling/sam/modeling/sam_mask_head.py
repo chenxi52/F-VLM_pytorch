@@ -37,6 +37,8 @@ class samMaskHead(BaseMaskRCNNHead):
             test_nms_thresh: float=0.5,
             mask_loss_type: str='ce_dice',
             data_classes: int=80,
+            test_score_type: str='score',
+            test_geometric_fact = 0.5,
             ) -> None:
         super().__init__()
         if with_sincos:
@@ -85,6 +87,8 @@ class samMaskHead(BaseMaskRCNNHead):
         self.test_nms_thresh = test_nms_thresh
         self.mask_loss_type = mask_loss_type
         self.data_classes  = data_classes
+        self.test_score_type = test_score_type
+        self.test_geometric_fact = test_geometric_fact
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
@@ -120,6 +124,8 @@ class samMaskHead(BaseMaskRCNNHead):
                 'test_nms_thresh': cfg.MODEL.ROI_HEADS.NMS_THRESH_TEST,
                 'mask_loss_type': cfg.MODEL.ROI_MASK_HEAD.MASK_LOSS_TYPE,
                 'data_classes': cfg.MODEL.ROI_HEADS.NUM_CLASSES,
+                'test_score_type': cfg.TEST.SCORE_TYPE,
+                'test_geometric_fact': cfg.TEST.GEOMETRIC_FACT,
                 }
     
     def forward(
@@ -364,6 +370,11 @@ class samMaskHead(BaseMaskRCNNHead):
             new_instance = Instances(instances.image_size).to(logits.device)
             scores = logits.softmax(dim=1)
             boxes = instances.pred_boxes.tensor
+            objectness = instances.objectness
+            if self.test_score_type == 'ob_mul_cls':
+                scores = scores * objectness[:, None]
+            elif self.test_score_type == 'ob_geo_cls':
+                scores = scores**(1-self.test_geometric_fact) * objectness[:, None]**self.test_geometric_fact
             masks = prob
             filter_mask = scores>score_thresh
             num_bbox_reg_classes = boxes.shape[1] // 4
