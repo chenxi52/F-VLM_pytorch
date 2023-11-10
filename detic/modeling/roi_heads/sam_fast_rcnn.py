@@ -148,6 +148,7 @@ class SamRCNNOutputLayers(FastRCNNOutputLayers):
         if self.loss_weight["loss_box_reg"] == 0.:
             boxes = [p.proposal_boxes.tensor for p in proposals]
             scores = [torch.zeros(len(p), self.num_classes, device=p.proposal_boxes.device) for p in proposals]
+            objectness = [p.objectness_logits.sigmoid() for p in proposals]
         else:
             boxes = self.predict_boxes(predictions, proposals)
             scores = self.predict_probs(predictions, proposals)
@@ -155,6 +156,7 @@ class SamRCNNOutputLayers(FastRCNNOutputLayers):
         return fast_rcnn_inference(
             boxes,
             scores,
+            objectness,
             image_shapes,
             self.test_score_thresh,
             self.test_nms_thresh,
@@ -164,6 +166,7 @@ class SamRCNNOutputLayers(FastRCNNOutputLayers):
 def fast_rcnn_inference(
     boxes: List[torch.Tensor],
     scores: List[torch.Tensor],
+    objectness: List[torch.Tensor],
     image_shapes: List[Tuple[int, int]],
     score_thresh: float,
     nms_thresh: float,
@@ -196,9 +199,9 @@ def fast_rcnn_inference(
     """
     result_per_image = [
         fast_rcnn_inference_single_image(
-            boxes_per_image, scores_per_image, image_shape, score_thresh, nms_thresh, topk_per_image
+            boxes_per_image, scores_per_image, objectness_per_image, image_shape, score_thresh, nms_thresh, topk_per_image
         )
-        for scores_per_image, boxes_per_image, image_shape in zip(scores, boxes, image_shapes)
+        for scores_per_image, boxes_per_image, objectness_per_image, image_shape in zip(scores, boxes, objectness, image_shapes)
     ]
     return result_per_image, None
 
@@ -207,6 +210,7 @@ def fast_rcnn_inference(
 def fast_rcnn_inference_single_image(
     boxes,
     scores,
+    objectness,
     image_shape: Tuple[int, int],
     score_thresh: float,
     nms_thresh: float,
@@ -251,6 +255,7 @@ def fast_rcnn_inference_single_image(
     
     result = Instances(image_shape)
     result.pred_boxes = Boxes(boxes)
+    result.objectness = objectness
     return result
 
 def log_classification_stats(pred_logits, gt_classes, prefix="fast_rcnn"):
