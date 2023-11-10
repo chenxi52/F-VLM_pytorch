@@ -148,10 +148,10 @@ class SamRCNNOutputLayers(FastRCNNOutputLayers):
         if self.loss_weight["loss_box_reg"] == 0.:
             boxes = [p.proposal_boxes.tensor for p in proposals]
             scores = [torch.zeros(len(p), self.num_classes, device=p.proposal_boxes.device) for p in proposals]
-            objectness = [p.objectness_logits.sigmoid() for p in proposals]
         else:
             boxes = self.predict_boxes(predictions, proposals)
             scores = self.predict_probs(predictions, proposals)
+        objectness = [p.objectness_logits.sigmoid() for p in proposals]
         image_shapes = [x.image_size for x in proposals]
         return fast_rcnn_inference(
             boxes,
