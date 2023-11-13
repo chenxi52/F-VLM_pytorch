@@ -111,7 +111,7 @@ class SAMRPN(RPN):
             # centerness_target for each anchor. multiply the centerness_target_i with the gt_label_i
             gt_labels_i = self._subsample_labels(gt_labels_i)
 
-            if len(gt_boxes_i) == 0:
+            if len(gt_boxes_i) == 0:    
                 # These values won't be used anyway since the anchor is labeled as background
                 matched_gt_boxes_i = torch.zeros_like(anchors.tensor)
             else:
@@ -121,8 +121,9 @@ class SAMRPN(RPN):
                 gt_centerness = retry_if_cuda_oom(get_centerness)(anchors, matched_gt_boxes_i)
                 gt_centerness = gt_centerness.to(device=gt_boxes_i.device)
                 gt_labels_i = gt_labels_i.to(torch.float32)
-                gt_labels_i.mul_(gt_centerness)
-            gt_labels.append(gt_labels_i)  # N,AHW
+                gt_centerness = torch.where(gt_centerness>0, gt_centerness*gt_labels_i, gt_labels_i)
+                # only negtive boxes are set to gt_labels=0
+            gt_labels.append(gt_centerness)  # N,AHW
             matched_gt_boxes.append(matched_gt_boxes_i)
 
         return gt_labels, matched_gt_boxes
@@ -166,7 +167,6 @@ class SAMRPN(RPN):
         storage = get_event_storage()
         storage.put_scalar("rpn/num_pos_anchors", num_pos_anchors / num_images)
         storage.put_scalar("rpn/num_neg_anchors", num_neg_anchors / num_images)
-
         localization_loss = _dense_box_regression_loss(
             anchors,
             self.box2box_transform,
@@ -195,7 +195,7 @@ class SAMRPN(RPN):
     
 def get_centerness(anchors, gt_boxes_i):
     anchors_centers = anchors.get_centers()
-    gt_reg = anchors.tensor
+    gt_reg = torch.zeros_like(anchors.tensor, device=gt_boxes_i.device)
     # gt_boxes: xyxy
     gt_reg[:,0] = anchors_centers[:,0] - gt_boxes_i[:,0]
     gt_reg[:,1] = anchors_centers[:,1] - gt_boxes_i[:,1]
@@ -209,9 +209,9 @@ def compute_centerness_targets(reg_targets, is_inside_box):
     # reg_targets is [N, 4]， （x-x0, y-y0, x1-x, y1-y)
     left_right = reg_targets[:, [0, 2]]
     top_bottom = reg_targets[:, [1, 3]]
-    centerness = torch.sqrt(
-        (left_right.min(dim=-1)[0] / left_right.max(dim=-1)[0]) *
-        (top_bottom.min(dim=-1)[0] / top_bottom.max(dim=-1)[0])
+    centerness = torch.zeros_like(reg_targets[:, 0])
+    centerness[is_inside_box] = torch.sqrt(
+        (left_right[is_inside_box].min(dim=-1)[0] / left_right[is_inside_box].max(dim=-1)[0]) *
+        (top_bottom[is_inside_box].min(dim=-1)[0] / top_bottom[is_inside_box].max(dim=-1)[0])
     )
-    centerness[~is_inside_box] = 0
     return centerness
