@@ -168,6 +168,7 @@ class SamOpenDetector(SamDetector):
         do_postprocess=True,
         backbone_name=None,
         class_name=constants.COCO_INSTANCE_CLASSES,
+        add_unfrozen='xxx',
         **kwargs
     ):
         self.fp16=fp16
@@ -182,7 +183,10 @@ class SamOpenDetector(SamDetector):
         self.text_feats =  self.get_custom_text_feat(self.class_name)
         # set params in sam and clip to no_grad
         for name, params in self.sam.named_parameters():
-            params.requires_grad = False
+            if add_unfrozen in name:
+                params.requires_grad = True
+            else:
+                params.requires_grad = False
         for name, params in self.clip.named_parameters():
             params.requires_grad = False
         self.register_buffer("clip_pixel_mean", torch.tensor([0.48145466, 0.4578275, 0.40821073]).unsqueeze(1).unsqueeze(2), False)
@@ -206,7 +210,8 @@ class SamOpenDetector(SamDetector):
             "clip_type": cfg.MODEL.BACKBONE.CLIP_TYPE,
             "do_postprocess": cfg.TEST.DO_POSTPROCESS,
             "backbone_name":cfg.MODEL.BACKBONE.NAME,
-            "class_name":class_name
+            "class_name":class_name,
+            "add_unfrozen":cfg.MODEL.BACKBONE.ADD_UNFROZEN
         })
         ret.update(mask_thr_binary = cfg.TEST.MASK_THR_BINARY)
         return ret

@@ -5,6 +5,7 @@ MODEL:
     NAME: "build_sam_vit_det_backbone" #SAM vit_h
     TYPE: "vit_t"
     CLIP_TYPE: "ViT-B/16"
+    ADD_UNFROZEN: 'xxx' # unfrozen extra part of model, default='xxx'
   WEIGHTS: "mobile_sam.pt"
   # WEIGHTS: "/opt/tiger/OpenVo-Seg-master/output/wo_mask_with_prompt_encoder_roi_head_withgrad/model_final.pth"
   # WEIGHTS: "sam_vit_h_4b8939.pth"
@@ -19,11 +20,11 @@ MODEL:
   ANCHOR_GENERATOR:
     NAME: "DefaultAnchorGenerator"
     SIZES: [[32],[64],[128],[256],[512]] 
-    ASPECT_RATIOS: [[0.5, 1.0, 2.0]]  # Three aspect ratios (same for all in feature maps)
+    ASPECT_RATIOS: [[1.0]]  # Three aspect ratios (same for all in feature maps)
   PROPOSAL_GENERATOR:
-    NAME: "RPN"
+    NAME: "SAMRPN"
   RPN:
-    HEAD_NAME: "SAMRpnHead"
+    HEAD_NAME: "StandardRPNHead"
     IN_FEATURES: ["feat4","feat3","feat2","feat1","feat0"]
     PRE_NMS_TOPK_TRAIN: 2000  # Per FPN level
     PRE_NMS_TOPK_TEST: 1000  # Per FPN level
@@ -33,7 +34,7 @@ MODEL:
     POST_NMS_TOPK_TRAIN: 1000
     POST_NMS_TOPK_TEST: 300
     IOU_THRESHOLDS: [0.3, 0.7]
-    BATCH_SIZE_PER_IMAGE: 512 # the sampling num 
+    BATCH_SIZE_PER_IMAGE: 256 # the sampling num 
     POSITIVE_FRACTION: 0.5
     BBOX_REG_LOSS_TYPE: "smooth_l1"
     NMS_THRESH: 0.7

@@ -136,6 +136,8 @@ def add_rsprompter_config(cfg):
     _C = cfg
     _C.MODEL.BACKBONE.TYPE = 'vit_h'
     _C.MODEL.BACKBONE.CLIP_TYPE = 'RN50'
+    _C.MODEL.BACKBONE.ADD_UNFROZEN = 'xxx'
+    _C.MODEL.RPN.OBJECTNESS_LOSS_TYPE = 'binary_ce'
 
     _C.MODEL.FPN.INNER_CHANNELS  = 32
     _C.MODEL.FPN.UP_SAMPLE_SCALE = 4
@@ -175,7 +177,7 @@ def add_rsprompter_config(cfg):
     _C.TEST.IMS_PER_BATCH = 2 #the batch_size of testing
     _C.TEST.SCORE_TYPE = 'cls'
     _C.TEST.GEOMETRIC_FACT = 0.35
-    
+
     _C.MODEL.ROI_HEADS.ALLOW_LOW_QUALITY_MATCHES = True
 
     _C.FP16 = False
