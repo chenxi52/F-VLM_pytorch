@@ -4,18 +4,20 @@ from typing import Tuple, List
 from detectron2.modeling import BaseMaskRCNNHead, ROI_MASK_HEAD_REGISTRY
 from detectron2.config import configurable
 from einops import repeat
-from detectron2.structures import Instances, ImageList
+from detectron2.structures import Instances, ImageList, Boxes
 import torch.nn.functional as F
-from detectron2.modeling.roi_heads.mask_head import mask_rcnn_inference
 from timm.models.layers import trunc_normal_
 from detectron2.utils.events import get_event_storage
-from detectron2.layers import cat
+from detectron2.layers import cat, cross_entropy, batched_nms
 import time
-from detectron2.structures.masks import polygons_to_bitmask
-import copy
-from detectron2.modeling.roi_heads.mask_head import mask_rcnn_loss
+from detectron2.layers.wrappers import move_device_like
+import torch.cuda.amp as amp
+from detectron2.modeling.roi_heads.roi_heads import select_foreground_proposals
+from detic.modeling.ContextFormer import build_contextformer
+from detectron2.modeling.roi_heads.fast_rcnn import _log_classification_stats
+from detectron2.layers import nonzero_tuple
 from fvcore.nn import sigmoid_focal_loss_jit
-
+# add classification with clip text
 @ROI_MASK_HEAD_REGISTRY.register()
 class samMaskHead(BaseMaskRCNNHead):
     @configurable
@@ -28,7 +30,16 @@ class samMaskHead(BaseMaskRCNNHead):
             num_classes: int = 1,
             mask_loss_type: str = 'ce',
             mask_loss_weight: float=1.0,
-            vis_period: int = 0
+            vis_period: int = 0,
+            clip_type: str = 'CLIP_400M_Large',
+            d_model: int=1024,
+            score_thresh: float=0.02,
+            top_per_instance: int=100,
+            test_nms_thresh: float=0.5,
+            mask_loss_type: str='ce_dice',
+            data_classes: int=80,
+            test_score_type: str='score',
+            test_geometric_fact = 0.5,
             ) -> None:
         super().__init__()
         if with_sincos:
@@ -54,9 +65,43 @@ class samMaskHead(BaseMaskRCNNHead):
         self.train_size = train_size
         self.num_classes = num_classes
         self.vis_period = vis_period
-        self.mask_loss_type = mask_loss_type
-        self.mask_loss_weight = mask_loss_weight
+        
+        if clip_type == 'ViT-B/16':
+            self.text_dim = 512
+            self.clip_dim = 768
+            self.down_dim = self.clip_dim
+        elif clip_type == 'RN50':
+            self.text_dim = 1024
+            self.clip_dim = 2048
+            self.down_dim = 1024
+        elif clip_type == 'RN50x64':
+            self.text_dim = 1024
+            self.clip_dim = 4096
+            self.down_dim = self.clip_dim
+        self.contextformer = build_contextformer(
+          d_model=self.down_dim
+        )
+        self.to_clip = nn.Linear(
+            256, self.down_dim
+        )
+
+        self.projector = nn.Linear(
+            self.down_dim, self.text_dim
+        )
+        self.down_channel = nn.Linear(
+            self.clip_dim, self.down_dim
+        )
         self._init_weights(self.point_emb)
+        self._init_weights(self.to_clip)
+        self._init_weights(self.projector)
+        self._init_weights(self.down_channel)
+        self.score_thresh = score_thresh
+        self.top_per_instance = top_per_instance
+        self.test_nms_thresh = test_nms_thresh
+        self.mask_loss_type = mask_loss_type
+        self.data_classes  = data_classes
+        self.test_score_type = test_score_type
+        self.test_geometric_fact = test_geometric_fact
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
@@ -72,6 +117,8 @@ class samMaskHead(BaseMaskRCNNHead):
         with_sincos = cfg.MODEL.ROI_MASK_HEAD.WITH_SINCOS
         per_query_point = cfg.MODEL.ROI_MASK_HEAD.PER_QUERY_POINT
         class_agnostic = cfg.MODEL.ROI_MASK_HEAD.CLS_AGNOSTIC_MASK
+        mask_loss_weight = cfg.MODEL.ROI_MASK_HEAD.MASK_LOSS_WEIGHT
+        clip_type = cfg.MODEL.BACKBONE.CLIP_TYPE
         if cfg.MODEL.ROI_MASK_HEAD.CLS_AGNOSTIC_MASK:
             num_classes = 1
         else:
@@ -83,15 +130,25 @@ class samMaskHead(BaseMaskRCNNHead):
                 'train_size': train_size,
                 'num_classes': num_classes,
                 'vis_period': cfg.VIS_PERIOD,
+                'clip_type': clip_type,
+                'score_thresh': cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST,
+                'top_per_instance': cfg.TEST.DETECTIONS_PER_IMAGE,
+                'test_nms_thresh': cfg.MODEL.ROI_HEADS.NMS_THRESH_TEST,
                 'mask_loss_type': cfg.MODEL.ROI_MASK_HEAD.MASK_LOSS_TYPE,
-                'mask_loss_weight': cfg.MODEL.ROI_MASK_HEAD.MASK_LOSS_WEIGHT,}
+                'data_classes': cfg.MODEL.ROI_HEADS.NUM_CLASSES,
+                'test_score_type': cfg.TEST.SCORE_TYPE,
+                'test_geometric_fact': cfg.TEST.GEOMETRIC_FACT,
+                }
     
     def forward(
             self,
-            roi_feature: List[torch.Tensor],
+            roi_features: torch.Tensor,
             img_features: torch.Tensor,
             instances: List[Instances],
             sam: nn.Module,
+            clip: nn.Module,
+            clip_images: torch.Tensor,
+            clip_texts: torch.Tensor, 
         ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         firstly, inference, and then calculate losses
@@ -103,11 +160,14 @@ class samMaskHead(BaseMaskRCNNHead):
                 objectness_logits: tensor([23.0259], device='cuda:0'), gt_classes: tensor([0], device='cuda:0'), 
                 gt_boxes: Boxes(tensor([[214.0800, 907.2640, 235.6640, 963.2800]], device='cuda:0')), 
                 gt_masks: PolygonMasks(num_instances=1)])
+            clip: clip model
+            clip_images: vit-B/16: 512
+            clip_texts: cit-B/16: 512
         Returns:
             A dict of losses in training. The predicted "instances" in inference(List[Dict['instances': Instances]]).
         """
-        batch_size = roi_feature.shape[0]
-        point_emd = self.point_emb(roi_feature) #prompt head 
+        batch_size = roi_features.shape[0]
+        point_emd = self.point_emb(roi_features) #prompt head 
         point_emd = point_emd.view(batch_size, self.per_query_point, -1)
         if self.with_sincos: 
             point_emd = torch.sin(point_emd[..., ::2] + point_emd[..., 1::2])
@@ -115,128 +175,105 @@ class samMaskHead(BaseMaskRCNNHead):
         nomask_dense_embeddings = sam.prompt_encoder.no_mask_embed.weight.reshape(1, -1, 1, 1).expand(
             point_emd.shape[0], -1, *img_features.shape[-2:]
         )
-        img_flag_ids = torch.tensor([len(i) for i in instances], device=point_emd.device, dtype=torch.long)
+        img_flag_ids = torch.tensor([len(i) for i in instances], device=roi_features.device, dtype=torch.long)
         padding = torch.zeros((len(img_features)-len(img_flag_ids),), device=img_flag_ids.device, dtype=img_flag_ids.dtype)
         # padding: what if no_mask exist in the 
         img_flag_ids = torch.cat([img_flag_ids, padding])
         
         img_embeddings = torch.repeat_interleave(img_features, img_flag_ids, dim=0)
+        clip_img_embeddings = torch.repeat_interleave(clip_images, img_flag_ids, dim=0)
         img_pe = sam.prompt_encoder.get_dense_pe()
         img_pe = repeat(img_pe, 'b c h w -> (b n) c h w', n=img_embeddings.shape[0])
 
-        low_res_masks = sam.mask_decoder.forward_batch(
+        low_res_masks, iou_preds, mask_tokens = sam.mask_decoder.forward_batch(
             image_embeddings=img_embeddings,
             image_pe=img_pe,
             sparse_prompt_embeddings=point_emd,
             dense_prompt_embeddings=nomask_dense_embeddings,
             multimask_output=False,
         )
+        # mask_tokens: (batch_size, 4, 256)
+        # clip_texts and mask_tokens
+        with amp.autocast(enabled=True):
+            mask_tokens = self.to_clip(mask_tokens)
 
-        ######################
-        # Initialize the result storage lists
-        # low_res_masks_list = []
-        # iou_predictions_list = []
-
-        # # Decide on the chunk size based on your requirements and memory constraints
-        # chunk_size = 100
-
-        # # Splitting the tensors into smaller chunks
-        # point_emd_chunks = torch.split(point_emd, chunk_size, dim=0)
-        # img_embeddings_chunks = torch.split(img_embeddings, chunk_size, dim=0)
-        # img_pe_chunks = torch.split(img_pe, chunk_size, dim=0)
-        # nomask_dense_embeddings_chunks = torch.split(nomask_dense_embeddings, chunk_size, dim=0)
-
-        # # Iterate through each chunk
-        # for point_emd_chunk, img_embeddings_chunk, img_pe_chunk, nomask_dense_chunk in zip(
-        #     point_emd_chunks, img_embeddings_chunks, img_pe_chunks, nomask_dense_embeddings_chunks):
-
-        #     # Processing each chunk through the mask decoder
-        #     low_res_masks_chunk, iou_predictions_chunk = sam.mask_decoder.forward_batch(
-        #         image_embeddings=img_embeddings_chunk,
-        #         image_pe=img_pe_chunk,
-        #         sparse_prompt_embeddings=point_emd_chunk,
-        #         dense_prompt_embeddings=nomask_dense_chunk,
-        #         multimask_output=False,
-        #         res_img_feat=None  # As per your previous setup
-        #     )
-
-        #     # Append results from this chunk to the result storage lists
-        #     low_res_masks_list.append(low_res_masks_chunk)
-        #     iou_predictions_list.append(iou_predictions_chunk)
-
-        # # Concatenate the results after processing all chunks
-        # low_res_masks = torch.cat(low_res_masks_list, dim=0)
-        # iou_predictions = torch.cat(iou_predictions_list, dim=0)
-        ######################
-        # iou_predictions = iou_predictions.squeeze(1)
-        # sample pos_ind from box_features, this has been done in the roi's _forward_mask
-        # low_res_masks = torch.nn.functional.interpolate(low_res_masks, size=(self.train_size, self.train_size), mode='bilinear', align_corners=False)
+            logit_scale = clip.logit_scale.exp()
+            # clIP_img_embedding.降维。clip_dim 修改为这个维度
+            clip_img_embeddings = self.down_channel(clip_img_embeddings)
+            semantic_token = self.contextformer(mask_tokens, clip_img_embeddings)#mask_tokens: (batch_size, 1, self.clip_dim),clip: [bz,self.clip_dim, 32,32]
+            semantic_token = self.projector(semantic_token)
+            clip_texts = move_device_like(clip_texts, semantic_token)
+            logits_image, logits_text = self.get_logits(semantic_token, clip_texts, logit_scale)
         low_res_masks = torch.nn.functional.interpolate(low_res_masks, size=(self.train_size, self.train_size), mode='bilinear', align_corners=False)
-
-        if self.training:
-            # TODO: not right
-            loss ={"loss_mask": self.custom_mask_rcnn_loss(low_res_masks, instances, self.vis_period) * self.loss_weight}
-            return loss
-        else:
-            # low_res_masks = torch.nn.functional.interpolate(low_res_masks, size=(self.train_size, self.train_size), mode='bilinear', align_corners=False)
-            mask_rcnn_inference(low_res_masks, instances)
-            return instances
+        logits_image = logits_image.squeeze(dim=1)
         
+        if self.training:
+            gt_classes = (
+                cat([p.gt_classes for p in instances], dim=0) if len(instances) else torch.empty(0)
+                )
+            # gt_class has index 81; logits_image has index 80
+            _log_classification_stats(logits_image, gt_classes, 'fast_rcnn')
+            
+            target_classes_onehot = torch.zeros(logits_image.shape, dtype=logits_image.dtype, device=logits_image.device)
+            target_classes_onehot.scatter_(1, gt_classes.unsqueeze(-1), 1)
+            # TODO: not right
+            loss ={"loss_mask": self.custom_mask_rcnn_loss(low_res_masks, instances, self.vis_period) * self.loss_weight,
+                   "loss_cls": self.sigmoid_focal_loss(logits_image, target_classes_onehot, num_boxes=batch_size)}
+            return loss
 
+        else:
+            new_instances = self.custom_mask_rcnn_inference(low_res_masks, instances, logits_image[:,:-1], self.score_thresh, self.top_per_instance, self.test_nms_thresh)
+            del instances
+            return new_instances
+        
+    def sigmoid_focal_loss(self, inputs, targets, num_boxes, alpha: float = 0.25, gamma: float = 2):
+        """Compute the sigmoid focal loss."""
+        prob = inputs.sigmoid()
+        ce_loss = F.binary_cross_entropy_with_logits(inputs, targets, reduction="none")
+        p_t = prob * targets + (1 - prob) * (1 - targets)
+        loss = ce_loss * ((1 - p_t) ** gamma)
+
+        if alpha >= 0:
+            loss = (alpha * targets + (1 - alpha) * (1 - targets)) * loss
+
+        return loss.mean(1).sum() / num_boxes
+    
+    def get_logits(self, region_features, text_features, logit_scale):
+        # 计算image_features @ text_features.T相似度矩阵
+        region_features = region_features / (region_features.norm(dim=-1, keepdim=True) + 1e-7)
+        logits_per_image = logit_scale * region_features @ (text_features.unsqueeze(0).transpose(1, 2))
+        logits_per_text = logit_scale * text_features.unsqueeze(0) @ region_features.transpose(1, 2)
+        return logits_per_image, logits_per_text
+    
     def custom_mask_rcnn_loss(self, pred_mask_logits: torch.Tensor, instances: List[Instances], vis_period: int = 0):
         """
         remove gt_masks.crop_and_resize from original mask_rcnn_loss 
+        with foreground selection
         """
-        # start_ = time.time()
         cls_agnostic_mask = pred_mask_logits.size(1) == 1
         total_num_masks = pred_mask_logits.size(0)
-        # mask_side_len = pred_mask_logits.size(2)
-        # mask_side_len = 1024
-        # assert pred_mask_logits.size(2) == pred_mask_logits.size(3), "Mask prediction must be square!"
-        # print('loss_dual_time1:', time.time()-start_)
-        
+
         gt_classes = []
         gt_masks = []
+        fg_inds_list = []
+        num_instance_list = []
         # store the gt_mask to gpu first 
         for instances_per_image in instances:
-            if len(instances_per_image) == 0:
-                continue
-            if not cls_agnostic_mask:
-                gt_classes_per_image = instances_per_image.gt_classes.to(dtype=torch.int64)
-                gt_classes.append(gt_classes_per_image)
-            # the mask are sampled by box grid with repspect to the mask_size_len when the gt_maks=polygonMask
-            # no need the crop_and_resize
-            # if gt_mask is bitMask, the crop_and_resize have align_ratio=1, and resize the roi to mask_side_len, which is totally wrong!!!
-            # instances.gt_masks.tensor = torch.nn.functional.pad(instances.gt_masks.tensor, (0, mask_side_len-instances.gt_masks.tensor.shape[-1], 0, mask_side_len-instances.gt_masks.tensor.shape[-2]))
-            
-            
-            # gt_masks_per_image = instances_per_image.gt_masks.crop_and_resize(
-            #     instances_per_image.proposal_boxes.tensor, mask_side_len
-            # ).to(device=pred_mask_logits.device)
-            ########
-            # device = instances_per_image.proposal_boxes.device
+            gt_classes_per_image = instances_per_image.gt_classes.to(dtype=torch.int64)
+            fg_inds = nonzero_tuple((gt_classes_per_image >= 0) & (gt_classes_per_image < self.data_classes))[0]
 
-            # # here the gt_mask is bitmask
-            # gt_masks_per_image = [torch.from_numpy(polygons_to_bitmask(copy.deepcopy(polygons), mask_side_len, mask_side_len))
-            #                       for i, polygons in enumerate(instances_per_image.gt_masks.polygons)]
-            # import ipdb;ipdb.set_trace()
-            # gt_masks_per_image = torch.tensor(torch.ones(size=(len(instances_per_image.gt_masks.polygons), mask_side_len, mask_side_len)),device=device)
-            #########
-            # if len(gt_masks_per_image) == 0:
-            #     gt_masks_per_image = torch.empty(0, mask_side_len, mask_side_len, device=device, dtype=torch.bool)
-            # else:
-            #     gt_masks_per_image = torch.stack(gt_masks_per_image, dim=0).to(device=device)
-            
+            gt_classes.append(gt_classes_per_image[fg_inds])
             # A tensor of shape (N, M, M), N=#instances in the image; M=mask_side_len
-            gt_masks_per_image = instances_per_image.gt_masks.tensor
+            gt_masks_per_image = instances_per_image.gt_masks.tensor[fg_inds]
             gt_masks.append(gt_masks_per_image)
-
+            fg_inds_list.append(fg_inds)
+            num_instance_list.append(len(instances_per_image))
+        pred_mask_per_logits = pred_mask_logits.split(num_instance_list, dim=0)
+        pred_mask_logits_list = [pred_mask_per_logits[i][fg_inds_list[i]] for i in range(len(fg_inds_list))]
+        pred_mask_logits = torch.cat(pred_mask_logits_list, dim=0)
         if len(gt_masks) == 0:
             return pred_mask_logits.sum() * 0
-
         gt_masks = cat(gt_masks, dim=0)
-        # print('loss_dual_time1:', time.time()-start_)
-
         if cls_agnostic_mask:
             pred_mask_logits = pred_mask_logits[:, 0]
         else:
@@ -250,7 +287,6 @@ class samMaskHead(BaseMaskRCNNHead):
             # Here we allow gt_masks to be float as well (depend on the implementation of rasterize())
             gt_masks_bool = gt_masks > 0.5
         gt_masks = gt_masks.to(dtype=torch.float32)
-        # print('loss_dual_time2:', time.time()-start_)
 
         # Log the training accuracy (using gt classes and sigmoid(0.0) == 0.5 threshold)
         mask_incorrect = (pred_mask_logits > 0.0) != gt_masks_bool
@@ -260,7 +296,6 @@ class samMaskHead(BaseMaskRCNNHead):
             gt_masks_bool.numel() - num_positive, 1.0
         )
         false_negative = (mask_incorrect & gt_masks_bool).sum().item() / max(num_positive, 1.0)
-        # print('loss_dual_time3:', time.time()-start_)
 
         storage = get_event_storage()
         storage.put_scalar("mask_rcnn/accuracy", mask_accuracy)
@@ -273,7 +308,7 @@ class samMaskHead(BaseMaskRCNNHead):
             for idx, vis_mask in enumerate(vis_masks):
                 vis_mask = torch.stack([vis_mask] * 3, axis=0)
                 storage.put_image(name + f" ({idx})", vis_mask)
-        # print('loss_dual_time5:', time.time()-start_)
+
         if self.mask_loss_type == 'ce':
             mask_loss = F.binary_cross_entropy_with_logits(pred_mask_logits, gt_masks, reduction="mean")
         elif self.mask_loss_type == 'focal_dice':
@@ -293,6 +328,118 @@ class samMaskHead(BaseMaskRCNNHead):
         else:
             assert False, 'mask loss type not supported'
         return mask_loss
+
+    def custom_mask_rcnn_inference(self, pred_mask_logits: torch.Tensor, pred_instances: List[Instances], logits_image: torch.Tensor,
+                                score_thresh: float, top_per_instance: int = 100, nms_thresh: float = 0.5):
+        """
+        Convert pred_mask_logits to estimated foreground probability masks while also
+        extracting only the masks for the predicted classes in pred_instances. For each
+        predicted box, the mask of the same class is attached to the instance by adding a
+        new "pred_masks" field to pred_instances.
+
+        Args:
+            pred_mask_logits (Tensor): A tensor of shape (B, C, Hmask, Wmask) or (B, 1, Hmask, Wmask)
+                for class-specific or class-agnostic, where B is the total number of predicted masks
+                in all images, C is the number of foreground classes, and Hmask, Wmask are the height
+                and width of the mask predictions. The values are logits.
+            pred_instances (list[Instances]): A list of N Instances, where N is the number of images
+                in the batch. Each Instances must have field "pred_classes".
+
+        Returns:
+            None. pred_instances will contain an extra "pred_masks" field storing a mask of size (Hmask,
+                Wmask) for predicted class. Note that the masks are returned as a soft (non-quantized)
+                masks the resolution predicted by the network; post-processing steps, such as resizing
+                the predicted masks to the original image resolution and/or binarizing them, is left
+                to the caller.
+        """
+        cls_agnostic_mask = pred_mask_logits.size(1) == 1
+
+        if cls_agnostic_mask:
+            mask_probs_pred = pred_mask_logits.sigmoid()
+        else:
+            # Select masks corresponding to the predicted classes
+            num_masks = pred_mask_logits.shape[0]
+            class_pred = cat([i.pred_classes for i in pred_instances])
+            device = (
+                class_pred.device
+                if torch.jit.is_scripting()
+                else ("cpu" if torch.jit.is_tracing() else class_pred.device)
+            )
+            indices = move_device_like(torch.arange(num_masks, device=device), class_pred)
+            mask_probs_pred = pred_mask_logits[indices, class_pred][:, None].sigmoid()
+        # mask_probs_pred.shape: (B, 1, Hmask, Wmask)
+
+        num_boxes_per_image = [len(i) for i in pred_instances]
+        mask_probs_pred = mask_probs_pred.split(num_boxes_per_image, dim=0)
+
+        logits_image = logits_image.split(num_boxes_per_image, dim=0)
+        return self.inference_single_image(mask_probs_pred, logits_image, pred_instances, score_thresh, top_per_instance, nms_thresh )
+
+
+    def inference_single_image(self, mask_probs_pred, logits_image, pred_instances, score_thresh, top_per_instance, nms_thresh):
+        # batch nms for single instance, class-wisely
+        instance_list = []
+        for prob, logits, instances in zip(mask_probs_pred, logits_image, pred_instances):
+            new_instance = Instances(instances.image_size).to(logits.device)
+            scores = logits.softmax(dim=1)
+            boxes = instances.pred_boxes.tensor
+            objectness = instances.objectness
+            if self.test_score_type == 'ob_mul_cls':
+                scores = scores * objectness[:, None]
+            elif self.test_score_type == 'ob_geo_cls':
+                scores = scores**(1-self.test_geometric_fact) * objectness[:, None]**self.test_geometric_fact
+            masks = prob
+            filter_mask = scores>score_thresh
+            num_bbox_reg_classes = boxes.shape[1] // 4
+            filter_inds = filter_mask.nonzero()
+            boxes = boxes.view(-1, num_bbox_reg_classes, 4)
+            if num_bbox_reg_classes == 1:
+                boxes = boxes[filter_inds[:, 0], 0]
+            else:
+                boxes = boxes[filter_mask]
+            scores = scores[filter_mask]
+            keep = batched_nms(boxes, scores, filter_inds[:, 1], nms_thresh)
+            if top_per_instance >= 0:
+                keep = keep[:top_per_instance]
+            boxes, scores, filter_inds = boxes[keep], scores[keep], filter_inds[keep]
+
+            new_instance.pred_boxes = Boxes(boxes)  # (1, Hmask, Wmask)
+            new_instance.scores = scores
+            new_instance.pred_classes = filter_inds[:,1]
+            new_instance.pred_masks = masks[filter_inds[:,0]]
+            instance_list.append(new_instance)
+        # instance_list,_ = select_foreground_proposals(instance_list, bg_label=self.data_classes)
+        return instance_list
+    
+def select_foreground_predictions(
+    proposals: List[Instances], bg_label: int
+) -> Tuple[List[Instances], List[torch.Tensor]]:
+    """
+    Given a list of N Instances (for N images), each containing a `gt_classes` field,
+    return a list of Instances that contain only instances with `gt_classes != -1 &&
+    gt_classes != bg_label`.
+
+    Args:
+        proposals (list[Instances]): A list of N Instances, where N is the number of
+            images in the batch.
+        bg_label: label index of background class.
+
+    Returns:
+        list[Instances]: N Instances, each contains only the selected foreground instances.
+        list[Tensor]: N boolean vector, correspond to the selection mask of
+            each Instances object. True for selected instances.
+    """
+    assert isinstance(proposals, (list, tuple))
+    assert isinstance(proposals[0], Instances)
+    fg_proposals = []
+    fg_selection_masks = []
+    for proposals_per_image in proposals:
+        gt_classes = proposals_per_image.gt_classes
+        fg_selection_mask = (gt_classes != -1) & (gt_classes != bg_label)
+        fg_idxs = fg_selection_mask.nonzero().squeeze(1)
+        fg_proposals.append(proposals_per_image[fg_idxs])
+        fg_selection_masks.append(fg_selection_mask)
+    return fg_proposals, fg_selection_masks
 
 
 def dice_loss(pred,

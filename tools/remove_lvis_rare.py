@@ -18,3 +18,4 @@ if __name__ == '__main__':
     out_path = args.ann[:-5] + '_norare.json'
     print('Saving to', out_path)
     json.dump(data, open(out_path, 'w'))
+    print('done')

@@ -5,7 +5,8 @@ from typing import Any, Callable, Dict, Iterable, List, Set, Type, Union
 import torch
 
 from detectron2.config import CfgNode
-
+import detectron2.utils.comm as comm
+from pprint import pformat
 from detectron2.solver.build import maybe_add_gradient_clipping
 
 def match_name_keywords(n, name_keywords):
@@ -78,7 +79,7 @@ def build_custom_optimizer(cfg: CfgNode, model: torch.nn.Module) -> torch.optim.
     return optimizer
 
 
-def build_sam_optimizer(cfg: CfgNode, model: torch.nn.Module) -> torch.optim.Optimizer:
+def build_sam_optimizer(cfg: CfgNode, model: torch.nn.Module, logger) -> torch.optim.Optimizer:
     """
     Build an optimizer from config.
     """
@@ -91,31 +92,20 @@ def build_sam_optimizer(cfg: CfgNode, model: torch.nn.Module) -> torch.optim.Opt
     for key, value in model.named_parameters(recurse=True):
         if not value.requires_grad:
             continue
-        # Avoid duplicating parameters
-        if value in memo:
+        # # Avoid duplicating parameters
+        if key in memo:
             continue
-        memo.add(value)
+        memo.add(key)
         lr = cfg.SOLVER.BASE_LR
         weight_decay = cfg.SOLVER.WEIGHT_DECAY
-        # if 'xxx.' not in key:
-        #     value.requires_grad_(True)
-        #     param = {"params": [value], "lr": lr}
-        #     if optimizer_type != 'ADAMW':
-        #         param['weight_decay'] = weight_decay
-        #     params += [param]
-        # else:
-        #     value.requires_grad_(False)
         param = {"params": [value], "lr": lr}
         if optimizer_type != 'ADAMW':
             param['weight_decay'] = weight_decay
-        params += [param]
-        print(key)
-    # print('*'*50)
-    # print('Optimzed Params are: ')
-    # for key, value in model.named_parameters(recurse=True):
-    #     if value.requires_grad == True:
-            # print(key)
-
+            params += [param]
+        else:
+            params += [param]
+    if comm.is_main_process():
+        logger.info('Optimized parameters:\n%s', pformat(memo))
     def maybe_add_full_model_gradient_clipping(optim):  # optim: the optimizer class
         # detectron2 doesn't have full model gradient clipping now
         clip_norm_val = cfg.SOLVER.CLIP_GRADIENTS.CLIP_VALUE

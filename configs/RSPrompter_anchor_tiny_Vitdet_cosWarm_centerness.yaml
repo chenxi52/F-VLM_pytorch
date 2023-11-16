@@ -4,7 +4,8 @@ MODEL:
   BACKBONE:
     NAME: "build_sam_vit_det_backbone" #SAM vit_h
     TYPE: "vit_t"
-    CLIP_TYPE: "RN50"
+    CLIP_TYPE: "ViT-B/16"
+    ADD_UNFROZEN: 'xxx' # unfrozen extra part of model, default='xxx'
   WEIGHTS: "mobile_sam.pt"
   # WEIGHTS: "/opt/tiger/OpenVo-Seg-master/output/wo_mask_with_prompt_encoder_roi_head_withgrad/model_final.pth"
   # WEIGHTS: "sam_vit_h_4b8939.pth"
@@ -19,7 +20,7 @@ MODEL:
   ANCHOR_GENERATOR:
     NAME: "DefaultAnchorGenerator"
     SIZES: [[32],[64],[128],[256],[512]] 
-    ASPECT_RATIOS: [[0.5, 1.0, 2.0]]  # Three aspect ratios (same for all in feature maps)
+    ASPECT_RATIOS: [[1.0]]  # Three aspect ratios (same for all in feature maps)
   PROPOSAL_GENERATOR:
     NAME: "SAMRPN"
   RPN:
@@ -45,7 +46,7 @@ MODEL:
     SCORE_THRESH_TEST: 0.02
     NUM_CLASSES: 80
     NMS_THRESH_TEST: 0.5
-    BATCH_SIZE_PER_IMAGE: 256 #the sampling num 
+    BATCH_SIZE_PER_IMAGE: 128 #the sampling num 
     POSITIVE_FRACTION: 0.25
     IOU_THRESHOLDS: [0.5]
     IOU_LABELS: [0, 1]
@@ -71,14 +72,13 @@ MODEL:
     NUM_CONV: 4
     CLS_AGNOSTIC_MASK: True
     WITH_SINCOS: True
-    MASK_LOSS_TYPE: "ce_dice" 
+    MASK_LOSS_TYPE: "focal_dice" 
     MASK_LOSS_WEIGHT: 1.0
     POOLER_RESOLUTION: 14
     POOLER_SAMPLING_RATIO: 0
     POOLER_TYPE: "ROIAlignV2"
     PER_QUERY_POINT: 4
   MASK_ON: True
-  SAM_FROZEN: True
 DATASETS:
   TRAIN: ("coco_2017_train",)
   TEST: ("coco_2017_val",)
@@ -112,12 +112,11 @@ INPUT:
   # PAD_MASK: True
   # MASK_PAD_VAL: 0.0
   MASK_FORMAT: "bitmask"
-  CLIP_TRAIN_SIZE: 512
 TEST:
   DETECTIONS_PER_IMAGE: 300  #test_topk_per_image
   MASK_THR_BINARY: 0.5  
   DO_POSTPROCESS: True
-  EVAL_PERIOD: 90000 # change
+  EVAL_PERIOD: 5000 # change
   IMS_PER_BATCH: 2 #every gpu has most 2 images  # change
   SCORE_TYPE: 'ob_geo_cls'
   GEOMETRIC_FACT: 0.65

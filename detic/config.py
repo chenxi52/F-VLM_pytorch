@@ -135,7 +135,10 @@ def add_detic_config(cfg):
 def add_rsprompter_config(cfg):
     _C = cfg
     _C.MODEL.BACKBONE.TYPE = 'vit_h'
-    
+    _C.MODEL.BACKBONE.CLIP_TYPE = 'RN50'
+    _C.MODEL.BACKBONE.ADD_UNFROZEN = 'xxx'
+    _C.MODEL.RPN.OBJECTNESS_LOSS_TYPE = 'binary_ce'
+
     _C.MODEL.FPN.INNER_CHANNELS  = 32
     _C.MODEL.FPN.UP_SAMPLE_SCALE = 4
     _C.MODEL.FPN.ANCHOR_STRIDE = [8, 16, 32]
@@ -166,12 +169,15 @@ def add_rsprompter_config(cfg):
     _C.INPUT.TEST_INPUT_TYPE = 'default' 
     _C.INPUT.PAD_MASK = True
     _C.INPUT.MASK_PAD_VAL = 0.0
-
+    _C.INPUT.CLIP_TRAIN_SIZE = 1024
+    
     _C.FIND_UNUSED_PARAM = True
 
     _C.TEST.MASK_THR_BINARY = 0.5
     _C.TEST.DO_POSTPROCESS = True
     _C.TEST.IMS_PER_BATCH = 2 #the batch_size of testing
+    _C.TEST.SCORE_TYPE = 'cls'
+    _C.TEST.GEOMETRIC_FACT = 0.35
 
     _C.MODEL.ROI_HEADS.ALLOW_LOW_QUALITY_MATCHES = True
 
@@ -180,3 +186,4 @@ def add_rsprompter_config(cfg):
     _C.DATALOADER.PERSISTENT_WORKERS = False
 
     _C.WANDB = False
+    

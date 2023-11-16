@@ -1,12 +1,16 @@
 # Copyright (c) Facebook, Inc. and its affiliates.
 import logging
 import torch
+import torch.nn as nn
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
 from detectron2.config import configurable
 from detectron2.layers import ShapeSpec, batched_nms, cat, cross_entropy, nonzero_tuple
 from detectron2.structures import Boxes, Instances
 from fvcore.nn import giou_loss, smooth_l1_loss
-from detectron2.modeling.roi_heads.fast_rcnn import _log_classification_stats, FastRCNNOutputLayers
+from detectron2.modeling.roi_heads.fast_rcnn import FastRCNNOutputLayers
+from detectron2.utils.events import get_event_storage
+
 __all__ = ["SamRCNNOutputLayers"]
 
 logger = logging.getLogger(__name__)
@@ -26,6 +30,9 @@ class SamRCNNOutputLayers(FastRCNNOutputLayers):
         **kwargs
     ):
         super().__init__(input_shape, **kwargs)
+        # input_size = input_shape.channels * (input_shape.width or 1) * (input_shape.height or 1)
+        # self.box_score = nn.Linear(input_size, 1)
+        # self.box_score.weight.data.normal_(0, 0.01)
 
 
     def losses(self, predictions, proposals):
@@ -45,7 +52,7 @@ class SamRCNNOutputLayers(FastRCNNOutputLayers):
             cat([p.gt_classes for p in proposals], dim=0) if len(proposals) else torch.empty(0)
         )
 
-        _log_classification_stats(scores, gt_classes)
+        # log_classification_stats(scores, gt_classes)
 
         # parse box regression outputs
         if len(proposals):
@@ -62,13 +69,8 @@ class SamRCNNOutputLayers(FastRCNNOutputLayers):
         else:
             proposal_boxes = gt_boxes = torch.empty((0, 4), device=proposal_deltas.device)
 
-        if self.use_sigmoid_ce:
-            loss_cls = self.sigmoid_cross_entropy_loss(scores, gt_classes) #mean
-        else:
-            loss_cls = cross_entropy(scores, gt_classes, reduction="mean")
-
         losses = {
-            "loss_cls": loss_cls,
+            # "loss_cls": loss_cls,
             "loss_box_reg": self.box_reg_loss(
                 proposal_boxes, gt_boxes, proposal_deltas, gt_classes
             ),
@@ -111,5 +113,176 @@ class SamRCNNOutputLayers(FastRCNNOutputLayers):
             loss_box_reg = giou_loss(fg_pred_boxes, gt_boxes[fg_inds], reduction="sum")
         else:
             raise ValueError(f"Invalid bbox reg loss type '{self.box_reg_loss_type}'")
-        # numel(): total numbers
         return loss_box_reg / max(gt_classes.numel(), 1.0)
+    
+    def forward(self, x):
+        """
+        Args:
+            x: per-region features of shape (N, ...) for N bounding boxes to predict.
+
+        Returns:
+            (Tensor, Tensor):
+            First tensor: shape (N,K+1), scores for each of the N box. Each row contains the
+            scores for K object categories and 1 background class.
+
+            Second tensor: bounding box regression deltas for each box. Shape is shape (N,Kx4),
+            or (N,4) for class-agnostic regression.
+        """
+        if x.dim() > 2:
+            x = torch.flatten(x, start_dim=1)
+        scores = self.cls_score(x)
+        proposal_deltas = self.bbox_pred(x)
+        return scores, proposal_deltas
+
+    def inference(self, predictions: Tuple[torch.Tensor, torch.Tensor], proposals: List[Instances]):
+        """
+        Args:
+            predictions: return values of :meth:`forward()`.
+            proposals (list[Instances]): proposals that match the features that were
+                used to compute predictions. The ``proposal_boxes`` field is expected.
+
+        Returns:
+            list[Instances]: same as `fast_rcnn_inference`.
+            list[Tensor]: same as `fast_rcnn_inference`.
+        """
+        if self.loss_weight["loss_box_reg"] == 0.:
+            boxes = [p.proposal_boxes.tensor for p in proposals]
+            scores = [torch.zeros(len(p), self.num_classes, device=p.proposal_boxes.device) for p in proposals]
+        else:
+            boxes = self.predict_boxes(predictions, proposals)
+            scores = self.predict_probs(predictions, proposals)
+        objectness = [p.objectness_logits.sigmoid() for p in proposals]
+        image_shapes = [x.image_size for x in proposals]
+        return fast_rcnn_inference(
+            boxes,
+            scores,
+            objectness,
+            image_shapes,
+            self.test_score_thresh,
+            self.test_nms_thresh,
+            self.test_topk_per_image,
+        )
+    
+def fast_rcnn_inference(
+    boxes: List[torch.Tensor],
+    scores: List[torch.Tensor],
+    objectness: List[torch.Tensor],
+    image_shapes: List[Tuple[int, int]],
+    score_thresh: float,
+    nms_thresh: float,
+    topk_per_image: int,
+):
+    """
+    Call `fast_rcnn_inference_single_image` for all images.
+
+    Args:
+        boxes (list[Tensor]): A list of Tensors of predicted class-specific or class-agnostic
+            boxes for each image. Element i has shape (Ri, K * 4) if doing
+            class-specific regression, or (Ri, 4) if doing class-agnostic
+            regression, where Ri is the number of predicted objects for image i.
+            This is compatible with the output of :meth:`FastRCNNOutputLayers.predict_boxes`.
+        scores (list[Tensor]): A list of Tensors of predicted class scores for each image.
+            Element i has shape (Ri, K + 1), where Ri is the number of predicted objects
+            for image i. Compatible with the output of :meth:`FastRCNNOutputLayers.predict_probs`.
+        image_shapes (list[tuple]): A list of (width, height) tuples for each image in the batch.
+        score_thresh (float): Only return detections with a confidence score exceeding this
+            threshold.
+        nms_thresh (float):  The threshold to use for box non-maximum suppression. Value in [0, 1].
+        topk_per_image (int): The number of top scoring detections to return. Set < 0 to return
+            all detections.
+
+    Returns:
+        instances: (list[Instances]): A list of N instances, one for each image in the batch,
+            that stores the topk most confidence detections.
+        kept_indices: (list[Tensor]): A list of 1D tensor of length of N, each element indicates
+            the corresponding boxes/scores index in [0, Ri) from the input, for image i.
+    """
+    result_per_image = [
+        fast_rcnn_inference_single_image(
+            boxes_per_image, scores_per_image, objectness_per_image, image_shape, score_thresh, nms_thresh, topk_per_image
+        )
+        for scores_per_image, boxes_per_image, objectness_per_image, image_shape in zip(scores, boxes, objectness, image_shapes)
+    ]
+    return result_per_image, None
+
+
+
+def fast_rcnn_inference_single_image(
+    boxes,
+    scores,
+    objectness,
+    image_shape: Tuple[int, int],
+    score_thresh: float,
+    nms_thresh: float,
+    topk_per_image: int,
+):
+    """
+    Single-image inference. Return bounding-box detection results by thresholding
+    on scores and applying non-maximum suppression (NMS).
+
+    Args:
+        Same as `fast_rcnn_inference`, but with boxes, scores, and image shapes
+        per image.
+
+    Returns:
+        Same as `fast_rcnn_inference`, but for only one image.
+    """
+    valid_mask = torch.isfinite(boxes).all(dim=1) & torch.isfinite(scores).all(dim=1)
+    if not valid_mask.all():
+        boxes = boxes[valid_mask]
+        scores = scores[valid_mask]
+    scores = scores[:, :-1]
+    num_bbox_reg_classes = boxes.shape[1] // 4
+    # Convert to Boxes to use the `clip` function ...
+    boxes = Boxes(boxes.reshape(-1, 4))
+    boxes.clip(image_shape)
+    boxes = boxes.tensor.view(-1, num_bbox_reg_classes, 4)  # R x C x 4
+
+    # 1. Filter results based on detection scores. It can make NMS more efficient
+    #    by filtering out low-confidence detections.
+    # filter_mask = scores > score_thresh  # R x K
+    # R' x 2. First column contains indices of the R predictions;
+    # Second column contains indices of classes.
+    if num_bbox_reg_classes == 1:
+        boxes = boxes[:, 0]
+    else:
+        boxes = boxes
+    # 2. Apply NMS for each class independently.
+    # keep = batched_nms(boxes, scores, filter_inds[:, 1], nms_thresh)
+    # if topk_per_image >= 0:
+        # keep = keep[:topk_per_image]
+    # boxes, scores, filter_inds = boxes[keep], scores[keep], filter_inds[keep]
+    
+    result = Instances(image_shape)
+    result.pred_boxes = Boxes(boxes)
+    result.objectness = objectness
+    return result
+
+def log_classification_stats(pred_logits, gt_classes, prefix="fast_rcnn"):
+    """
+    Log the classification metrics to EventStorage.
+
+    Args:
+        pred_logits: Rx(K+1) logits. The last column is for background class.
+        gt_classes: R labels
+    """
+    num_instances = gt_classes.numel()
+    if num_instances == 0:
+        return
+    pred_classes = pred_logits.argmax(dim=1)
+    bg_class_ind = pred_logits.shape[1] - 1
+
+    fg_inds = (gt_classes >= 0) & (gt_classes < bg_class_ind)
+    num_fg = fg_inds.nonzero().numel()
+    fg_gt_classes = gt_classes[fg_inds]
+    fg_pred_classes = pred_classes[fg_inds]
+
+    num_false_negative = (fg_pred_classes == bg_class_ind).nonzero().numel()
+    num_accurate = (pred_classes == gt_classes).nonzero().numel()
+    fg_num_accurate = (fg_pred_classes == fg_gt_classes).nonzero().numel()
+
+    storage = get_event_storage()
+    storage.put_scalar(f"{prefix}/cls_accuracy", num_accurate / num_instances)
+    if num_fg > 0:
+        storage.put_scalar(f"{prefix}/fg_cls_accuracy", fg_num_accurate / num_fg)
+        storage.put_scalar(f"{prefix}/false_negative", num_false_negative / num_fg)

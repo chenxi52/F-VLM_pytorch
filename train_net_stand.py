@@ -17,6 +17,8 @@ You may want to write your own script with your datasets and other customization
 
 Compared to "train_net.py", this script supports fewer default features.
 It also includes fewer abstraction, therefore is easier to add custom logic.
+
+add CLIP model
 """
 
 import logging
@@ -56,6 +58,7 @@ from detectron2.utils.events import (
     JSONWriter,
     TensorboardXWriter,
 )
+from torch.cuda.amp import GradScaler
 
 from detic.data.custom_dataset_mapper import SamDatasetMapper
 from detic.data.custom_build_augmentation import build_custom_augmentation
@@ -64,8 +67,8 @@ from detic.config import add_rsprompter_config
 from detectron2.utils.logger import setup_logger
 from detic.custom_solver import build_sam_optimizer
 import wandb
-from detic.evaluation.custom_evaluator import custom_inference_on_dataset
-
+from detic.modeling.clip import clip
+import torch.nn as nn
 logger = logging.getLogger("detectron2")
 
 
@@ -86,15 +89,11 @@ def do_test(cfg, model):
         if evaluator_type == "lvis" :
             evaluator = LVISEvaluator(dataset_name, cfg, True, output_folder)
         elif evaluator_type == 'coco':
-            # if dataset_name == 'coco_generalized_zeroshot_val':
-            #     # Additionally plot mAP for 'seen classes' and 'unseen classes'
-            #     evaluator = CustomCOCOEvaluator(dataset_name, cfg, True, output_folder)
-            # else:
             evaluator = COCOEvaluator(dataset_name, cfg, True, output_folder)
         else:
             assert 0, evaluator_type
         
-        results_i = custom_inference_on_dataset(model, data_loader, evaluator, frozen=cfg.MODEL.SAM_FROZEN)
+        results_i = inference_on_dataset(model, data_loader, evaluator)
         results[dataset_name] = results_i
         if comm.is_main_process():
             logger.info("Evaluation results for {} in csv format:".format(dataset_name))
@@ -105,22 +104,10 @@ def do_test(cfg, model):
 
 
 def do_train(cfg, model, resume=False):
-    model.train()
-    ##### set prompter params False
-    if cfg.MODEL.SAM_FROZEN:
-        for key, params in model.named_parameters():
-            if 'sam.' in key:
-                params.requires_grad = False
-        def set_sam_eval():
-            if comm.get_world_size() > 1:
-                model.module.sam.eval()
-            else:
-                model.sam.eval()
-        set_sam_eval()
-    #####
+    set_model_mode(model)
     if cfg.SOLVER.USE_CUSTOM_SOLVER:
         # also set requires_grad for module
-        optimizer = build_sam_optimizer(cfg, model)
+        optimizer = build_sam_optimizer(cfg, model, logger)
     else:
         assert cfg.SOLVER.OPTIMIZER == 'SGD'
         assert cfg.SOLVER.CLIP_GRADIENTS.CLIP_TYPE != 'full_model'
@@ -167,14 +154,21 @@ def do_train(cfg, model, resume=False):
     #####
     
     data_loader = build_detection_train_loader(cfg, mapper=mapper)
-
+    if cfg.FP16:
+        scaler = GradScaler()
     logger.info("Starting training from iteration {}".format(start_iter))
     with EventStorage(start_iter) as storage:
         for data, iteration in zip(data_loader, range(start_iter, max_iter)):
             storage.iter = iteration
-            loss_dict = model(data)
-            losses = sum(loss_dict.values())
-            assert torch.isfinite(losses).all(), loss_dict
+            if cfg.SOLVER.AMP.ENABLED:
+                with torch.cuda.amp.autocast():
+                    loss_dict = model(data)
+                    losses = sum(loss_dict.values())
+            try: assert torch.isfinite(losses).all()
+            except AssertionError:
+                print("*"*50)
+                print('loss is infinite')
+                losses = torch.tensor(0., requires_grad=True, device=losses.device)
 
             loss_dict_reduced = {k: v.item() for k, v in comm.reduce_dict(loss_dict).items()}
             losses_reduced = sum(loss for loss in loss_dict_reduced.values())
@@ -182,8 +176,13 @@ def do_train(cfg, model, resume=False):
                 storage.put_scalars(total_loss=losses_reduced, **loss_dict_reduced)
 
             optimizer.zero_grad()
-            losses.backward()
-            optimizer.step()
+            if cfg.SOLVER.AMP.ENABLED:
+                scaler.scale(losses).backward()
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                losses.backward()
+                optimizer.step()
             storage.put_scalar("lr", optimizer.param_groups[0]["lr"], smoothing_hint=False)
             scheduler.step()
 
@@ -207,9 +206,18 @@ def do_train(cfg, model, resume=False):
                     loss_dict_reduced['total_loss'] = losses_reduced
                     wandb.log(loss_dict_reduced)
             periodic_checkpointer.step(iteration)
-        # if comm.is_main_process() and cfg.WANDB:
-        #     wandb.finish()
 
+
+def set_model_mode(model):
+    # 如果模型是 DDP 模型，获取其内部的原始模型
+    if isinstance(model, nn.parallel.DistributedDataParallel):
+        model = model.module
+
+    for module in model.modules():
+        if any(param.requires_grad for param in module.parameters()):
+            module.train()
+        else:
+            module.eval()
 
 def setup(args):
     """
@@ -251,7 +259,7 @@ def main(args):
     distributed = comm.get_world_size() > 1
     if distributed:
         model = DistributedDataParallel(
-            model, device_ids=[comm.get_local_rank()], broadcast_buffers=True, find_unused_parameters=True
+            model, device_ids=[comm.get_local_rank()], broadcast_buffers=False, find_unused_parameters=True
         )
 
     do_train(cfg, model, resume=args.resume)
