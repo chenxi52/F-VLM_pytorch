@@ -68,6 +68,7 @@ from detectron2.utils.logger import setup_logger
 from detic.custom_solver import build_sam_optimizer
 import wandb
 from detic.modeling.clip import clip
+import torch.nn as nn
 logger = logging.getLogger("detectron2")
 
 
@@ -88,10 +89,6 @@ def do_test(cfg, model):
         if evaluator_type == "lvis" :
             evaluator = LVISEvaluator(dataset_name, cfg, True, output_folder)
         elif evaluator_type == 'coco':
-            # if dataset_name == 'coco_generalized_zeroshot_val':
-            #     # Additionally plot mAP for 'seen classes' and 'unseen classes'
-            #     evaluator = CustomCOCOEvaluator(dataset_name, cfg, True, output_folder)
-            # else:
             evaluator = COCOEvaluator(dataset_name, cfg, True, output_folder)
         else:
             assert 0, evaluator_type
@@ -107,7 +104,7 @@ def do_test(cfg, model):
 
 
 def do_train(cfg, model, resume=False):
-    model.train()
+    set_model_mode(model)
     if cfg.SOLVER.USE_CUSTOM_SOLVER:
         # also set requires_grad for module
         optimizer = build_sam_optimizer(cfg, model, logger)
@@ -173,7 +170,11 @@ def do_train(cfg, model, resume=False):
                 with torch.cuda.amp.autocast():
                     loss_dict = model(data)
                     losses = sum(loss_dict.values())
-            assert torch.isfinite(losses).all(), loss_dict
+            try: assert torch.isfinite(losses).all()
+            except AssertionError:
+                print("*"*50)
+                print('loss is infinite')
+                losses = torch.tensor(0., requires_grad=True, device=losses.device)
 
             loss_dict_reduced = {k: v.item() for k, v in comm.reduce_dict(loss_dict).items()}
             losses_reduced = sum(loss for loss in loss_dict_reduced.values())
@@ -211,9 +212,18 @@ def do_train(cfg, model, resume=False):
                     loss_dict_reduced['total_loss'] = losses_reduced
                     wandb.log(loss_dict_reduced)
             periodic_checkpointer.step(iteration)
-        # if comm.is_main_process() and cfg.WANDB:
-        #     wandb.finish()
 
+
+def set_model_mode(model):
+    # 如果模型是 DDP 模型，获取其内部的原始模型
+    if isinstance(model, nn.parallel.DistributedDataParallel):
+        model = model.module
+
+    for module in model.modules():
+        if any(param.requires_grad for param in module.parameters()):
+            module.train()
+        else:
+            module.eval()
 
 def setup(args):
     """

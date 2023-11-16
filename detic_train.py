@@ -7,23 +7,23 @@ import torch
 from torch.nn.parallel import DistributedDataParallel
 import time
 import datetime
+
 from fvcore.common.timer import Timer
 import detectron2.utils.comm as comm
 from detectron2.checkpoint import DetectionCheckpointer, PeriodicCheckpointer
-from detic.custom_checkpointer import samCheckpointer
 from detectron2.config import get_cfg
 from detectron2.data import (
     MetadataCatalog,
     build_detection_test_loader,
 )
 from detectron2.engine import default_argument_parser, default_setup, launch
+
 from detectron2.evaluation import (
     inference_on_dataset,
     print_csv_format,
     LVISEvaluator,
     COCOEvaluator,
 )
-from detic.evaluation.custom_evaluator import custom_inference_on_dataset
 from detectron2.modeling import build_model
 from detectron2.solver import build_lr_scheduler, build_optimizer
 from detectron2.utils.events import (
@@ -40,28 +40,31 @@ from torch.cuda.amp import GradScaler
 from detic.config import add_detic_config
 from detic.data.custom_build_augmentation import build_custom_augmentation
 from detic.data.custom_dataset_dataloader import  build_custom_train_loader
-from detic.data.custom_dataset_mapper import CustomDatasetMapper, DetrDatasetMapper, SamDatasetMapper
-from detic.custom_solver import build_custom_optimizer, build_sam_optimizer
+from detic.data.custom_dataset_mapper import CustomDatasetMapper, DetrDatasetMapper
+from detic.custom_solver import build_custom_optimizer
 from detic.evaluation.oideval import OIDEvaluator
 from detic.evaluation.custom_coco_eval import CustomCOCOEvaluator
 from detic.modeling.utils import reset_cls_test
-from detic.data.build import custom_build_detection_test_loader
 
-from detic.config import add_rsprompter_config
 logger = logging.getLogger("detectron2")
 
 def do_test(cfg, model):
     results = OrderedDict()
     for d, dataset_name in enumerate(cfg.DATASETS.TEST):
+        if cfg.MODEL.RESET_CLS_TESTS:
+            reset_cls_test(
+                model,
+                cfg.MODEL.TEST_CLASSIFIERS[d],
+                cfg.MODEL.TEST_NUM_CLASSES[d])
         mapper = None if cfg.INPUT.TEST_INPUT_TYPE == 'default' \
-            else SamDatasetMapper(
+            else DatasetMapper(
                 cfg, False, augmentations=build_custom_augmentation(cfg, False))
-        data_loader = custom_build_detection_test_loader(cfg, dataset_name, mapper=mapper)
+        data_loader = build_detection_test_loader(cfg, dataset_name, mapper=mapper)
         output_folder = os.path.join(
             cfg.OUTPUT_DIR, "inference_{}".format(dataset_name))
         evaluator_type = MetadataCatalog.get(dataset_name).evaluator_type
 
-        if evaluator_type == "lvis" :
+        if evaluator_type == "lvis" or cfg.GEN_PSEDO_LABELS:
             evaluator = LVISEvaluator(dataset_name, cfg, True, output_folder)
         elif evaluator_type == 'coco':
             if dataset_name == 'coco_generalized_zeroshot_val':
@@ -73,10 +76,9 @@ def do_test(cfg, model):
             evaluator = OIDEvaluator(dataset_name, cfg, True, output_folder)
         else:
             assert 0, evaluator_type
-        if cfg.SOLVER.AMP.ENABLED:
-            with torch.cuda.amp.autocast():
-                results[dataset_name] = custom_inference_on_dataset(
-                    model, data_loader, evaluator)
+            
+        results[dataset_name] = inference_on_dataset(
+            model, data_loader, evaluator)
         if comm.is_main_process():
             logger.info("Evaluation results for {} in csv format:".format(
                 dataset_name))
@@ -85,45 +87,43 @@ def do_test(cfg, model):
         results = list(results.values())[0]
     return results
 
-
 def do_train(cfg, model, resume=False):
     model.train()
     if cfg.SOLVER.USE_CUSTOM_SOLVER:
-        # also set requires_grad for module
-        optimizer = build_sam_optimizer(cfg, model)
+        optimizer = build_custom_optimizer(cfg, model)
     else:
         assert cfg.SOLVER.OPTIMIZER == 'SGD'
         assert cfg.SOLVER.CLIP_GRADIENTS.CLIP_TYPE != 'full_model'
         assert cfg.SOLVER.BACKBONE_MULTIPLIER == 1.
         optimizer = build_optimizer(cfg, model)
-
     scheduler = build_lr_scheduler(cfg, optimizer)
-    
-    checkpointer = samCheckpointer(
+
+    checkpointer = DetectionCheckpointer(
         model, cfg.OUTPUT_DIR, optimizer=optimizer, scheduler=scheduler
     )
+
     start_iter = checkpointer.resume_or_load(
             cfg.MODEL.WEIGHTS, resume=resume).get("iteration", -1) + 1
     if not resume:
         start_iter = 0
-    max_iter = cfg.SOLVER.MAX_ITER
+    max_iter = cfg.SOLVER.MAX_ITER if cfg.SOLVER.TRAIN_ITER < 0 else cfg.SOLVER.TRAIN_ITER
 
     periodic_checkpointer = PeriodicCheckpointer(
-        checkpointer, period=cfg.SOLVER.CHECKPOINT_PERIOD, max_iter=max_iter,
-        max_to_keep=3
+        checkpointer, cfg.SOLVER.CHECKPOINT_PERIOD, max_iter=max_iter
     )
-    TIMESTAMP = "{0:%Y-%m-%dT%H-%M-%S/}".format(datetime.datetime.now())
+
     writers = (
         [
             CommonMetricPrinter(max_iter),
             JSONWriter(os.path.join(cfg.OUTPUT_DIR, "metrics.json")),
-            TensorboardXWriter(cfg.OUTPUT_DIR+f'/{TIMESTAMP}'),
+            TensorboardXWriter(cfg.OUTPUT_DIR),
         ]
         if comm.is_main_process()
         else []
     )
 
-    MapperClass = SamDatasetMapper
+    use_custom_mapper = cfg.WITH_IMAGE_LABELS
+    MapperClass = CustomDatasetMapper if use_custom_mapper else DatasetMapper
     mapper = MapperClass(cfg, True) if cfg.INPUT.CUSTOM_AUG == '' else \
         DetrDatasetMapper(cfg, True) if cfg.INPUT.CUSTOM_AUG == 'DETR' else \
         MapperClass(cfg, True, augmentations=build_custom_augmentation(cfg, True))
@@ -131,7 +131,7 @@ def do_train(cfg, model, resume=False):
         data_loader = build_detection_train_loader(cfg, mapper=mapper)
     else:
         data_loader = build_custom_train_loader(cfg, mapper=mapper)
-    
+
     if cfg.FP16:
         scaler = GradScaler()
 
@@ -146,9 +146,8 @@ def do_train(cfg, model, resume=False):
             step_timer.reset()
             iteration = iteration + 1
             storage.step()
-            if cfg.SOLVER.AMP.ENABLED:
-                with torch.cuda.amp.autocast():
-                    loss_dict = model(data)
+            loss_dict = model(data)
+
             losses = sum(
                 loss for k, loss in loss_dict.items())
             assert torch.isfinite(losses).all(), loss_dict
@@ -161,7 +160,7 @@ def do_train(cfg, model, resume=False):
                     total_loss=losses_reduced, **loss_dict_reduced)
 
             optimizer.zero_grad()
-            if cfg.SOLVER.AMP.ENABLED:
+            if cfg.FP16:
                 scaler.scale(losses).backward()
                 scaler.step(optimizer)
                 scaler.update()
@@ -182,8 +181,9 @@ def do_train(cfg, model, resume=False):
                 and iteration != max_iter):
                 do_test(cfg, model)
                 comm.synchronize()
+
             if iteration - start_iter > 5 and \
-                (iteration % cfg.SOLVER.LOGGER_FREQ == 0 or iteration == max_iter):
+                (iteration % 20 == 0 or iteration == max_iter):
                 for writer in writers:
                     writer.write()
             periodic_checkpointer.step(iteration)
@@ -198,8 +198,7 @@ def setup(args):
     Create configs and perform basic setups.
     """
     cfg = get_cfg()
-    add_rsprompter_config(cfg)
-    # add_detic_config(cfg)
+    add_detic_config(cfg)
     cfg.merge_from_file(args.config_file)
     cfg.merge_from_list(args.opts)
     if '/auto' in cfg.OUTPUT_DIR:
@@ -215,22 +214,20 @@ def setup(args):
 
 def main(args):
     cfg = setup(args)
-    
+
     model = build_model(cfg)
-    # logger.info("Model:\n{}".format(model))
-    
+    logger.info("Model:\n{}".format(model))
     if args.eval_only:
-        # for debugging, load fastercnn here
-        samCheckpointer(model, save_dir=cfg.OUTPUT_DIR).resume_or_load(
+        DetectionCheckpointer(model, save_dir=cfg.OUTPUT_DIR).resume_or_load(
             cfg.MODEL.WEIGHTS, resume=args.resume
         )
-        model.eval()
+
         return do_test(cfg, model)
 
     distributed = comm.get_world_size() > 1
     if distributed:
         model = DistributedDataParallel(
-            model, device_ids=[comm.get_local_rank()], broadcast_buffers=True,
+            model, device_ids=[comm.get_local_rank()], broadcast_buffers=False,
             find_unused_parameters=cfg.FIND_UNUSED_PARAM
         )
 

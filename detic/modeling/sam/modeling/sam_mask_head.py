@@ -68,20 +68,32 @@ class samMaskHead(BaseMaskRCNNHead):
         if clip_type == 'ViT-B/16':
             self.text_dim = 512
             self.clip_dim = 768
-        # elif clip_type == 'RN50':
-        #     self.text_dim = 768
-        #     self.clip_dim = 1024
+            self.down_dim = self.clip_dim
+        elif clip_type == 'RN50':
+            self.text_dim = 1024
+            self.clip_dim = 2048
+            self.down_dim = 1024
+        elif clip_type == 'RN50x64':
+            self.text_dim = 1024
+            self.clip_dim = 4096
+            self.down_dim = self.clip_dim
         self.contextformer = build_contextformer(
-          d_model=self.clip_dim
+          d_model=self.down_dim
         )
         self.to_clip = nn.Linear(
-            256, self.clip_dim
+            256, self.down_dim
         )
+
         self.projector = nn.Linear(
-            self.clip_dim, self.text_dim
+            self.down_dim, self.text_dim
+        )
+        self.down_channel = nn.Linear(
+            self.clip_dim, self.down_dim
         )
         self._init_weights(self.point_emb)
         self._init_weights(self.to_clip)
+        self._init_weights(self.projector)
+        self._init_weights(self.down_channel)
         self.score_thresh = score_thresh
         self.top_per_instance = top_per_instance
         self.test_nms_thresh = test_nms_thresh
@@ -186,9 +198,10 @@ class samMaskHead(BaseMaskRCNNHead):
             mask_tokens = self.to_clip(mask_tokens)
 
             logit_scale = clip.logit_scale.exp()
-            semantic_token = self.contextformer(mask_tokens, clip_img_embeddings)#(batch_size, 4, self.clip_dim)
+            # clIP_img_embedding.降维。clip_dim 修改为这个维度
+            clip_img_embeddings = self.down_channel(clip_img_embeddings)
+            semantic_token = self.contextformer(mask_tokens, clip_img_embeddings)#mask_tokens: (batch_size, 1, self.clip_dim),clip: [bz,self.clip_dim, 32,32]
             semantic_token = self.projector(semantic_token)
-            
             clip_texts = move_device_like(clip_texts, semantic_token)
             logits_image, logits_text = self.get_logits(semantic_token, clip_texts, logit_scale)
         low_res_masks = torch.nn.functional.interpolate(low_res_masks, size=(self.train_size, self.train_size), mode='bilinear', align_corners=False)

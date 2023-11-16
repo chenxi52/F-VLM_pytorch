@@ -4,7 +4,7 @@ MODEL:
   BACKBONE:
     NAME: "build_sam_vit_det_backbone" #SAM vit_h
     TYPE: "vit_t"
-    CLIP_TYPE: "ViT-B/16"
+    CLIP_TYPE: "RN50"
   WEIGHTS: "mobile_sam.pt"
   # WEIGHTS: "/opt/tiger/OpenVo-Seg-master/output/wo_mask_with_prompt_encoder_roi_head_withgrad/model_final.pth"
   # WEIGHTS: "sam_vit_h_4b8939.pth"
@@ -21,9 +21,9 @@ MODEL:
     SIZES: [[32],[64],[128],[256],[512]] 
     ASPECT_RATIOS: [[0.5, 1.0, 2.0]]  # Three aspect ratios (same for all in feature maps)
   PROPOSAL_GENERATOR:
-    NAME: "RPN"
+    NAME: "SAMRPN"
   RPN:
-    HEAD_NAME: "SAMRpnHead"
+    HEAD_NAME: "StandardRPNHead"
     IN_FEATURES: ["feat4","feat3","feat2","feat1","feat0"]
     PRE_NMS_TOPK_TRAIN: 2000  # Per FPN level
     PRE_NMS_TOPK_TEST: 1000  # Per FPN level
@@ -38,7 +38,7 @@ MODEL:
     BBOX_REG_LOSS_TYPE: "smooth_l1"
     NMS_THRESH: 0.7
     SMOOTH_L1_BETA: 0.
-    OBJECTNESS_LOSS_TYPE: "centerness" # options: centerness, binary_ce
+    OBJECTNESS_LOSS_TYPE: "binary_ce" # options: centerness, binary_ce
   ROI_HEADS:
     NAME: "samAnchorPromptRoiHeads" 
     IN_FEATURES: ["feat4","feat3","feat2","feat1"]
@@ -71,7 +71,7 @@ MODEL:
     NUM_CONV: 4
     CLS_AGNOSTIC_MASK: True
     WITH_SINCOS: True
-    MASK_LOSS_TYPE: "focal_dice" 
+    MASK_LOSS_TYPE: "ce_dice" 
     MASK_LOSS_WEIGHT: 1.0
     POOLER_RESOLUTION: 14
     POOLER_SAMPLING_RATIO: 0
@@ -111,11 +111,12 @@ INPUT:
   # PAD_MASK: True
   # MASK_PAD_VAL: 0.0
   MASK_FORMAT: "bitmask"
+  CLIP_TRAIN_SIZE: 512
 TEST:
   DETECTIONS_PER_IMAGE: 300  #test_topk_per_image
   MASK_THR_BINARY: 0.5  
   DO_POSTPROCESS: True
-  EVAL_PERIOD: 5000 # change
+  EVAL_PERIOD: 90000 # change
   IMS_PER_BATCH: 2 #every gpu has most 2 images  # change
   SCORE_TYPE: 'ob_geo_cls'
   GEOMETRIC_FACT: 0.65

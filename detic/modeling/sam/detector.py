@@ -169,6 +169,7 @@ class SamOpenDetector(SamDetector):
         backbone_name=None,
         class_name=constants.COCO_INSTANCE_CLASSES,
         add_unfrozen='xxx',
+        clip_train_size=1024,
         **kwargs
     ):
         self.fp16=fp16
@@ -176,6 +177,7 @@ class SamOpenDetector(SamDetector):
         assert self.proposal_generator is not None
         self.sam = sam_model_registry[sam_type]()
         self.clip = clip.load(clip_type, jit=False)[0]
+        self.clip_type = clip_type
         self.mask_thr_binary = mask_thr_binary
         self.do_postprocess = do_postprocess
         self.backbone_name = backbone_name
@@ -191,6 +193,7 @@ class SamOpenDetector(SamDetector):
             params.requires_grad = False
         self.register_buffer("clip_pixel_mean", torch.tensor([0.48145466, 0.4578275, 0.40821073]).unsqueeze(1).unsqueeze(2), False)
         self.register_buffer("clip_pixel_std", torch.tensor([0.26862954, 0.26130258, 0.27577711]).unsqueeze(1).unsqueeze(2), False)
+        self.clip_train_size = clip_train_size
 
     @classmethod
     def from_config(cls, cfg):
@@ -211,7 +214,8 @@ class SamOpenDetector(SamDetector):
             "do_postprocess": cfg.TEST.DO_POSTPROCESS,
             "backbone_name":cfg.MODEL.BACKBONE.NAME,
             "class_name":class_name,
-            "add_unfrozen":cfg.MODEL.BACKBONE.ADD_UNFROZEN
+            "add_unfrozen":cfg.MODEL.BACKBONE.ADD_UNFROZEN,
+            "clip_train_size":cfg.INPUT.CLIP_TRAIN_SIZE
         })
         ret.update(mask_thr_binary = cfg.TEST.MASK_THR_BINARY)
         return ret
@@ -252,10 +256,12 @@ class SamOpenDetector(SamDetector):
         else:
             # tiny image encoder are not implemented now
             feat, inter_features = self.sam.image_encoder(batched_inputs)
-        clip_img = self.clip.encode_image_feature(resized_images)
-    
+        clip_feat = self.clip.encode_image_feature(resized_images)
+        if 'RN' in self.clip_type:
+            clip_feat = clip_feat.permute(1, 0, 2)
         # feat: Tensor[bz, 256, 64, 64]  inter_feats: List[32*Tensor[bz,64,64,1280]]
-        return feat, inter_features, clip_img
+        # rn_50 clip: [bz, img_dim, c]
+        return feat, inter_features, clip_feat
     
     def forward(self, batched_inputs: List[Dict[str, torch.Tensor]]):
         resized_images = self.resize_norm(batched_inputs)
@@ -285,8 +291,12 @@ class SamOpenDetector(SamDetector):
     def resize_norm(self, batched_inputs, target_size=(224, 224)):
         # Convert the numpy image to a torch tensor and ensure it is in CxHxW format
         images = [self._move_to_current_device((x["image"]/255.).to(torch.float)) for x in batched_inputs]
-        resized_images = [F.interpolate(x.unsqueeze(0), size=target_size, mode='bilinear', align_corners=False).squeeze(1) for x in images]
+        if self.clip_type == 'ViT-B/16':
+            resized_images = [F.interpolate(x.unsqueeze(0), size=(224,224), mode='bilinear', align_corners=False).squeeze(1) for x in images]
         # Apply normalization
+        elif self.clip_type == 'RN50':
+            resized_images = [F.interpolate(x.unsqueeze(0), size=(self.clip_train_size,self.clip_train_size), mode='bilinear', align_corners=False).squeeze(1) for x in images]
+
         resized_images = [(x - self.clip_pixel_mean) / self.clip_pixel_std for x in resized_images]
         return torch.cat(resized_images,dim=0)
     

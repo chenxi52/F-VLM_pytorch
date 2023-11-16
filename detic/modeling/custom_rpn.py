@@ -121,9 +121,9 @@ class SAMRPN(RPN):
                 gt_centerness = retry_if_cuda_oom(get_centerness)(anchors, matched_gt_boxes_i)
                 gt_centerness = gt_centerness.to(device=gt_boxes_i.device)
                 gt_labels_i = gt_labels_i.to(torch.float32)
-                gt_centerness = torch.where(gt_centerness>0, gt_centerness*gt_labels_i, gt_labels_i)
+                gt_labels_i = torch.where(gt_centerness>0, gt_centerness*gt_labels_i, gt_labels_i)
                 # only negtive boxes are set to gt_labels=0
-            gt_labels.append(gt_centerness)  # N,AHW
+            gt_labels.append(gt_labels_i)  # N,AHW
             matched_gt_boxes.append(matched_gt_boxes_i)
 
         return gt_labels, matched_gt_boxes

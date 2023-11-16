@@ -89,7 +89,11 @@ class AttentionPool2d(nn.Module):
             need_weights=False
         )
         return x.squeeze(0)
-
+    def forward_fea(self,x):
+        x = x.flatten(start_dim=2).permute(2, 0, 1)  # NCHW -> (HW)NC
+        x = torch.cat([x.mean(dim=0, keepdim=True), x], dim=0)  # (HW+1)NC
+        x = x + self.positional_embedding[:, None, :].to(x.dtype)  # (HW+1)NC
+        return x
 
 class ModifiedResNet(nn.Module):
     """
@@ -135,6 +139,23 @@ class ModifiedResNet(nn.Module):
 
         return nn.Sequential(*layers)
 
+    def forward_featuremap(self, x: torch.Tensor):
+        def stem(x):
+            x = self.relu1(self.bn1(self.conv1(x)))
+            x = self.relu2(self.bn2(self.conv2(x)))
+            x = self.relu3(self.bn3(self.conv3(x)))
+            x = self.avgpool(x)
+            return x
+
+        x = x.type(self.conv1.weight.dtype)
+        x = stem(x)
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+        x = self.layer4(x)
+        x = self.attnpool.forward_fea(x)
+        return x
+
     def forward(self, x):
         def stem(x):
             x = self.relu1(self.bn1(self.conv1(x)))
@@ -150,7 +171,6 @@ class ModifiedResNet(nn.Module):
         x = self.layer3(x)
         x = self.layer4(x)
         x = self.attnpool(x)
-
         return x
 
 
