@@ -74,7 +74,6 @@ class DeticFastRCNNOutputLayers(FastRCNNOutputLayers):
         self.add_image_box = add_image_box
         self.softmax_weak_loss = softmax_weak_loss
         self.debug = debug
-
         if softmax_weak_loss:
             assert image_label_loss in ['max_size'] 
 
@@ -144,7 +143,7 @@ class DeticFastRCNNOutputLayers(FastRCNNOutputLayers):
             'caption_weight': cfg.MODEL.ROI_BOX_HEAD.CAPTION_WEIGHT,
             'neg_cap_weight': cfg.MODEL.ROI_BOX_HEAD.NEG_CAP_WEIGHT,
             'add_image_box': cfg.MODEL.ROI_BOX_HEAD.ADD_IMAGE_BOX,
-            'debug': cfg.DEBUG or cfg.SAVE_DEBUG or cfg.IS_DEBUG,
+            'debug': cfg.IS_DEBUG,
             'prior_prob': cfg.MODEL.ROI_BOX_HEAD.PRIOR_PROB,
             'cat_freq_path': cfg.MODEL.ROI_BOX_HEAD.CAT_FREQ_PATH,
             'fed_loss_freq_weight': cfg.MODEL.ROI_BOX_HEAD.FED_LOSS_FREQ_WEIGHT,
@@ -433,7 +432,7 @@ class DeticFastRCNNOutputLayers(FastRCNNOutputLayers):
         if x.dim() > 2:
             x = torch.flatten(x, start_dim=1)
         scores = []
-   
+        import ipdb;ipdb.set_trace()
         if classifier_info[0] is not None:
             cls_scores = self.cls_score(x, classifier=classifier_info[0])
             scores.append(cls_scores)

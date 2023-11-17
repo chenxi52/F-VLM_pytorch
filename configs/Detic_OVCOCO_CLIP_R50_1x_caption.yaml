@@ -1,6 +1,6 @@
 _BASE_: "Base_OVCOCO_C4_1x.yaml"
 MODEL:
-  WEIGHTS: "models/BoxSup_OVCOCO_CLIP_R50_1x.pth"
+  # WEIGHTS: "models/BoxSup_OVCOCO_CLIP_R50_1x.pth"
   WITH_CAPTION: True
   SYNC_CAPTION_BATCH: True
   ROI_BOX_HEAD:

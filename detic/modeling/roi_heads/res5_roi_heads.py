@@ -31,7 +31,7 @@ class CustomRes5ROIHeads(Res5ROIHeads):
         super().__init__(**kwargs)
         stage_channel_factor = 2 ** 3
         out_channels = cfg.MODEL.RESNETS.RES2_OUT_CHANNELS * stage_channel_factor
-
+        
         self.with_image_labels = cfg.WITH_IMAGE_LABELS
         self.ws_num_props = cfg.MODEL.ROI_BOX_HEAD.WS_NUM_PROPS
         self.add_image_box = cfg.MODEL.ROI_BOX_HEAD.ADD_IMAGE_BOX

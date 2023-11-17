@@ -9,6 +9,8 @@ from .modeling.sam.detector import SamDetector
 from .modeling.sam.modeling.image_encoder import ImageEncoderViT
 from .modeling.sam.modeling.sam_roi_heads import samAnchorPromptRoiHeads
 from .modeling.custom_rpn import SAMRPN
+from .modeling.meta_arch.custom_rcnn import CustomRCNN
+from .modeling.roi_heads import res5_roi_heads
 
 from .data.datasets import lvis_v1
 from .data.datasets import imagenet

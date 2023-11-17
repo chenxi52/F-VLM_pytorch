@@ -149,7 +149,6 @@ class CustomRCNN(GeneralizedRCNN):
             cls_inds = self._sample_cls_inds(gt_instances, ann_type) # inds, inv_inds
             ind_with_bg = cls_inds[0].tolist() + [-1]
             cls_features = self.roi_heads.box_predictor[0].cls_score.zs_weight[:, ind_with_bg].permute(1, 0).contiguous()
-        import ipdb; ipdb.set_trace()
         classifier_info = cls_features, cls_inds, caption_features
         proposals, proposal_losses = self.proposal_generator(
             images, features, gt_instances)
