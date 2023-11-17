@@ -31,9 +31,8 @@ import datetime
 import detectron2.utils.comm as comm
 from detectron2.checkpoint import PeriodicCheckpointer
 from detectron2.config import get_cfg
-from detectron2.data import MetadataCatalog
+from detectron2.data import MetadataCatalog, build_detection_test_loader 
 
-from detic.data.build import custom_build_detection_test_loader
 from detectron2.data.build import build_detection_train_loader
 
 from detectron2.engine import default_argument_parser, default_setup, launch
@@ -73,7 +72,7 @@ def do_test(cfg, model):
         mapper = None if cfg.INPUT.TEST_INPUT_TYPE == 'default' \
             else SamDatasetMapper(
                 cfg, False, augmentations=build_custom_augmentation(cfg, False))
-        data_loader = custom_build_detection_test_loader(cfg, dataset_name, mapper=mapper)
+        data_loader = build_detection_test_loader(cfg, dataset_name, mapper=mapper)
         #####
         output_folder = os.path.join(
             cfg.OUTPUT_DIR, "inference_{}".format(dataset_name))

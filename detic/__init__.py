@@ -12,11 +12,11 @@ from .modeling.custom_rpn import SAMRPN
 from .modeling.meta_arch.custom_rcnn import CustomRCNN
 from .modeling.roi_heads import res5_roi_heads
 
-from .data.datasets import lvis_v1
-from .data.datasets import imagenet
-from .data.datasets import cc
-from .data.datasets import objects365
-from .data.datasets import oid
+# from .data.datasets import lvis_v1
+# from .data.datasets import imagenet
+# from .data.datasets import cc
+# from .data.datasets import objects365
+# from .data.datasets import oid
 from .data.datasets import coco_zeroshot
 
 try:
