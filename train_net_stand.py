@@ -209,15 +209,13 @@ def do_train(cfg, model, resume=False):
 
 
 def set_model_mode(model):
+    model.train()
     # 如果模型是 DDP 模型，获取其内部的原始模型
     if isinstance(model, nn.parallel.DistributedDataParallel):
         model = model.module
 
-    for module in model.modules():
-        if any(param.requires_grad for param in module.parameters()):
-            module.train()
-        else:
-            module.eval()
+    model.sam.eval()
+    model.clip.eval()
 
 def setup(args):
     """
@@ -237,7 +235,6 @@ def setup(args):
 
 
 def main(args):
-    import ipdb;ipdb.set_trace()
     cfg = setup(args)
     TIMESTAMP = "{0:%Y-%m-%dT%H-%M-%S/}".format(datetime.datetime.now())
     if comm.is_main_process() and cfg.WANDB:

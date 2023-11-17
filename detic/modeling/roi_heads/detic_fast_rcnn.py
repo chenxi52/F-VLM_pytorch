@@ -81,7 +81,7 @@ class DeticFastRCNNOutputLayers(FastRCNNOutputLayers):
         if self.use_sigmoid_ce:
             bias_value = -math.log((1 - prior_prob) / prior_prob)
             nn.init.constant_(self.cls_score.bias, bias_value)
-        
+        import ipdb;ipdb.set_trace()
         if self.use_fed_loss or self.ignore_zero_cats:
             freq_weight = load_class_freq(cat_freq_path, fed_loss_freq_weight)
             self.register_buffer('freq_weight', freq_weight)
