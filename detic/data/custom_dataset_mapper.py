@@ -2,23 +2,17 @@
 import copy
 import logging
 import numpy as np
-from typing import List, Optional, Union, Tuple
 import torch
 import pycocotools.mask as mask_util
 
 from detectron2.config import configurable
-from detectron2.data import MapDataset,DatasetMapper
+from detectron2.data import DatasetMapper
 from detectron2.data import detection_utils as utils
-from detectron2.data.detection_utils import transform_keypoint_annotations
 from detectron2.data import transforms as T
 from detectron2.structures import Boxes, BoxMode, Instances, polygons_to_bitmask
 from detectron2.structures import Keypoints, PolygonMasks, BitMasks
-from fvcore.transforms.transform import TransformList
 from .custom_build_augmentation import build_custom_augmentation
 from .tar_dataset import DiskTarDataset
-from fvcore.transforms.transform import NoOpTransform
-# from detectron2.data.datasets import register_coco_instances
-from detic.data.sam_instances import samInstances
 
 __all__ = ["CustomDatasetMapper", "SamDatasetMapper"]
 

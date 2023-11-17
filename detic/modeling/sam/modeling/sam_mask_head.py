@@ -241,13 +241,16 @@ class samMaskHead(BaseMaskRCNNHead):
         ce_loss = F.binary_cross_entropy_with_logits(inputs, targets, reduction="none")
         p_t = prob * targets + (1 - prob) * (1 - targets)
         loss = ce_loss * ((1 - p_t) ** gamma)
+        B = inputs.shape[0]
 
         if alpha >= 0:
             loss = (alpha * targets + (1 - alpha) * (1 - targets)) * loss
-        B = inputs.shape[0]
-        w = (self.freq_weight.view(-1) > 1e-4).float()
-        w = torch.cat([w, w.new_ones(1)]).unsqueeze(0)
-        return (loss*w).mean(1).sum() / B
+        if self.ignore_zero_cats:
+            w = (self.freq_weight.view(-1) > 1e-4).float()
+            w = torch.cat([w, w.new_ones(1)]).unsqueeze(0)
+            return (loss*w).mean(1).sum() / B
+        else: 
+            return loss.mean(1).sum()/B
     
     def get_logits(self, region_features, text_features, logit_scale):
         # 计算image_features @ text_features.T相似度矩阵

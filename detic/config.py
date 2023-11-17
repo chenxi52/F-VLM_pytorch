@@ -148,7 +148,7 @@ def add_rsprompter_config(cfg):
 
     _C.MODEL.ROI_BOX_HEAD.USE_SIGMOID_CE = False
     _C.MODEL.ROI_BOX_HEAD.CAT_FREQ_PATH = 'datasets/metadata/lvis_v1_train_cat_info.json'
-    _C.MODEL.ROI_BOX_HEAD.IGNORE_ZERO_CATS = True
+    _C.MODEL.ROI_BOX_HEAD.IGNORE_ZERO_CATS = False
     _C.MODEL.ROI_BOX_HEAD.FED_LOSS_FREQ_WEIGHT = 0.5
     
     _C.MODEL.ROI_MASK_HEAD.WITH_SINCOS = True

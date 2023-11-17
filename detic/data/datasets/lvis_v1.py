@@ -142,14 +142,14 @@ def get_lvis_22k_meta():
     meta = {"thing_classes": thing_classes}
     return meta
 
-_CUSTOM_SPLITS_LVIS_22K = {
-    "lvis_v1_train_22k": ("coco/", "lvis/lvis_v1_train_lvis-22k.json"),
-}
+# _CUSTOM_SPLITS_LVIS_22K = {
+#     "lvis_v1_train_22k": ("coco/", "lvis/lvis_v1_train_lvis-22k.json"),
+# }
 
-for key, (image_root, json_file) in _CUSTOM_SPLITS_LVIS_22K.items():
-    custom_register_lvis_instances(
-        key,
-        get_lvis_22k_meta(),
-        os.path.join("datasets", json_file) if "://" not in json_file else json_file,
-        os.path.join("datasets", image_root),
-    )
+# for key, (image_root, json_file) in _CUSTOM_SPLITS_LVIS_22K.items():
+#     custom_register_lvis_instances(
+#         key,
+#         get_lvis_22k_meta(),
+#         os.path.join("datasets", json_file) if "://" not in json_file else json_file,
+#         os.path.join("datasets", image_root),
+#     )
