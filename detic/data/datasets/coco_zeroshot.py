@@ -108,14 +108,14 @@ for key, (image_root, json_file, cat) in _PREDEFINED_SPLITS_COCO.items():
         os.path.join("datasets", image_root),
     )
 
-_CUSTOM_SPLITS_COCO = {
-    "cc3m_coco_train_tags": ("cc3m/training/", "cc3m/coco_train_image_info_tags.json"),
-    "coco_caption_train_tags": ("coco/train2017/", "coco/annotations/captions_train2017_tags_allcaps.json"),}
+# _CUSTOM_SPLITS_COCO = {
+#     "cc3m_coco_train_tags": ("cc3m/training/", "cc3m/coco_train_image_info_tags.json"),
+#     "coco_caption_train_tags": ("coco/train2017/", "coco/annotations/captions_train2017_tags_allcaps.json"),}
 
-for key, (image_root, json_file) in _CUSTOM_SPLITS_COCO.items():
-    custom_register_lvis_instances(
-        key,
-        _get_builtin_metadata('coco'),
-        os.path.join("datasets", json_file) if "://" not in json_file else json_file,
-        os.path.join("datasets", image_root),
-    )
+# for key, (image_root, json_file) in _CUSTOM_SPLITS_COCO.items():
+#     custom_register_lvis_instances(
+#         key,
+#         _get_builtin_metadata('coco'),
+#         os.path.join("datasets", json_file) if "://" not in json_file else json_file,
+#         os.path.join("datasets", image_root),
+#     )

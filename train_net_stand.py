@@ -29,23 +29,17 @@ from torch.nn.parallel import DistributedDataParallel
 import datetime
 
 import detectron2.utils.comm as comm
-from detectron2.checkpoint import DetectionCheckpointer, PeriodicCheckpointer
+from detectron2.checkpoint import PeriodicCheckpointer
 from detectron2.config import get_cfg
-from detectron2.data import MetadataCatalog, dataset_mapper
+from detectron2.data import MetadataCatalog
 
-from detic.data.build import custom_build_detection_test_loader, custom_build_detection_train_loader
-from detectron2.data.build import get_detection_dataset_dicts, build_detection_test_loader, build_detection_train_loader, _train_loader_from_config
+from detic.data.build import custom_build_detection_test_loader
+from detectron2.data.build import build_detection_train_loader
 
-from detectron2.engine import default_argument_parser, default_setup, default_writers, launch
+from detectron2.engine import default_argument_parser, default_setup, launch
 from detectron2.evaluation import (
-    CityscapesInstanceEvaluator,
-    CityscapesSemSegEvaluator,
     COCOEvaluator,
-    COCOPanopticEvaluator,
-    DatasetEvaluators,
     LVISEvaluator,
-    PascalVOCDetectionEvaluator,
-    SemSegEvaluator,
     inference_on_dataset,
     print_csv_format,
 )
@@ -67,7 +61,6 @@ from detic.config import add_rsprompter_config
 from detectron2.utils.logger import setup_logger
 from detic.custom_solver import build_sam_optimizer
 import wandb
-from detic.modeling.clip import clip
 import torch.nn as nn
 logger = logging.getLogger("detectron2")
 
