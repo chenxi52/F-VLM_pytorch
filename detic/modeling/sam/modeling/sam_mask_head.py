@@ -17,6 +17,7 @@ from detic.modeling.ContextFormer import build_contextformer
 from detectron2.modeling.roi_heads.fast_rcnn import _log_classification_stats
 from detectron2.layers import nonzero_tuple
 from fvcore.nn import sigmoid_focal_loss_jit
+from detic.modeling.utils import load_class_freq
 # add classification with clip text
 @ROI_MASK_HEAD_REGISTRY.register()
 class samMaskHead(BaseMaskRCNNHead):
@@ -36,10 +37,12 @@ class samMaskHead(BaseMaskRCNNHead):
             score_thresh: float=0.02,
             top_per_instance: int=100,
             test_nms_thresh: float=0.5,
-            mask_loss_type: str='ce_dice',
             data_classes: int=80,
             test_score_type: str='score',
-            test_geometric_fact = 0.5,
+            test_geometric_fact: float= 0.5,
+            ignore_zero_cats: bool=True,
+            cat_freq_path: str='',
+            fed_loss_freq_weight: float=0.5,
             ) -> None:
         super().__init__()
         if with_sincos:
@@ -102,6 +105,10 @@ class samMaskHead(BaseMaskRCNNHead):
         self.data_classes  = data_classes
         self.test_score_type = test_score_type
         self.test_geometric_fact = test_geometric_fact
+        self.ignore_zero_cats = ignore_zero_cats
+        if self.ignore_zero_cats:
+            freq_weight = load_class_freq(cat_freq_path, fed_loss_freq_weight)
+            self.register_buffer('freq_weight', freq_weight)
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
@@ -138,6 +145,9 @@ class samMaskHead(BaseMaskRCNNHead):
                 'data_classes': cfg.MODEL.ROI_HEADS.NUM_CLASSES,
                 'test_score_type': cfg.TEST.SCORE_TYPE,
                 'test_geometric_fact': cfg.TEST.GEOMETRIC_FACT,
+                'ignore_zero_cats': cfg.MODEL.ROI_BOX_HEAD.IGNORE_ZERO_CATS,
+                'cat_freq_path': cfg.MODEL.ROI_BOX_HEAD.CAT_FREQ_PATH,
+                'fed_loss_freq_weight': cfg.MODEL.ROI_BOX_HEAD.FED_LOSS_FREQ_WEIGHT,
                 }
     
     def forward(
@@ -218,15 +228,14 @@ class samMaskHead(BaseMaskRCNNHead):
             target_classes_onehot.scatter_(1, gt_classes.unsqueeze(-1), 1)
             # TODO: not right
             loss ={"loss_mask": self.custom_mask_rcnn_loss(low_res_masks, instances, self.vis_period) * self.loss_weight,
-                   "loss_cls": self.sigmoid_focal_loss(logits_image, target_classes_onehot, num_boxes=batch_size)}
+                   "loss_cls": self.sigmoid_focal_loss(logits_image, target_classes_onehot)}
             return loss
-
         else:
             new_instances = self.custom_mask_rcnn_inference(low_res_masks, instances, logits_image[:,:-1], self.score_thresh, self.top_per_instance, self.test_nms_thresh)
             del instances
             return new_instances
         
-    def sigmoid_focal_loss(self, inputs, targets, num_boxes, alpha: float = 0.25, gamma: float = 2):
+    def sigmoid_focal_loss(self, inputs, targets, alpha: float = 0.25, gamma: float = 2):
         """Compute the sigmoid focal loss."""
         prob = inputs.sigmoid()
         ce_loss = F.binary_cross_entropy_with_logits(inputs, targets, reduction="none")
@@ -235,14 +244,17 @@ class samMaskHead(BaseMaskRCNNHead):
 
         if alpha >= 0:
             loss = (alpha * targets + (1 - alpha) * (1 - targets)) * loss
-
-        return loss.mean(1).sum() / num_boxes
+        B = inputs.shape[0]
+        w = (self.freq_weight.view(-1) > 1e-4).float()
+        w = torch.cat([w, w.new_ones(1)]).unsqueeze(0)
+        return (loss*w).mean(1).sum() / B
     
     def get_logits(self, region_features, text_features, logit_scale):
         # 计算image_features @ text_features.T相似度矩阵
+        # set unseen class weights to zero
         region_features = region_features / (region_features.norm(dim=-1, keepdim=True) + 1e-7)
         logits_per_image = logit_scale * region_features @ (text_features.unsqueeze(0).transpose(1, 2))
-        logits_per_text = logit_scale * text_features.unsqueeze(0) @ region_features.transpose(1, 2)
+        logits_per_text = logit_scale * (text_features.unsqueeze(0)) @ region_features.transpose(1, 2)
         return logits_per_image, logits_per_text
     
     def custom_mask_rcnn_loss(self, pred_mask_logits: torch.Tensor, instances: List[Instances], vis_period: int = 0):

@@ -87,7 +87,7 @@ def add_detic_config(cfg):
     _C.SOLVER.BACKBONE_MULTIPLIER = 1.0 # Used in DETR
     _C.SOLVER.CUSTOM_MULTIPLIER = 1.0 # Used in DETR
     _C.SOLVER.CUSTOM_MULTIPLIER_NAME = [] # Used in DETR
-
+    _C.SOLVER.TRAIN_ITER = -1 # Used in DETR
     # Deformable DETR
     _C.MODEL.DETR = CN()
     _C.MODEL.DETR.NUM_CLASSES = 80
@@ -125,6 +125,7 @@ def add_detic_config(cfg):
     _C.EVAL_PROPOSAL_AR = False
     _C.EVAL_CAT_SPEC_AR = False
     _C.IS_DEBUG = False
+    _C.SAVE_DEBUG = False
     _C.QUICK_DEBUG = False
     _C.FP16 = False
     _C.EVAL_AP_FIX = False
@@ -146,7 +147,10 @@ def add_rsprompter_config(cfg):
     _C.MODEL.FPN.IN_CHANNELS = [768, 768, 768]
 
     _C.MODEL.ROI_BOX_HEAD.USE_SIGMOID_CE = False
-
+    _C.MODEL.ROI_BOX_HEAD.CAT_FREQ_PATH = 'datasets/metadata/lvis_v1_train_cat_info.json'
+    _C.MODEL.ROI_BOX_HEAD.IGNORE_ZERO_CATS = True
+    _C.MODEL.ROI_BOX_HEAD.FED_LOSS_FREQ_WEIGHT = 0.5
+    
     _C.MODEL.ROI_MASK_HEAD.WITH_SINCOS = True
     _C.MODEL.ROI_MASK_HEAD.MASK_LOSS_TYPE = 'ce'
     _C.MODEL.ROI_MASK_HEAD.MASK_LOSS_WEIGHT = 1.0

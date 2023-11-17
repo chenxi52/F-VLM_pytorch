@@ -1,6 +1,6 @@
 _BASE_: "Base_OVCOCO_C4_1x.yaml"
 MODEL:
-  WEIGHTS: "models/BoxSup_OVCOCO_CLIP_R50_1x.pth"
+  # WEIGHTS: "models/BoxSup_OVCOCO_CLIP_R50_1x.pth"
   ROI_BOX_HEAD:
     WS_NUM_PROPS: 32
     IMAGE_LABEL_LOSS: 'max_size'
@@ -10,7 +10,7 @@ SOLVER:
   STEPS: (60000, 80000)
   MAX_ITER: 90000
 DATASETS:
-  TRAIN: ("coco_zeroshot_train_oriorder", "coco_caption_train_tags")
+  TRAIN: ("coco_zeroshot_train_oriorder",)
 INPUT:
   CUSTOM_AUG: ResizeShortestEdge
   MIN_SIZE_TRAIN_SAMPLING: range

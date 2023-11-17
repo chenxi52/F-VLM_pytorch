@@ -237,7 +237,6 @@ def setup(args):
 
 
 def main(args):
-    import ipdb;ipdb.set_trace()
     cfg = setup(args)
     TIMESTAMP = "{0:%Y-%m-%dT%H-%M-%S/}".format(datetime.datetime.now())
     if comm.is_main_process() and cfg.WANDB:
