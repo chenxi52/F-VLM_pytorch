@@ -18,6 +18,8 @@ from detectron2.modeling.roi_heads.fast_rcnn import _log_classification_stats
 from detectron2.layers import nonzero_tuple
 from fvcore.nn import sigmoid_focal_loss_jit
 from detic.modeling.utils import load_class_freq, get_fed_loss_inds
+import fvcore.nn.weight_init as weight_init
+
 # add classification with clip text
 @ROI_MASK_HEAD_REGISTRY.register()
 class samMaskHead(BaseMaskRCNNHead):
@@ -70,7 +72,6 @@ class samMaskHead(BaseMaskRCNNHead):
         self.train_size = train_size
         self.num_classes = num_classes
         self.vis_period = vis_period
-        
         if clip_type == 'ViT-B/16':
             self.text_dim = 512
             self.clip_dim = 768
@@ -89,17 +90,21 @@ class samMaskHead(BaseMaskRCNNHead):
         self.to_clip = nn.Linear(
             256, self.down_dim
         )
-
         self.projector = nn.Linear(
             self.down_dim, self.text_dim
         )
         self.down_channel = nn.Linear(
             self.clip_dim, self.down_dim
         )
-        self._init_weights(self.point_emb)
-        self._init_weights(self.to_clip)
-        self._init_weights(self.projector)
-        self._init_weights(self.down_channel)
+        def init_weights(m):
+            if type(m) == nn.Linear:
+                weight_init.c2_xavier_fill(m)
+            elif type(m) == nn.Conv2d:
+                weight_init.c2_msra_fill(m)
+        self.point_emb.apply(init_weights)
+        self.to_clip.apply(init_weights)
+        self.projector.apply(init_weights)
+        self.down_channel.apply(init_weights)
         self.score_thresh = score_thresh
         self.top_per_instance = top_per_instance
         self.test_nms_thresh = test_nms_thresh
@@ -114,14 +119,6 @@ class samMaskHead(BaseMaskRCNNHead):
         self.use_fed_loss = use_fed_loss
         self.fed_loss_num_cat = fed_loss_num_cat
         
-    def _init_weights(self, m):
-        if isinstance(m, nn.Linear):
-            trunc_normal_(m.weight, std=.02)
-            if isinstance(m, nn.Linear) and m.bias is not None:
-                nn.init.constant_(m.bias, 0)
-        elif isinstance(m, nn.LayerNorm):
-            nn.init.constant_(m.bias, 0)
-            nn.init.constant_(m.weight, 1.0)
             
     @classmethod
     def from_config(cls, cfg, input_shape):
@@ -215,8 +212,8 @@ class samMaskHead(BaseMaskRCNNHead):
 
             logit_scale = clip.logit_scale.exp()
             # clIP_img_embedding.降维。clip_dim 修改为这个维度
-            clip_img_embeddings = self.down_channel(clip_img_embeddings)
-            import ipdb; ipdb.set_trace()
+            if self.clip_dim != self.down_dim:
+                clip_img_embeddings = self.down_channel(clip_img_embeddings)
             semantic_token = self.contextformer(mask_tokens, clip_img_embeddings)#mask_tokens: (batch_size, 1, self.clip_dim),clip: [bz,self.clip_dim, 32,32]
             semantic_token = self.projector(semantic_token)
             clip_texts = move_device_like(clip_texts, semantic_token)
