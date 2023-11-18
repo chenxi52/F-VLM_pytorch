@@ -80,7 +80,6 @@ class DeticFastRCNNOutputLayers(FastRCNNOutputLayers):
         if self.use_sigmoid_ce:
             bias_value = -math.log((1 - prior_prob) / prior_prob)
             nn.init.constant_(self.cls_score.bias, bias_value)
-        import ipdb;ipdb.set_trace()
         if self.use_fed_loss or self.ignore_zero_cats:
             freq_weight = load_class_freq(cat_freq_path, fed_loss_freq_weight)
             self.register_buffer('freq_weight', freq_weight)
@@ -221,7 +220,7 @@ class DeticFastRCNNOutputLayers(FastRCNNOutputLayers):
             w = (self.freq_weight.view(-1) > 1e-4).float()
             weight = weight * w.view(1, C).expand(B, C)
             # import pdb; pdb.set_trace()
-
+        
         cls_loss = F.binary_cross_entropy_with_logits(
             pred_class_logits[:, :-1], target, reduction='none') # B x C
         loss =  torch.sum(cls_loss * weight) / B  

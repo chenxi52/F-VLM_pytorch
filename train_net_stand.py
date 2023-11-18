@@ -59,6 +59,7 @@ from detic.custom_checkpointer import samCheckpointer
 from detic.config import add_rsprompter_config
 from detectron2.utils.logger import setup_logger
 from detic.custom_solver import build_sam_optimizer
+from detic.evaluation.custom_coco_eval import CustomCOCOEvaluator
 import wandb
 import torch.nn as nn
 logger = logging.getLogger("detectron2")
@@ -81,7 +82,11 @@ def do_test(cfg, model):
         if evaluator_type == "lvis" :
             evaluator = LVISEvaluator(dataset_name, cfg, True, output_folder)
         elif evaluator_type == 'coco':
-            evaluator = COCOEvaluator(dataset_name, cfg, True, output_folder)
+            if dataset_name == 'coco_generalized_zeroshot_val':
+                # Additionally plot mAP for 'seen classes' and 'unseen classes'
+                evaluator = CustomCOCOEvaluator(dataset_name, cfg, True, output_folder)
+            else:
+                evaluator = COCOEvaluator(dataset_name, cfg, True, output_folder)
         else:
             assert 0, evaluator_type
         

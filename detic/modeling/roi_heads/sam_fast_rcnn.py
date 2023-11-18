@@ -10,6 +10,7 @@ from detectron2.structures import Boxes, Instances
 from fvcore.nn import giou_loss, smooth_l1_loss
 from detectron2.modeling.roi_heads.fast_rcnn import FastRCNNOutputLayers
 from detectron2.utils.events import get_event_storage
+from detectron2.modeling.box_regression import Box2BoxTransform, _dense_box_regression_loss
 
 __all__ = ["SamRCNNOutputLayers"]
 
@@ -27,14 +28,66 @@ class SamRCNNOutputLayers(FastRCNNOutputLayers):
     def __init__(
         self,
         input_shape: ShapeSpec,
-        **kwargs
+        *,
+        box2box_transform,
+        num_classes: int,
+        test_score_thresh: float = 0.0,
+        test_nms_thresh: float = 0.5,
+        test_topk_per_image: int = 100,
+        cls_agnostic_bbox_reg: bool = False,
+        smooth_l1_beta: float = 0.0,
+        box_reg_loss_type: str = "smooth_l1",
+        loss_weight: Union[float, Dict[str, float]] = 1.0,
+        use_fed_loss: bool = False,
+        use_sigmoid_ce: bool = False,
     ):
-        super().__init__(input_shape, **kwargs)
-        # input_size = input_shape.channels * (input_shape.width or 1) * (input_shape.height or 1)
-        # self.box_score = nn.Linear(input_size, 1)
-        # self.box_score.weight.data.normal_(0, 0.01)
+        nn.Module.__init__(self)
+        if isinstance(input_shape, int):  # some backward compatibility
+            input_shape = ShapeSpec(channels=input_shape)
+        self.num_classes = num_classes
+        input_size = input_shape.channels * (input_shape.width or 1) * (input_shape.height or 1)
+        # prediction layer for num_classes foreground classes and one background class (hence + 1)
+        self.cls_score = nn.Linear(input_size, num_classes + 1)
+        num_bbox_reg_classes = 1 if cls_agnostic_bbox_reg else num_classes
+        box_dim = len(box2box_transform.weights)
+        self.bbox_pred = nn.Linear(input_size, num_bbox_reg_classes * box_dim)
 
+        nn.init.normal_(self.cls_score.weight, std=0.01)
+        nn.init.normal_(self.bbox_pred.weight, std=0.001)
+        for l in [self.cls_score, self.bbox_pred]:
+            nn.init.constant_(l.bias, 0)
 
+        self.box2box_transform = box2box_transform
+        self.smooth_l1_beta = smooth_l1_beta
+        self.test_score_thresh = test_score_thresh
+        self.test_nms_thresh = test_nms_thresh
+        self.test_topk_per_image = test_topk_per_image
+        self.box_reg_loss_type = box_reg_loss_type
+        if isinstance(loss_weight, float):
+            loss_weight = {"loss_cls": loss_weight, "loss_box_reg": loss_weight}
+        self.loss_weight = loss_weight
+        self.use_fed_loss = use_fed_loss
+        self.use_sigmoid_ce = use_sigmoid_ce
+
+    @classmethod
+    def from_config(cls, cfg, input_shape):
+        return {
+            "input_shape": input_shape,
+            "box2box_transform": Box2BoxTransform(weights=cfg.MODEL.ROI_BOX_HEAD.BBOX_REG_WEIGHTS),
+            # fmt: off
+            "num_classes"               : cfg.MODEL.ROI_HEADS.NUM_CLASSES,
+            "cls_agnostic_bbox_reg"     : cfg.MODEL.ROI_BOX_HEAD.CLS_AGNOSTIC_BBOX_REG,
+            "smooth_l1_beta"            : cfg.MODEL.ROI_BOX_HEAD.SMOOTH_L1_BETA,
+            "test_score_thresh"         : cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST,
+            "test_nms_thresh"           : cfg.MODEL.ROI_HEADS.NMS_THRESH_TEST,
+            "test_topk_per_image"       : cfg.TEST.DETECTIONS_PER_IMAGE,
+            "box_reg_loss_type"         : cfg.MODEL.ROI_BOX_HEAD.BBOX_REG_LOSS_TYPE,
+            "loss_weight"               : {"loss_box_reg": cfg.MODEL.ROI_BOX_HEAD.BBOX_REG_LOSS_WEIGHT},  # noqa
+            "use_fed_loss"              : cfg.MODEL.ROI_BOX_HEAD.USE_FED_LOSS,
+            "use_sigmoid_ce"            : cfg.MODEL.ROI_BOX_HEAD.USE_SIGMOID_CE,
+            # fmt: on
+        }
+    
     def losses(self, predictions, proposals):
         """
         Args:

@@ -17,7 +17,7 @@ from detic.modeling.ContextFormer import build_contextformer
 from detectron2.modeling.roi_heads.fast_rcnn import _log_classification_stats
 from detectron2.layers import nonzero_tuple
 from fvcore.nn import sigmoid_focal_loss_jit
-from detic.modeling.utils import load_class_freq
+from detic.modeling.utils import load_class_freq, get_fed_loss_inds
 # add classification with clip text
 @ROI_MASK_HEAD_REGISTRY.register()
 class samMaskHead(BaseMaskRCNNHead):
@@ -43,6 +43,8 @@ class samMaskHead(BaseMaskRCNNHead):
             ignore_zero_cats: bool=True,
             cat_freq_path: str='',
             fed_loss_freq_weight: float=0.5,
+            use_fed_loss: bool=False,
+            fed_loss_num_cat: int=50,
             ) -> None:
         super().__init__()
         if with_sincos:
@@ -109,7 +111,9 @@ class samMaskHead(BaseMaskRCNNHead):
         if self.ignore_zero_cats:
             freq_weight = load_class_freq(cat_freq_path, fed_loss_freq_weight)
             self.register_buffer('freq_weight', freq_weight)
-
+        self.use_fed_loss = use_fed_loss
+        self.fed_loss_num_cat = fed_loss_num_cat
+        
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
             trunc_normal_(m.weight, std=.02)
@@ -148,6 +152,8 @@ class samMaskHead(BaseMaskRCNNHead):
                 'ignore_zero_cats': cfg.MODEL.ROI_BOX_HEAD.IGNORE_ZERO_CATS,
                 'cat_freq_path': cfg.MODEL.ROI_BOX_HEAD.CAT_FREQ_PATH,
                 'fed_loss_freq_weight': cfg.MODEL.ROI_BOX_HEAD.FED_LOSS_FREQ_WEIGHT,
+                'use_fed_loss': cfg.MODEL.ROI_BOX_HEAD.USE_FED_LOSS,
+                'fed_loss_num_cat': cfg.MODEL.NUM_SAMPLE_CATS,
                 }
     
     def forward(
@@ -210,6 +216,7 @@ class samMaskHead(BaseMaskRCNNHead):
             logit_scale = clip.logit_scale.exp()
             # clIP_img_embedding.降维。clip_dim 修改为这个维度
             clip_img_embeddings = self.down_channel(clip_img_embeddings)
+            import ipdb; ipdb.set_trace()
             semantic_token = self.contextformer(mask_tokens, clip_img_embeddings)#mask_tokens: (batch_size, 1, self.clip_dim),clip: [bz,self.clip_dim, 32,32]
             semantic_token = self.projector(semantic_token)
             clip_texts = move_device_like(clip_texts, semantic_token)
@@ -228,29 +235,39 @@ class samMaskHead(BaseMaskRCNNHead):
             target_classes_onehot.scatter_(1, gt_classes.unsqueeze(-1), 1)
             # TODO: not right
             loss ={"loss_mask": self.custom_mask_rcnn_loss(low_res_masks, instances, self.vis_period) * self.loss_weight,
-                   "loss_cls": self.sigmoid_focal_loss(logits_image, target_classes_onehot)}
+                   "loss_cls": self.sigmoid_focal_loss(logits_image, target_classes_onehot,gt_classes)}
             return loss
         else:
             new_instances = self.custom_mask_rcnn_inference(low_res_masks, instances, logits_image[:,:-1], self.score_thresh, self.top_per_instance, self.test_nms_thresh)
             del instances
             return new_instances
         
-    def sigmoid_focal_loss(self, inputs, targets, alpha: float = 0.25, gamma: float = 2):
+    def sigmoid_focal_loss(self, inputs, targets, gt_classes, alpha: float = 0.25, gamma: float = 2):
         """Compute the sigmoid focal loss."""
         prob = inputs.sigmoid()
         ce_loss = F.binary_cross_entropy_with_logits(inputs, targets, reduction="none")
         p_t = prob * targets + (1 - prob) * (1 - targets)
         loss = ce_loss * ((1 - p_t) ** gamma)
         B = inputs.shape[0]
-
+        C = inputs.shape[1] - 1
+        weight = 1
         if alpha >= 0:
             loss = (alpha * targets + (1 - alpha) * (1 - targets)) * loss
-        if self.ignore_zero_cats:
+        # if use fed_loss, the background is not sampled ?
+        if self.use_fed_loss and (self.freq_weight is not None): # fedloss
+            appeared = get_fed_loss_inds(
+                gt_classes, 
+                num_sample_cats=self.fed_loss_num_cat,
+                C=C,
+                weight=self.freq_weight)
+            appeared_mask = appeared.new_zeros(C + 1)
+            appeared_mask[appeared] = 1 # C + 1
+            weight = appeared_mask.float() # 
+        if self.ignore_zero_cats and (self.freq_weight is not None):
             w = (self.freq_weight.view(-1) > 1e-4).float()
-            w = torch.cat([w, w.new_ones(1)]).unsqueeze(0)
-            return (loss*w).mean(1).sum() / B
-        else: 
-            return loss.mean(1).sum()/B
+            w = torch.cat([w, w.new_ones(1)])
+            weight = weight * w
+        return (loss*weight).mean(1).sum() / B
     
     def get_logits(self, region_features, text_features, logit_scale):
         # 计算image_features @ text_features.T相似度矩阵
