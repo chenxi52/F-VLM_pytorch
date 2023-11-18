@@ -229,7 +229,6 @@ class samMaskHead(BaseMaskRCNNHead):
                 cat([p.gt_classes for p in instances], dim=0) if len(instances) else torch.empty(0)
                 )
             # gt_class has index 81; logits_image has index 80
-            _log_classification_stats(logits_image, gt_classes, 'fast_rcnn')
             
             target_classes_onehot = torch.zeros(logits_image.shape, dtype=logits_image.dtype, device=logits_image.device)
             target_classes_onehot.scatter_(1, gt_classes.unsqueeze(-1), 1)
@@ -244,6 +243,7 @@ class samMaskHead(BaseMaskRCNNHead):
         
     def sigmoid_focal_loss(self, inputs, targets, gt_classes, alpha: float = 0.25, gamma: float = 2):
         """Compute the sigmoid focal loss."""
+        _log_classification_stats(inputs, gt_classes, 'clip_fast_rcnn')
         prob = inputs.sigmoid()
         ce_loss = F.binary_cross_entropy_with_logits(inputs, targets, reduction="none")
         p_t = prob * targets + (1 - prob) * (1 - targets)
