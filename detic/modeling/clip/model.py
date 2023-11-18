@@ -92,7 +92,6 @@ class AttentionPool2d(nn.Module):
     def forward_fea(self,x):
         x = x.flatten(start_dim=2).permute(2, 0, 1)  # NCHW -> (HW)NC
         x = torch.cat([x.mean(dim=0, keepdim=True), x], dim=0)  # (HW+1)NC
-        x = x + self.positional_embedding[:, None, :].to(x.dtype)  # (HW+1)NC
         return x
 
 class ModifiedResNet(nn.Module):
