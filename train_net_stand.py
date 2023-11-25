@@ -212,7 +212,6 @@ def set_model_mode(model):
         model = model.module
 
     model.sam.eval()
-    model.clip.eval()
 
 def setup(args):
     """

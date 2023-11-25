@@ -22,7 +22,7 @@ from detectron2.modeling.roi_heads.mask_head import mask_rcnn_loss
 from detic.modeling.clip import clip
 from detic.prompt_engineering import get_prompt_templates
 from detic import constants
-
+from detic.modeling.sam.utils.onnx import SamOnnxModel
 @META_ARCH_REGISTRY.register()
 class SamDetector(GeneralizedRCNN):
     """
@@ -167,7 +167,7 @@ class SamOpenDetector(SamDetector):
         mask_thr_binary=0.5,
         do_postprocess=True,
         backbone_name=None,
-        class_name=constants.COCO_INSTANCE_CLASSES,
+        class_name=constants.COCO_UNSEEN_CLS,
         add_unfrozen='xxx',
         clip_train_size=1024,
         **kwargs
@@ -178,11 +178,23 @@ class SamOpenDetector(SamDetector):
         self.sam = sam_model_registry[sam_type]()
         self.clip = clip.load(clip_type, jit=False)[0]
         self.clip_type = clip_type
+        if 'RN' in clip_type:
+            L,W = self.clip.visual.attnpool.positional_embedding.shape
+            scale = W ** -0.5
+            self.context_former_pe = nn.Parameter(scale*torch.randn(L,W).to(device))
+        elif 'ViT' in clip_type:
+            L,W = self.clip.visual.positional_embedding.shape
+            scale = W ** -0.5
+            device = self.clip.visual.positional_embedding.device
+            self.context_former_pe = nn.Parameter(scale*torch.randn(L,W).to(device))
+
         self.mask_thr_binary = mask_thr_binary
         self.do_postprocess = do_postprocess
         self.backbone_name = backbone_name
         self.class_name = class_name
-        self.text_feats =  self.get_custom_text_feat(self.class_name)
+        # self.class_name =constants.COCO_SEEN_CLS
+        with torch.no_grad():
+            self.text_feats =  self.get_custom_text_feat(self.class_name)
         # set params in sam and clip to no_grad
         for name, params in self.sam.named_parameters():
             if add_unfrozen in name:
@@ -190,6 +202,8 @@ class SamOpenDetector(SamDetector):
             else:
                 params.requires_grad = False
         for name, params in self.clip.named_parameters():
+            if add_unfrozen in name:
+                params.requires_grad = True
             params.requires_grad = False
         self.register_buffer("clip_pixel_mean", torch.tensor([0.48145466, 0.4578275, 0.40821073]).unsqueeze(1).unsqueeze(2), False)
         self.register_buffer("clip_pixel_std", torch.tensor([0.26862954, 0.26130258, 0.27577711]).unsqueeze(1).unsqueeze(2), False)
@@ -219,26 +233,27 @@ class SamOpenDetector(SamDetector):
         })
         ret.update(mask_thr_binary = cfg.TEST.MASK_THR_BINARY)
         return ret
-    
+    @torch.no_grad()
     def inference(
             self,
             batched_inputs: Tuple[Dict[str, torch.Tensor]],
             detected_instances: Optional[List[Instances]]=None,
             do_postprocess:bool= True,
-            resized_images:torch.Tensor=None
         ):
         assert not self.training
         assert detected_instances is None
         # normalize images
         # batched_inputs is a dict
-        images = self.preprocess_image(batched_inputs) #padding and size_divisiable
-        img_embedding_feat, inter_feats, clip_images = self.extract_feat(images.tensor, resized_images)
+        resized_images = self.resize_norm_long_padding(batched_inputs, self.clip_train_size)
+        images = self.preprocess_image(batched_inputs)
+        img_embedding_feat, inter_feats, clip_images = self.extract_feat(images, resized_images)
         
         fpn_features = self.backbone(inter_feats)
         # proposal_generator need to be trained before testing
         proposals, _ = self.proposal_generator(images, fpn_features, None) #samFpn # proposals: img_height=img_width=1024
         results, _ = self.roi_heads(self.sam, img_embedding_feat, fpn_features, proposals, targets=None,
-                                    clip=self.clip, clip_images=clip_images, clip_texts=self.text_feats )
+                                    clip=self.clip, clip_images=clip_images, clip_texts=self.text_feats,
+                                    context_former_pe=self.context_former_pe)
         # batched_inputs have ori_image_sizes
         # images.image_sizes have input_image_sizes
         if do_postprocess:
@@ -250,30 +265,42 @@ class SamOpenDetector(SamDetector):
         
     def extract_feat(self, batched_inputs, resized_images):
         # forward sam.image_encoder
+        batched_inputs = [self.sam.image_encoder.preprocess(x) for x in batched_inputs.tensor]
+        batched_inputs = torch.stack(batched_inputs,dim=0)
         if 'det' in self.backbone_name:
             feat,inter_features = self.sam.image_encoder(batched_inputs)
             inter_features = feat
         else:
             # tiny image encoder are not implemented now
             feat, inter_features = self.sam.image_encoder(batched_inputs)
-        clip_feat = self.clip.encode_image_feature(resized_images)
+        with torch.no_grad():
+            clip_feat = self.clip.encode_image_feature(resized_images)
         if 'RN' in self.clip_type:
             clip_feat = clip_feat.permute(1, 0, 2)
         # feat: Tensor[bz, 256, 64, 64]  inter_feats: List[32*Tensor[bz,64,64,1280]]
         # rn_50 clip: [bz, img_dim, c]
         return feat, inter_features, clip_feat
     
+    def padding(self, x: torch.Tensor, length:int) -> torch.Tensor:
+        # Normalize colors have done 
+        # Pad
+        h, w = x.shape[-2:]
+        padh = length - h
+        padw = length - w
+        x = F.pad(x, (0, padw, 0, padh))
+        return x
     def forward(self, batched_inputs: List[Dict[str, torch.Tensor]]):
-        resized_images = self.resize_norm(batched_inputs)
+        # resized_images = self.resize_norm(batched_inputs)
         if not self.training:
-            return self.inference(batched_inputs, do_postprocess=self.do_postprocess, resized_images=resized_images)
+            return self.inference(batched_inputs, do_postprocess=self.do_postprocess)
         # batched_inputs have longes_side=1024, and prepocess need the shortest_side%32==0
         # images.size() is origin image size
         # preprocess are normalized
+        resized_images = self.resize_norm_long_padding(batched_inputs, self.clip_train_size)
         images = self.preprocess_image(batched_inputs)
         gt_instances = [x["instances"].to(self.device) for x in batched_inputs] #instance have img_Size with longest-size = 1024
         
-        img_embedding_feat, inter_feats, clip_feats = self.extract_feat(images.tensor, resized_images) 
+        img_embedding_feat, inter_feats, clip_feats = self.extract_feat(images, resized_images) 
         fpn_features = self.backbone(inter_feats)
         # fpn_features: Dict{'feat0': Tuple[2*Tensor[256,32,32]], 'feat1': Tuple[2*Tensor[256,64,64]], ...}
         # resize the img_size in gt_instances to (1024,1024)
@@ -281,7 +308,7 @@ class SamOpenDetector(SamDetector):
             images, fpn_features, gt_instances)
         # proposals:max(h,w)=1024,  gt_instance:max(h,w)=1024
         del images
-        _, detector_losses = self.roi_heads(self.sam, img_embedding_feat, fpn_features, proposals, gt_instances, self.clip, clip_feats, self.text_feats )
+        _, detector_losses = self.roi_heads(self.sam, img_embedding_feat, fpn_features, proposals, gt_instances, self.clip, clip_feats, self.text_feats,self.context_former_pe )
         
         losses = {}
         losses.update(detector_losses)
@@ -300,8 +327,30 @@ class SamOpenDetector(SamDetector):
         resized_images = [(x - self.clip_pixel_mean) / self.clip_pixel_std for x in resized_images]
         return torch.cat(resized_images,dim=0)
     
+    def resize_longest_image_size(self, input_image_size, longest_side: int):
+        input_image_size = input_image_size.to(torch.float32)
+        scale = longest_side / torch.max(input_image_size)
+        transformed_size = scale * input_image_size
+        transformed_size = torch.floor(transformed_size + 0.5).to(torch.int64)
+        return tuple(transformed_size.tolist())
+    
+    def resize_norm_long_padding(self, batched_inputs, long_size=224):
+        # Convert the numpy image to a torch tensor and ensure it is in CxHxW format
+        images = [self._move_to_current_device((x["image"].clone()/255.).to(torch.float)) for x in batched_inputs]
+        image_shapes = [self.resize_longest_image_size(torch.tensor(x.shape[-2:],device=x.device), long_size) for x in images]
+        if self.clip_type == 'ViT-B/16':
+            resized_images = [F.interpolate(x.unsqueeze(0), size=image_shapes[i], mode='bilinear', align_corners=False).squeeze(1) for i,x in enumerate(images)]
+        # Apply normalization
+        elif self.clip_type == 'RN50':
+            resized_images = [F.interpolate(x.unsqueeze(0), size=(self.clip_train_size,self.clip_train_size), mode='bilinear', align_corners=False).squeeze(1) for x in images]
+
+        resized_images = [(x - self.clip_pixel_mean) / self.clip_pixel_std for x in resized_images]
+        resized_images = [self.padding(x, self.clip_train_size) for x in resized_images]
+        return torch.cat(resized_images,dim=0)
+    
     @torch.no_grad()
     def get_custom_text_feat(self, class_names):
+
         def extract_mean_emb(text):
             tokens = clip.tokenize(text).cuda()
             if len(text) > 10000:
@@ -324,7 +373,7 @@ class SamOpenDetector(SamDetector):
         clss_embeddings.append(extract_mean_emb(txts))
         text_emb = torch.stack(clss_embeddings, dim=0)
         text_emb /= text_emb.norm(dim=-1, keepdim=True) 
-    
+        # import ipdb; ipdb.set_trace()
         return text_emb
 
 def custom_detector_postprocess(

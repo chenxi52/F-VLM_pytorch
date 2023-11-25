@@ -252,6 +252,8 @@ class VisionTransformer(nn.Module):
         x = x.permute(1, 0, 2)  # LND -> NLD
         return x
 
+    # maskclip 
+
     def forward(self, x: torch.Tensor):
         x = self.forward_featuremap(x)
         x = self.ln_post(x[:, 0, :])

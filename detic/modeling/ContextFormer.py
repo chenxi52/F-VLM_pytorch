@@ -113,6 +113,8 @@ class TransformerDecoder(nn.Module):
         self.num_layers = num_layers
         self.norm = norm
         self.return_intermediate = return_intermediate
+        # postion_embedding should be same to image pathes + 1 
+
 
     def forward(self, tgt, memory,
                 tgt_mask: Optional[Tensor] = None,
@@ -122,7 +124,6 @@ class TransformerDecoder(nn.Module):
                 pos: Optional[Tensor] = None,
                 query_pos: Optional[Tensor] = None):
         output = tgt
-
         intermediate = []
 
         for layer in self.layers:
@@ -149,11 +150,12 @@ def build_contextformer(
     d_model=256,
     nhead=8,
     num_decoder_layers=3,
+    normalize_before=False,
 ):
     dim_feedforward=2048
     dropout=0.1
     activation="relu"
-    normalize_before=False
+    normalize_before=normalize_before
     return_intermediate_dec=False
 
     decoder_layer = TransformerDecoderLayer(d_model, nhead, dim_feedforward,

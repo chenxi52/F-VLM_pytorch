@@ -68,6 +68,7 @@ def do_test(cfg, model):
             evaluator = LVISEvaluator(dataset_name, cfg, True, output_folder)
         elif evaluator_type == 'coco':
             if dataset_name == 'coco_generalized_zeroshot_val':
+                print('Start generalized zero-shot evaluation')
                 # Additionally plot mAP for 'seen classes' and 'unseen classes'
                 evaluator = CustomCOCOEvaluator(dataset_name, cfg, True, output_folder)
             else:

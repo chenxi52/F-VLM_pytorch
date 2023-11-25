@@ -219,7 +219,6 @@ class DeticFastRCNNOutputLayers(FastRCNNOutputLayers):
         if self.ignore_zero_cats and (self.freq_weight is not None):
             w = (self.freq_weight.view(-1) > 1e-4).float()
             weight = weight * w.view(1, C).expand(B, C)
-            # import pdb; pdb.set_trace()
         
         cls_loss = F.binary_cross_entropy_with_logits(
             pred_class_logits[:, :-1], target, reduction='none') # B x C
@@ -431,7 +430,6 @@ class DeticFastRCNNOutputLayers(FastRCNNOutputLayers):
         if x.dim() > 2:
             x = torch.flatten(x, start_dim=1)
         scores = []
-        import ipdb;ipdb.set_trace()
         if classifier_info[0] is not None:
             cls_scores = self.cls_score(x, classifier=classifier_info[0])
             scores.append(cls_scores)

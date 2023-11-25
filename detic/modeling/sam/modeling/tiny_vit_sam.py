@@ -600,7 +600,7 @@ class TinyViT(nn.Module):
         return {'attention_biases'}
 
     def forward_features(self, x):
-        x = torch.stack([self.preprocess(i)  for i in x], dim=0)
+        # x = torch.stack([self.preprocess(i)  for i in x], dim=0)
         # x: (N, C, H, W)
         x = self.patch_embed(x)
 

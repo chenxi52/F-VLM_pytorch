@@ -1,6 +1,6 @@
 _BASE_: "Base_OVCOCO_C4_1x.yaml"
 MODEL:
-  # WEIGHTS: "models/BoxSup_OVCOCO_CLIP_R50_1x.pth"
+  WEIGHTS: "models/Detic_OVCOCO_CLIP_R50_1x_max-size.pth"
   ROI_BOX_HEAD:
     WS_NUM_PROPS: 32
     IMAGE_LABEL_LOSS: 'max_size'
@@ -26,5 +26,5 @@ DATALOADER:
   FILTER_EMPTY_ANNOTATIONS: False
   MULTI_DATASET_GROUPING: True
   DATASET_ANN: ['box', 'image']
-  NUM_WORKERS: 8
+  NUM_WORKERS: 4
 WITH_IMAGE_LABELS: True

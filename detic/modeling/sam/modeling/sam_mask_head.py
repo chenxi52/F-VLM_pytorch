@@ -9,7 +9,6 @@ import torch.nn.functional as F
 from timm.models.layers import trunc_normal_
 from detectron2.utils.events import get_event_storage
 from detectron2.layers import cat, cross_entropy, batched_nms
-import time
 from detectron2.layers.wrappers import move_device_like
 import torch.cuda.amp as amp
 from detectron2.modeling.roi_heads.roi_heads import select_foreground_proposals
@@ -79,13 +78,14 @@ class samMaskHead(BaseMaskRCNNHead):
         elif clip_type == 'RN50':
             self.text_dim = 1024
             self.clip_dim = 2048
-            self.down_dim = 1024
+            self.down_dim = self.clip_dim
         elif clip_type == 'RN50x64':
             self.text_dim = 1024
             self.clip_dim = 4096
             self.down_dim = self.clip_dim
+        
         self.contextformer = build_contextformer(
-          d_model=self.down_dim
+          d_model=self.down_dim, normalize_before=False
         )
         self.to_clip = nn.Linear(
             256, self.down_dim
@@ -118,7 +118,6 @@ class samMaskHead(BaseMaskRCNNHead):
             self.register_buffer('freq_weight', freq_weight)
         self.use_fed_loss = use_fed_loss
         self.fed_loss_num_cat = fed_loss_num_cat
-        
             
     @classmethod
     def from_config(cls, cfg, input_shape):
@@ -162,6 +161,7 @@ class samMaskHead(BaseMaskRCNNHead):
             clip: nn.Module,
             clip_images: torch.Tensor,
             clip_texts: torch.Tensor, 
+            context_former_pe: nn.Module,
         ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         firstly, inference, and then calculate losses
@@ -209,15 +209,17 @@ class samMaskHead(BaseMaskRCNNHead):
         # clip_texts and mask_tokens
         with amp.autocast(enabled=True):
             mask_tokens = self.to_clip(mask_tokens)
-
             logit_scale = clip.logit_scale.exp()
             # clIP_img_embedding.降维。clip_dim 修改为这个维度
             if self.clip_dim != self.down_dim:
                 clip_img_embeddings = self.down_channel(clip_img_embeddings)
-            semantic_token = self.contextformer(mask_tokens, clip_img_embeddings)#mask_tokens: (batch_size, 1, self.clip_dim),clip: [bz,self.clip_dim, 32,32]
+            semantic_token = self.contextformer(mask_tokens, clip_img_embeddings, pos=context_former_pe)#mask_tokens: (batch_size, 1, self.clip_dim),clip: [bz,self.clip_dim, 32,32]
             semantic_token = self.projector(semantic_token)
             clip_texts = move_device_like(clip_texts, semantic_token)
+            # import ipdb; ipdb.set_trace()
+            #clip_texts 81,d
             logits_image, logits_text = self.get_logits(semantic_token, clip_texts, logit_scale)
+
         low_res_masks = torch.nn.functional.interpolate(low_res_masks, size=(self.train_size, self.train_size), mode='bilinear', align_corners=False)
         logits_image = logits_image.squeeze(dim=1)
         
@@ -240,6 +242,7 @@ class samMaskHead(BaseMaskRCNNHead):
         
     def sigmoid_focal_loss(self, inputs, targets, gt_classes, alpha: float = 0.25, gamma: float = 2):
         """Compute the sigmoid focal loss."""
+        # import ipdb; ipdb.set_trace()
         _log_classification_stats(inputs, gt_classes, 'clip_fast_rcnn')
         prob = inputs.sigmoid()
         ce_loss = F.binary_cross_entropy_with_logits(inputs, targets, reduction="none")
@@ -410,13 +413,15 @@ class samMaskHead(BaseMaskRCNNHead):
         instance_list = []
         for prob, logits, instances in zip(mask_probs_pred, logits_image, pred_instances):
             new_instance = Instances(instances.image_size).to(logits.device)
-            scores = logits.softmax(dim=1)
+            scores = logits.sigmoid()
             boxes = instances.pred_boxes.tensor
             objectness = instances.objectness
             if self.test_score_type == 'ob_mul_cls':
                 scores = scores * objectness[:, None]
             elif self.test_score_type == 'ob_geo_cls':
                 scores = scores**(1-self.test_geometric_fact) * objectness[:, None]**self.test_geometric_fact
+            elif self.test_score_type == 'cls':
+                pass
             masks = prob
             filter_mask = scores>score_thresh
             num_bbox_reg_classes = boxes.shape[1] // 4

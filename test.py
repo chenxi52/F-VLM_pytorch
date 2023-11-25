@@ -1,12 +1,4 @@
-import torch.nn as nn
-
-# 定义一个简单的模型
-model = nn.Sequential(
-    nn.Linear(10, 20),
-    nn.ReLU(),
-    nn.Linear(20, 30),
-)
-
-# 遍历模型及其所有子模块
-for module in model.modules():
-    print(module)
+import torch
+a = torch.zeros((1,3,4,5))
+b = torch.tensor([1,2,3]).unsqueeze(1).unsqueeze(2)
+print(a-b)
