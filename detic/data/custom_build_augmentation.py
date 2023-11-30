@@ -1,7 +1,7 @@
 # Copyright (c) Facebook, Inc. and its affiliates.
 from detectron2.data import transforms as T
 from .transforms.custom_augmentation_impl import EfficientDetResizeCrop, ResizeLongestSizeFlip
-
+from detectron2.config import LazyCall as L
 def build_custom_augmentation(cfg, is_train, scale=None, size=None, \
     min_size=None, max_size=None):
     """
@@ -45,6 +45,18 @@ def build_custom_augmentation(cfg, is_train, scale=None, size=None, \
         augmentation = [T.Resize((size, size))]
         if is_train:
             augmentation.append(T.RandomFlip(prob=0.5))
+    elif cfg.INPUT.CUSTOM_AUG == 'ResizeLongLSJ':
+        size = cfg.INPUT.TRAIN_SIZE
+        if is_train:
+            augmentation = [ResizeLongestSizeFlip(longest_length = size),
+                            T.ResizeScale(
+                            min_scale=0.1, max_scale=2.0, target_height=size, target_width=size
+                            ),
+                            T.FixedSizeCrop(crop_size=(size, size)),
+                            T.RandomFlip(horizontal=True),
+                        ]
+        else:
+            augmentation = [ResizeLongestSizeFlip(longest_length = size)]
     else:
         assert 0, cfg.INPUT.CUSTOM_AUG
     return augmentation
