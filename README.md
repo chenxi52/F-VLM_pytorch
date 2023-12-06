@@ -1,3 +1,8 @@
+Stage1: 
+    train RPN in base classes
+    (test rpn recall first)
+Stage2:
+    change contextformer
 # Open-Vocabulary segmentation
 运行配置基本都在config-file
 

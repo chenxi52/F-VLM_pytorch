@@ -162,6 +162,7 @@ class samMaskHead(BaseMaskRCNNHead):
             clip_images: torch.Tensor,
             clip_texts: torch.Tensor, 
             context_former_pe: nn.Module,
+            # fore_masks: torch.Tensor=None,
         ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         firstly, inference, and then calculate losses
@@ -197,7 +198,7 @@ class samMaskHead(BaseMaskRCNNHead):
         clip_img_embeddings = torch.repeat_interleave(clip_images, img_flag_ids, dim=0)
         img_pe = sam.prompt_encoder.get_dense_pe()
         img_pe = repeat(img_pe, 'b c h w -> (b n) c h w', n=img_embeddings.shape[0])
-
+        # select foreGround proposals first will save computation here.
         low_res_masks, iou_preds, mask_tokens = sam.mask_decoder.forward_batch(
             image_embeddings=img_embeddings,
             image_pe=img_pe,
@@ -210,14 +211,15 @@ class samMaskHead(BaseMaskRCNNHead):
         with amp.autocast(enabled=True):
             mask_tokens = self.to_clip(mask_tokens)
             logit_scale = clip.logit_scale.exp()
-            # clIP_img_embedding.降维。clip_dim 修改为这个维度
+            # clip_img_embedding.降维。clip_dim 修改为这个维度
             if self.clip_dim != self.down_dim:
                 clip_img_embeddings = self.down_channel(clip_img_embeddings)
             semantic_token = self.contextformer(mask_tokens, clip_img_embeddings, pos=context_former_pe)#mask_tokens: (batch_size, 1, self.clip_dim),clip: [bz,self.clip_dim, 32,32]
             semantic_token = self.projector(semantic_token)
             clip_texts = move_device_like(clip_texts, semantic_token)
-            # import ipdb; ipdb.set_trace()
-            #clip_texts 81,d
+            # clip_texts 81,d
+            # for all samples, the background samples are not selected 
+            # so get logits is not for background. 
             logits_image, logits_text = self.get_logits(semantic_token, clip_texts, logit_scale)
 
         low_res_masks = torch.nn.functional.interpolate(low_res_masks, size=(self.train_size, self.train_size), mode='bilinear', align_corners=False)
@@ -227,11 +229,9 @@ class samMaskHead(BaseMaskRCNNHead):
             gt_classes = (
                 cat([p.gt_classes for p in instances], dim=0) if len(instances) else torch.empty(0)
                 )
-            # gt_class has index 81; logits_image has index 80
-            
             target_classes_onehot = torch.zeros(logits_image.shape, dtype=logits_image.dtype, device=logits_image.device)
             target_classes_onehot.scatter_(1, gt_classes.unsqueeze(-1), 1)
-            # TODO: not right
+            # what if the classification not include background. The classification will not be interupted?
             loss ={"loss_mask": self.custom_mask_rcnn_loss(low_res_masks, instances, self.vis_period) * self.loss_weight,
                    "loss_cls": self.sigmoid_focal_loss(logits_image, target_classes_onehot,gt_classes)}
             return loss
@@ -242,7 +242,6 @@ class samMaskHead(BaseMaskRCNNHead):
         
     def sigmoid_focal_loss(self, inputs, targets, gt_classes, alpha: float = 0.25, gamma: float = 2):
         """Compute the sigmoid focal loss."""
-        # import ipdb; ipdb.set_trace()
         _log_classification_stats(inputs, gt_classes, 'clip_fast_rcnn')
         prob = inputs.sigmoid()
         ce_loss = F.binary_cross_entropy_with_logits(inputs, targets, reduction="none")
@@ -292,6 +291,7 @@ class samMaskHead(BaseMaskRCNNHead):
         # store the gt_mask to gpu first 
         for instances_per_image in instances:
             gt_classes_per_image = instances_per_image.gt_classes.to(dtype=torch.int64)
+            # duplicated when select foreground proposals before, but not a big deal
             fg_inds = nonzero_tuple((gt_classes_per_image >= 0) & (gt_classes_per_image < self.data_classes))[0]
 
             gt_classes.append(gt_classes_per_image[fg_inds])
@@ -344,6 +344,7 @@ class samMaskHead(BaseMaskRCNNHead):
         if self.mask_loss_type == 'ce':
             mask_loss = F.binary_cross_entropy_with_logits(pred_mask_logits, gt_masks, reduction="mean")
         elif self.mask_loss_type == 'focal_dice':
+            # suitable for open-vocabulary setting
             focalLoss = sigmoid_focal_loss_jit(pred_mask_logits, 
                                             gt_masks,
                                             alpha=0.25,
