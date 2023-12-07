@@ -5,7 +5,7 @@ MODEL:
     NAME: "build_sam_vit_det_backbone" #SAM vit_h
     TYPE: "vit_t"
     CLIP_TYPE: "ViT-B/16"
-    ADD_UNFROZEN: 'context_former_pe' # unfrozen extra part of model, default='xxx'
+    ADD_UNFROZEN: 'context_former_pe' # unfrozen extra part of model, the name is relative to sam and clip
   WEIGHTS: "mobile_sam.pt"
   # WEIGHTS: "/opt/tiger/OpenVo-Seg-master/output/wo_mask_with_prompt_encoder_roi_head_withgrad/model_final.pth"
   # WEIGHTS: "sam_vit_h_4b8939.pth"
@@ -88,7 +88,7 @@ DATALOADER:
   NUM_WORKERS: 16 # num_workers == batchsize_per_gpu
   # PERSISTENT_WORKERS: True 
 SOLVER:
-  IMS_PER_BATCH: 2  # change  # max 8 imgs per batch
+  IMS_PER_BATCH: 16  # change  # max 8 imgs per batch
   BASE_LR: 0.0005  # change0.000025
   STEPS: (60000, 80000)  # change 
   WARMUP_ITERS: 7500  
