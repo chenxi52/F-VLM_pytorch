@@ -276,6 +276,7 @@ class SamOpenDetector(SamDetector):
         with torch.no_grad():
             clip_feat = self.clip.encode_image_feature(resized_images)
         if 'RN' in self.clip_type:
+            assert False, 'not implemented'
             clip_feat = clip_feat.permute(1, 0, 2)
         # feat: Tensor[bz, 256, 64, 64]  inter_feats: List[32*Tensor[bz,64,64,1280]]
         # rn_50 clip: [bz, img_dim, c]
@@ -289,6 +290,7 @@ class SamOpenDetector(SamDetector):
         padw = length - w
         x = F.pad(x, (0, padw, 0, padh))
         return x
+    
     def forward(self, batched_inputs: List[Dict[str, torch.Tensor]]):
         # resized_images = self.resize_norm(batched_inputs)
         if not self.training:
@@ -373,7 +375,6 @@ class SamOpenDetector(SamDetector):
         clss_embeddings.append(extract_mean_emb(txts))
         text_emb = torch.stack(clss_embeddings, dim=0)
         text_emb /= text_emb.norm(dim=-1, keepdim=True) 
-        # import ipdb; ipdb.set_trace()
         return text_emb
 
 def custom_detector_postprocess(

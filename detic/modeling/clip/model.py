@@ -249,10 +249,19 @@ class VisionTransformer(nn.Module):
 
         x = x.permute(1, 0, 2)  # NLD -> LND
         x = self.transformer(x)
+        
         x = x.permute(1, 0, 2)  # LND -> NLD
-        return x
+        x = self.ln_post(x)
+        x = x @ self.proj
+        global_feature = x[:, 0, :]
+        visual_feature = x[:, 1:, :]
+        global_feature = global_feature.unsqueeze(1)
+        global_feature = global_feature/ global_feature.norm(dim=1, keepdim=True)
+        visual_feature = visual_feature/ visual_feature.norm(dim=1, keepdim=True)
+        return torch.cat([global_feature, visual_feature], dim=1)
 
     # maskclip 
+    
 
     def forward(self, x: torch.Tensor):
         x = self.forward_featuremap(x)
@@ -379,14 +388,12 @@ class CLIP(nn.Module):
         # x.shape = [batch_size, n_ctx, transformer.width]
         # take features from the eot embedding (eot_token is the highest number in each sequence)
         x = x[torch.arange(x.shape[0]), text.argmax(dim=-1)] @ self.text_projection
-
         return x
-
+    
     def forward(self, image, text):
         image_features = self.encode_image(image)
         text_features = self.encode_text(text)
-
-        # normalized features
+        # normalize the hidden dim
         image_features = image_features / image_features.norm(dim=1, keepdim=True)
         text_features = text_features / text_features.norm(dim=1, keepdim=True)
 

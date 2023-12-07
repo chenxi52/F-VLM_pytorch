@@ -73,38 +73,28 @@ class samMaskHead(BaseMaskRCNNHead):
         self.vis_period = vis_period
         if clip_type == 'ViT-B/16':
             self.text_dim = 512
-            self.clip_dim = 768
-            self.down_dim = self.clip_dim
+            self.emb_dim = 768
+            self.down_dim = self.emb_dim
         elif clip_type == 'RN50':
             self.text_dim = 1024
-            self.clip_dim = 2048
-            self.down_dim = self.clip_dim
+            self.emb_dim = 2048
+            self.down_dim = self.emb_dim
         elif clip_type == 'RN50x64':
             self.text_dim = 1024
-            self.clip_dim = 4096
-            self.down_dim = self.clip_dim
+            self.emb_dim = 4096
+            self.down_dim = self.emb_dim
         
         self.contextformer = build_contextformer(
-          d_model=self.down_dim, normalize_before=False
+            mask_dim=256,
+            d_model=self.text_dim, clip_txt_dim=self.text_dim, normalize_before=False
         )
-        self.to_clip = nn.Linear(
-            256, self.down_dim
-        )
-        self.projector = nn.Linear(
-            self.down_dim, self.text_dim
-        )
-        self.down_channel = nn.Linear(
-            self.clip_dim, self.down_dim
-        )
+
         def init_weights(m):
             if type(m) == nn.Linear:
                 weight_init.c2_xavier_fill(m)
             elif type(m) == nn.Conv2d:
                 weight_init.c2_msra_fill(m)
         self.point_emb.apply(init_weights)
-        self.to_clip.apply(init_weights)
-        self.projector.apply(init_weights)
-        self.down_channel.apply(init_weights)
         self.score_thresh = score_thresh
         self.top_per_instance = top_per_instance
         self.test_nms_thresh = test_nms_thresh
@@ -206,25 +196,10 @@ class samMaskHead(BaseMaskRCNNHead):
             dense_prompt_embeddings=nomask_dense_embeddings,
             multimask_output=False,
         )
-        # mask_tokens: (batch_size, 4, 256)
-        # clip_texts and mask_tokens
         with amp.autocast(enabled=True):
-            mask_tokens = self.to_clip(mask_tokens)
-            logit_scale = clip.logit_scale.exp()
-            # clip_img_embedding.降维。clip_dim 修改为这个维度
-            if self.clip_dim != self.down_dim:
-                clip_img_embeddings = self.down_channel(clip_img_embeddings)
-            semantic_token = self.contextformer(mask_tokens, clip_img_embeddings, pos=context_former_pe)#mask_tokens: (batch_size, 1, self.clip_dim),clip: [bz,self.clip_dim, 32,32]
-            semantic_token = self.projector(semantic_token)
-            clip_texts = move_device_like(clip_texts, semantic_token)
-            # clip_texts 81,d
-            # for all samples, the background samples are not selected 
-            # so get logits is not for background. 
-            logits_image, logits_text = self.get_logits(semantic_token, clip_texts, logit_scale)
-
+            clip_texts = move_device_like(clip_texts, low_res_masks)
+            logits_image,_ = self.contextformer(mask_tokens, clip_img_embeddings, clip_texts)#mask_tokens: (batch_size, 1, self.emb_dim),clip: [bz,self.emb_dim, 32,32]
         low_res_masks = torch.nn.functional.interpolate(low_res_masks, size=(self.train_size, self.train_size), mode='bilinear', align_corners=False)
-        logits_image = logits_image.squeeze(dim=1)
-        
         if self.training:
             gt_classes = (
                 cat([p.gt_classes for p in instances], dim=0) if len(instances) else torch.empty(0)

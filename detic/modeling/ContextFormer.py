@@ -4,6 +4,8 @@ from typing import Optional, List
 import torch
 import torch.nn.functional as F
 from torch import nn, Tensor
+import numpy as np
+from timm.models.layers import trunc_normal_
 
 def _get_activation_fn(activation):
     """Return an activation function given a string"""
@@ -19,7 +21,6 @@ def _get_clones(module, N):
     return nn.ModuleList([copy.deepcopy(module) for i in range(N)])
 
 class TransformerDecoderLayer(nn.Module):
-
     def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1,
                  activation="relu", normalize_before=False):
         super().__init__()
@@ -146,25 +147,69 @@ class TransformerDecoder(nn.Module):
 
         return output
 
-def build_contextformer(
-    d_model=256,
-    nhead=8,
-    num_decoder_layers=3,
-    normalize_before=False,
-):
-    dim_feedforward=2048
-    dropout=0.1
-    activation="relu"
-    normalize_before=normalize_before
-    return_intermediate_dec=False
+class build_contextformer(nn.Module):  
+    def __init__(self,
+                mask_dim=1024,
+                d_model=256,
+                clip_txt_dim=512,
+                nhead=8,
+                num_decoder_layers=3,
+                normalize_before=False,
+                dim_feedforward=2048,
+                dropout=0.1,
+                activation="relu",
+                return_intermediate_dec=False,
+                use_ln=True) -> None:
+        """
+        use_ln: whether use ln to visual tokens and masktokens(layernorm)
+        """
+        super().__init__()
+        attenLayer1 = TransformerDecoderLayer(d_model, nhead, dim_feedforward, dropout, activation, normalize_before)
+        attenLayer2 = TransformerDecoderLayer(d_model, nhead, dim_feedforward, dropout, activation, normalize_before)
 
-    decoder_layer = TransformerDecoderLayer(d_model, nhead, dim_feedforward,
-                                                    dropout, activation, normalize_before)
-    decoder_norm = nn.LayerNorm(d_model)
-    decoder = TransformerDecoder(decoder_layer, num_decoder_layers, decoder_norm,
-                                        return_intermediate=return_intermediate_dec)
-    return decoder
+        decoder_norm1 = nn.LayerNorm(d_model)
+        decoder_norm2 = nn.LayerNorm(d_model)
+        self.decoder1 = TransformerDecoder(attenLayer1, num_decoder_layers, decoder_norm1,
+                                            return_intermediate=return_intermediate_dec)
+        self.decoder2 = TransformerDecoder(attenLayer2, num_decoder_layers, decoder_norm2,
+                                            return_intermediate=return_intermediate_dec)
+        self.q_proj = nn.Linear(mask_dim, d_model)# for mask_token
+        self.kv_proj = nn.Linear(2*clip_txt_dim, d_model)# for k,v
+        self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
+        self.use_ln = use_ln
+        if use_ln:
+            self.ln_mask = nn.LayerNorm(d_model)
 
+    def get_qs(self, q, cls):
+        # concat[cls*txt,txt]
+        C, dim = q.shape
+        bs, _ = cls.shape
+        q = q.expand(bs, -1, -1)
+        q1 = torch.einsum("bd,bcd->bcd", cls, q) #bs, dim, C
+        q_ = torch.concat((q1, q),dim=-1) # for cls token and text token have align, there are no laynorms
+        return q_
+
+    def forward(self, mask_token, clip_vis, clip_txt):
+        cls_token, visual_tokens = clip_vis[:,0], clip_vis[:,1:]
+        cls_token = self.get_qs(clip_txt, cls_token)
+        kv = self.kv_proj(cls_token)
+
+        if self.use_ln:
+            q = self.ln_mask(self.q_proj(mask_token))
+        else:
+            q = self.q_proj(mask_token)
+        mask_text = self.decoder1(q, kv)
+
+        mask_img = self.decoder2(mask_text, visual_tokens)
+        return self.get_logits(mask_img.squeeze(), clip_txt)
+
+    def get_logits(self, image, text):
+        image = image/image.norm(dim=-1, keepdim=True)
+        text = text/text.norm(dim=-1, keepdim=True)
+        logit_scale = self.logit_scale.exp()
+        mask_cls_img = logit_scale * image @ text.t()
+        mask_cls_txt = mask_cls_img.t()
+        return mask_cls_img, mask_cls_txt
 
 # tgt = torch.rand(2, 10, 256)
 # #[N, \sigma(HiWi), C]
