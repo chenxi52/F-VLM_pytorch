@@ -121,7 +121,7 @@ TEST:
   DO_POSTPROCESS: True
   EVAL_PERIOD: 90000 # change
   IMS_PER_BATCH: 1 #every gpu has most 2 images  # change
-  SCORE_TYPE: 'cls'
+  SCORE_TYPE: 'ob_geo_cls'
   GEOMETRIC_FACT: 0.35
 VERSION: 2
 FP16: True
