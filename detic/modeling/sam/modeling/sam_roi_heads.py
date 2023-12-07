@@ -122,8 +122,8 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         if not self.mask_on:
             return {} if self.training else instances
         if self.training:
-            instances, fore_masks = select_foreground_proposals(instances, self.num_classes)
-            boxes = [i.proposal_boxes if self.training else i.pred_boxes for i in instances]
+            instances, _ = select_foreground_proposals(instances, self.num_classes)
+        boxes = [i.proposal_boxes if self.training else i.pred_boxes for i in instances]
         if self.mask_pooler is not None:
             # the box here are fused together, but will be assigned to each level in mask_pooler
             features = [features[f] for f in self.mask_in_features]
@@ -137,7 +137,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
                 return results_instances
         else:
             features = [features[f] for f in self.mask_in_features]
-        return self.mask_head(features, img_features, instances, sam, clip, clip_images, clip_texts, context_former_pe, fore_masks)
+        return self.mask_head(features, img_features, instances, sam, clip, clip_images, clip_texts, context_former_pe)
 
 
     def forward( 
