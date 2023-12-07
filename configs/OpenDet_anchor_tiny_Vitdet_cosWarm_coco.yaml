@@ -83,7 +83,7 @@ MODEL:
   MASK_ON: True
 DATASETS:
   TRAIN: ("coco_zeroshot_train_oriorder",)
-  TEST: ("coco_not_zeroshot_val",)
+  TEST: ("coco_generalized_zeroshot_val",)
 DATALOADER:
   NUM_WORKERS: 16 # num_workers == batchsize_per_gpu
   # PERSISTENT_WORKERS: True 
