@@ -147,10 +147,8 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             features: Dict[str, torch.Tensor],
             proposals: List[Instances],
             targets: Optional[List[Instances]] = None,
-            clip: nn.Module=None,
             clip_images: torch.Tensor=None,
             clip_texts: torch.Tensor=None,
-            context_former_pe: nn.Module=None,
             )-> Tuple[List[Instances], Dict[str, torch.Tensor]]:
         """
             img_features: output of image_encoder
@@ -188,7 +186,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             # Usually the original proposals used by the box head are used by the mask, keypoint
             # heads. But when `self.train_on_pred_boxes is True`, proposals will contain boxes
             # predicted by the box head. proposal_boxes are replaced by boxes predicted by box_head
-            losses.update(self._forward_mask(sam, img_features, x, proposals, clip, clip_images, clip_texts, context_former_pe))
+            losses.update(self._forward_mask(sam, img_features, x, proposals, clip_images, clip_texts))
             # self._forward_mask(sam, img_features, x, proposals)
 
             return proposals, losses
@@ -198,7 +196,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             # pred_boxes = Boxes(boxes)   result.scores = scores  pred_classes
             # During inference cascaded prediction is used: the mask and keypoints heads are only
             # applied to the top scoring box detections.
-            pred_instances = self.forward_with_given_boxes(sam, img_features, x, pred_instances, clip, clip_images, clip_texts, context_former_pe)
+            pred_instances = self.forward_with_given_boxes(sam, img_features, x, pred_instances, clip_images, clip_texts)
             return pred_instances, {}
         
     @torch.no_grad()
@@ -279,28 +277,11 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         self, sam: nn.Module, img_features: torch.Tensor, features: Dict[str, torch.Tensor], instances: List[Instances],
         clip:nn.Module, clip_images: torch.Tensor, clip_texts: torch.Tensor, context_former_pe:nn.Module=None
         ) -> List[Instances]:
-        """
-        Use the given boxes in `instances` to produce other (non-box) per-ROI outputs.
-
-        This is useful for downstream tasks where a box is known, but need to obtain
-        other attributes (outputs of other heads).
-        Test-time augmentation also uses this.
-
-        Args:
-            features: same as in `forward()` multi-level roi features
-            img_features: image features from image encoder
-            instances (list[Instances]): instances to predict other outputs. Expect the keys
-                "pred_boxes" and "pred_classes" to exist.
-
-        Returns:
-            list[Instances]:
-                the same `Instances` objects, with extra
-                fields such as `pred_masks` or `pred_keypoints`.
-        """
+      
         assert not self.training
         assert instances[0].has("pred_boxes")
 
-        instances = self._forward_mask(sam, img_features, features, instances, clip, clip_images, clip_texts, context_former_pe=context_former_pe)
+        instances = self._forward_mask(sam, img_features, features, instances, clip_images, clip_texts)
         # NMS , this is semantic token classification
         return instances
 

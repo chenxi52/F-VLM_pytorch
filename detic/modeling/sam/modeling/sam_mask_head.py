@@ -148,10 +148,8 @@ class samMaskHead(BaseMaskRCNNHead):
             img_features: torch.Tensor,
             instances: List[Instances],
             sam: nn.Module,
-            clip: nn.Module,
             clip_images: torch.Tensor,
             clip_texts: torch.Tensor, 
-            context_former_pe: nn.Module,
         ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         firstly, inference, and then calculate losses

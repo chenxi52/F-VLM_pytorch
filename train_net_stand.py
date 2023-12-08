@@ -42,7 +42,6 @@ import torch.nn as nn
 import psutil
 import gc
 import multiprocessing  
-from memory_profiler import profile
 logger = logging.getLogger("detectron2")
 
 
@@ -132,7 +131,7 @@ def do_train(cfg, model, resume=False):
                 cfg, True, augmentations=build_custom_augmentation(cfg, True))
     #####
     
-    data_loader = build_detection_train_loader(cfg, mapper=mapper)
+    data_loader = build_detection_train_loader(cfg, mapper=mapper, pin_memory=True)
     if cfg.FP16:
         scaler = GradScaler()
     logger.info("Starting training from iteration {}".format(start_iter))

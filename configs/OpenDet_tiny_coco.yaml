@@ -28,7 +28,7 @@ DATASETS:
   TRAIN: ("coco_zeroshot_train_oriorder",)
   TEST: ("coco_generalized_zeroshot_val",)
 DATALOADER:
-  NUM_WORKERS: 8 # num_workers == batchsize_per_gpu
+  NUM_WORKERS: 4 # num_workers == batchsize_per_gpu
 SOLVER:
   IMS_PER_BATCH: 16  # change  # max 8 imgs per batch
   BASE_LR: 0.0005  # change0.000025

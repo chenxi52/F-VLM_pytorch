@@ -52,7 +52,7 @@ class SAMRPN(RPN):
 
     @classmethod
     def from_config(cls, cfg, input_shape):
-        # Standard RPN is shared across levels:
+        # add objectness_loss_type
         ret = super().from_config(cfg, input_shape)
         ret['objectness_loss_type'] = cfg.MODEL.RPN.OBJECTNESS_LOSS_TYPE
         return ret
@@ -63,19 +63,6 @@ class SAMRPN(RPN):
         self, anchors: List[Boxes], gt_instances: List[Instances]
     ) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
         """
-        Args:
-            anchors (list[Boxes]): anchors for each feature map.
-            gt_instances: the ground-truth instances for each image.
-
-        Returns:
-            list[Tensor]:
-                List of #img tensors. i-th element is a vector of labels whose length is
-                the total number of anchors across all feature maps R = sum(Hi * Wi * A).
-                Label values are in {-1, 0, 1}, with meanings: -1 = ignore; 0 = negative
-                class; 1 = positive class.
-            list[Tensor]:
-                i-th element is a Rx4 tensor. The values are the matched gt boxes for each
-                anchor. Values are undefined for those anchors not labeled as 1.
         """
         anchors = Boxes.cat(anchors)
         gt_boxes = [x.gt_boxes for x in gt_instances]
@@ -138,29 +125,11 @@ class SAMRPN(RPN):
         gt_boxes: List[torch.Tensor],
     ) -> Dict[str, torch.Tensor]:
         """
-        Return the losses from a set of RPN predictions and their associated ground-truth.
-
-        Args:
-            anchors (list[Boxes or RotatedBoxes]): anchors for each feature map, each
-                has shape (Hi*Wi*A, B), where B is box dimension (4 or 5).
-            pred_objectness_logits (list[Tensor]): A list of L elements.
-                Element i is a tensor of shape (N, Hi*Wi*A) representing
-                the predicted objectness logits for all anchors.
-            gt_labels (list[Tensor]): Output of :meth:`label_and_sample_anchors`.
-            pred_anchor_deltas (list[Tensor]): A list of L elements. Element i is a tensor of shape
-                (N, Hi*Wi*A, 4 or 5) representing the predicted "deltas" used to transform anchors
-                to proposals.
-            gt_boxes (list[Tensor]): Output of :meth:`label_and_sample_anchors`.
-
-        Returns:
-            dict[loss name -> loss value]: A dict mapping from loss name to loss value.
-                Loss names are: `loss_rpn_cls` for objectness classification and
-                `loss_rpn_loc` for proposal localization.
         """
         num_images = len(gt_labels)
         gt_labels = torch.stack(gt_labels)  # (N, sum(Hi*Wi*Ai))
 
-        # Log the number of positive/negative anchors per-image that's used in training
+        # only difference, to suit for centerness 
         pos_mask = gt_labels>0
         num_pos_anchors = pos_mask.sum().item()
         num_neg_anchors = (gt_labels == 0).sum().item()
