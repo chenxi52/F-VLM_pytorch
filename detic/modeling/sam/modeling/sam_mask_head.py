@@ -204,14 +204,18 @@ class samMaskHead(BaseMaskRCNNHead):
                 cat([p.gt_classes for p in instances], dim=0) if len(instances) else torch.empty(0)
                 )
             target_classes_onehot = torch.zeros(logits_image.shape, dtype=logits_image.dtype, device=logits_image.device)
+            if len(logits_image.shape) < 2:
+                logits_image = logits_image.unsqueeze(0)
+            assert len(logits_image.shape) == 2, print('logits_image.shape: ', logits_image.shape)
             target_classes_onehot.scatter_(1, gt_classes.unsqueeze(-1), 1)
             # what if the classification not include background. The classification will not be interupted?
             loss ={"loss_mask": self.custom_mask_rcnn_loss(low_res_masks, instances, self.vis_period) * self.loss_weight,
                    "loss_cls": self.sigmoid_focal_loss(logits_image, target_classes_onehot,gt_classes)}
+            del instances, low_res_masks, logits_image, mask_tokens, clip_img_embeddings, img_embeddings
             return loss
         else:
             new_instances = self.custom_mask_rcnn_inference(low_res_masks, instances, logits_image[:,:-1], self.score_thresh, self.top_per_instance, self.test_nms_thresh)
-            del instances
+            del instances, low_res_masks, logits_image, mask_tokens, clip_img_embeddings, img_embeddings
             return new_instances
         
     def sigmoid_focal_loss(self, inputs, targets, gt_classes, alpha: float = 0.25, gamma: float = 2):
