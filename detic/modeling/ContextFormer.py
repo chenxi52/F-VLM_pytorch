@@ -210,10 +210,3 @@ class build_contextformer(nn.Module):
         mask_cls_img = logit_scale * image @ text.t()
         mask_cls_txt = mask_cls_img.t()
         return mask_cls_img, mask_cls_txt
-
-# tgt = torch.rand(2, 10, 256)
-# #[N, \sigma(HiWi), C]
-# memory = torch.rand(2, 256, 64, 64).flatten(2).permute(0, 2, 1)
-# # memory = torch.rand(1, 1024, 256)
-# out = decoder(tgt, memory)
-# print(out.shape)
