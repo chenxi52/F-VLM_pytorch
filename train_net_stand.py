@@ -6,12 +6,11 @@ from collections import OrderedDict
 import torch
 from torch.nn.parallel import DistributedDataParallel
 import datetime
-
+import time
 import detectron2.utils.comm as comm
 from detectron2.checkpoint import PeriodicCheckpointer
 from detectron2.config import get_cfg
 from detectron2.data import MetadataCatalog, build_detection_test_loader 
-
 from detectron2.data.build import build_detection_train_loader
 
 from detectron2.engine import default_argument_parser, default_setup, launch
@@ -31,7 +30,6 @@ from detectron2.utils.events import (
     TensorboardXWriter,
 )
 from torch.cuda.amp import GradScaler
-
 from detic.data.custom_dataset_mapper import SamDatasetMapper
 from detic.data.custom_build_augmentation import build_custom_augmentation
 from detic.custom_checkpointer import samCheckpointer
@@ -41,6 +39,9 @@ from detic.custom_solver import build_sam_optimizer
 from detic.evaluation.custom_coco_eval import CustomCOCOEvaluator
 import wandb
 import torch.nn as nn
+import psutil
+import gc
+import multiprocessing  
 logger = logging.getLogger("detectron2")
 
 
@@ -77,6 +78,22 @@ def do_test(cfg, model):
     if len(results) == 1:
         results = list(results.values())[0]
     return results
+
+def is_dead(model):
+    # 获取模型的所有参数
+    parameters = model.parameters()
+    is_dead = False
+    while not is_dead:
+        # 同步 CPU 和 GPU 的状态
+        torch.cuda.synchronize()
+        # 检查模型的参数是否有更新
+        for parameter in parameters:
+            if parameter.grad is not None:
+                is_dead = False
+                break
+        # 休眠 1 秒
+        time.sleep(1)
+    return is_dead
 
 
 def do_train(cfg, model, resume=False):
@@ -159,6 +176,21 @@ def do_train(cfg, model, resume=False):
             else:
                 losses.backward()
                 optimizer.step()
+            is_dead_sta = is_dead(model)
+            # try:
+            #     if is_dead_sta:
+            #         logger.error('model is dead')
+            #         break
+            # except RuntimeError as e:
+            #     if 'out of memory' in str(e):
+            #         logger.error('| WARNING: ran out of memory')
+            #         logger.error('Attempting to restart training')
+            #         if hasattr(torch.cuda, 'empty_cache'):
+            #             torch.cuda.empty_cache()
+            #         gc.collect()
+            #         continue
+            #     else:
+            #         raise e
             storage.put_scalar("lr", optimizer.param_groups[0]["lr"], smoothing_hint=False)
             scheduler.step()
 
@@ -183,6 +215,23 @@ def do_train(cfg, model, resume=False):
                     wandb.log(loss_dict_reduced)
             periodic_checkpointer.step(iteration)
 
+def train_model(cfg, model, resume):
+    while True:
+        p = multiprocessing.Process(target=do_train, args=(cfg, model, resume))
+        p.start()
+
+        while True:
+            if p.is_alive():
+                # 获取进程的CPU使用率
+                cpu_percent = psutil.Process(p.pid).cpu_percent(interval=1)
+                if cpu_percent == 100.:
+                    print("WARNING: CPU usage is 100%, restarting training...")
+                    p.terminate()
+                    break
+                else:
+                    time.sleep(1)
+            else:
+                break
 
 def set_model_mode(model):
     model.train()
@@ -233,8 +282,8 @@ def main(args):
         model = DistributedDataParallel(
             model, device_ids=[comm.get_local_rank()], broadcast_buffers=False, find_unused_parameters=True
         )
-
-    do_train(cfg, model, resume=args.resume)
+    train_model(cfg, model, args.resume)
+    # do_train(cfg, model, resume=args.resume)
     return do_test(cfg, model)
 
 
