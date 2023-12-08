@@ -50,7 +50,6 @@ class SamDetector(GeneralizedRCNN):
         super().__init__(**kwargs)
         assert self.proposal_generator is not None
         self.sam = sam
-        
         self.mask_thr_binary = mask_thr_binary
         self.do_postprocess = do_postprocess
         self.backbone_name = backbone_name
@@ -58,23 +57,24 @@ class SamDetector(GeneralizedRCNN):
     @classmethod
     def from_config(cls, cfg):
         sam = sam_model_registry[cfg.MODEL.BACKBONE.TYPE]()
-        backbone = build_backbone(cfg)# fpn+image_encoder
         # roi_heads include box_heads, mask_heads
+        backbone = build_backbone(cfg)
+
         ret=({
-            'backbone':backbone,
-            'proposal_generator':build_proposal_generator(cfg, backbone.output_shape),
-            "roi_heads": build_roi_heads(cfg, backbone.output_shape),
-            'fp16': cfg.FP16,
-            'input_format': cfg.INPUT.FORMAT,
+            "backbone": backbone,
+            "proposal_generator": build_proposal_generator(cfg, backbone.output_shape()),
+            "roi_heads": build_roi_heads(cfg, backbone.output_shape()),
+            "input_format": cfg.INPUT.FORMAT,
+            "vis_period": cfg.VIS_PERIOD,
             "pixel_mean": cfg.MODEL.PIXEL_MEAN,
             "pixel_std": cfg.MODEL.PIXEL_STD,
+
+            'fp16': cfg.FP16,
             "sam": sam,
             "do_postprocess": cfg.TEST.DO_POSTPROCESS,
             "backbone_name":cfg.MODEL.BACKBONE.NAME,
-            "vis_period": cfg.VIS_PERIOD,
-
+            "mask_thr_binary":cfg.TEST.MASK_THR_BINARY
         })
-        ret.update(mask_thr_binary = cfg.TEST.MASK_THR_BINARY)
         return ret
     
     
@@ -176,6 +176,9 @@ class SamOpenDetector(SamDetector):
     ):
         self.fp16=fp16
         super().__init__(**kwargs)
+        self.register_buffer("clip_pixel_mean", torch.tensor([0.48145466, 0.4578275, 0.40821073]).unsqueeze(1).unsqueeze(2), False)
+        self.register_buffer("clip_pixel_std", torch.tensor([0.26862954, 0.26130258, 0.27577711]).unsqueeze(1).unsqueeze(2), False)
+        self.class_name = class_name
         assert self.proposal_generator is not None
         self.sam = sam_model_registry[sam_type]()
         self.clip = clip.load(clip_type, jit=False)[0]
@@ -205,34 +208,33 @@ class SamOpenDetector(SamDetector):
             # if add_unfrozen in name:
                 # params.requires_grad = True
             params.requires_grad = False
-        self.register_buffer("clip_pixel_mean", torch.tensor([0.48145466, 0.4578275, 0.40821073]).unsqueeze(1).unsqueeze(2), False)
-        self.register_buffer("clip_pixel_std", torch.tensor([0.26862954, 0.26130258, 0.27577711]).unsqueeze(1).unsqueeze(2), False)
-        self.register_buffer("class_name", class_name, False)
         self.clip_train_size = clip_train_size
 
     @classmethod
     def from_config(cls, cfg):
-        backbone = build_backbone(cfg)# fpn+image_encoder
         # roi_heads include box_heads, mask_heads
         if 'coco' in cfg.DATASETS.TRAIN[0]:
             class_name = constants.COCO_INSTANCE_CLASSES
+        backbone = build_backbone(cfg)
         ret=({
-            'backbone':backbone,
-            'proposal_generator':build_proposal_generator(cfg, backbone.output_shape),
+            "backbone": backbone,
+            "proposal_generator": build_proposal_generator(cfg, backbone.output_shape),
             "roi_heads": build_roi_heads(cfg, backbone.output_shape),
-            'fp16': cfg.FP16,
-            'input_format': cfg.INPUT.FORMAT,
+            "input_format": cfg.INPUT.FORMAT,
+            "vis_period": cfg.VIS_PERIOD,
             "pixel_mean": cfg.MODEL.PIXEL_MEAN,
             "pixel_std": cfg.MODEL.PIXEL_STD,
+
+            'fp16': cfg.FP16,
             "sam_type": cfg.MODEL.BACKBONE.TYPE,
             "clip_type": cfg.MODEL.BACKBONE.CLIP_TYPE,
             "do_postprocess": cfg.TEST.DO_POSTPROCESS,
             "backbone_name":cfg.MODEL.BACKBONE.NAME,
             "class_name":class_name,
             "add_unfrozen":cfg.MODEL.BACKBONE.ADD_UNFROZEN,
-            "clip_train_size":cfg.INPUT.CLIP_TRAIN_SIZE
+            "clip_train_size":cfg.INPUT.CLIP_TRAIN_SIZE,
+            "mask_thr_binary":cfg.TEST.MASK_THR_BINARY
         })
-        ret.update(mask_thr_binary = cfg.TEST.MASK_THR_BINARY)
         return ret
     
     @torch.no_grad()
@@ -285,11 +287,10 @@ class SamOpenDetector(SamDetector):
     
     def padding(self, x: torch.Tensor, length:int) -> torch.Tensor:
         # Normalize colors have done 
-        # Pad
         h, w = x.shape[-2:]
         padh = length - h
         padw = length - w
-        x = F.pad(x, (0, padw, 0, padh))
+        x = F.pad(x, (0, padw, 0, padh)) #(左, 右, 上, 下) 
         return x
     
     def forward(self, batched_inputs: List[Dict[str, torch.Tensor]]):
@@ -300,20 +301,25 @@ class SamOpenDetector(SamDetector):
         # images.size() is origin image size
         # preprocess are normalized
         resized_images = self.resize_norm_long_padding(batched_inputs, self.clip_train_size)
-        if self.vis_period > 0:
-            storage = get_event_storage()
-            if storage.iter % self.vis_period == 0:
-                self.visualize_training(batched_inputs, proposals)
-
         images = self.preprocess_image(batched_inputs)
         gt_instances = [x["instances"].to(self.device) for x in batched_inputs] #instance have img_Size with longest-size = 1024
         
         img_embedding_feat, inter_feats, clip_feats = self.extract_feat(images, resized_images) 
         fpn_features = self.backbone(inter_feats)
         # fpn_features: Dict{'feat0': Tuple[2*Tensor[256,32,32]], 'feat1': Tuple[2*Tensor[256,64,64]], ...}
-        # resize the img_size in gt_instances to (1024,1024)
         proposals, proposal_losses = self.proposal_generator(
             images, fpn_features, gt_instances)
+        if self.vis_period > 0:
+            storage = get_event_storage()
+            if storage.iter % self.vis_period == 0:
+                self.visualize_training(batched_inputs, proposals)
+                # self.visualize_training(batched_inputs, proposals, 'gt.jpg')
+                # for img, ins in zip(resized_images, batched_inputs):
+                    # ins['image'] = img
+                    # print('img_shape', img.shape)
+                # self.visualize_training(batched_inputs, proposals, 'resized.jpg')
+            # import sys
+            # sys.exit()
         # proposals:max(h,w)=1024,  gt_instance:max(h,w)=1024
         del images
         _, detector_losses = self.roi_heads(self.sam, img_embedding_feat, fpn_features, proposals, gt_instances, clip_feats, self.text_feats)
@@ -331,7 +337,6 @@ class SamOpenDetector(SamDetector):
         # Apply normalization
         elif self.clip_type == 'RN50':
             resized_images = [F.interpolate(x.unsqueeze(0), size=(self.clip_train_size,self.clip_train_size), mode='bilinear', align_corners=False).squeeze(1) for x in images]
-
         resized_images = [(x - self.clip_pixel_mean) / self.clip_pixel_std for x in resized_images]
         return torch.cat(resized_images,dim=0)
     
@@ -344,7 +349,7 @@ class SamOpenDetector(SamDetector):
     
     def resize_norm_long_padding(self, batched_inputs, long_size=224):
         # Convert the numpy image to a torch tensor and ensure it is in CxHxW format
-        images = [self._move_to_current_device((x["image"].clone()/255.).to(torch.float)) for x in batched_inputs]
+        images = [self._move_to_current_device((x["image"].clone().detach()/255.).to(torch.float)) for x in batched_inputs]
         image_shapes = [self.resize_longest_image_size(torch.tensor(x.shape[-2:],device=x.device), long_size) for x in images]
         if self.clip_type == 'ViT-B/16':
             resized_images = [F.interpolate(x.unsqueeze(0), size=image_shapes[i], mode='bilinear', align_corners=False).squeeze(1) for i,x in enumerate(images)]
@@ -382,7 +387,33 @@ class SamOpenDetector(SamDetector):
         text_emb = torch.stack(clss_embeddings, dim=0)
         text_emb /= text_emb.norm(dim=-1, keepdim=True) 
         return text_emb
+    
+    def visualize_training(self, batched_inputs, proposals, pg_name=''):
+        from detectron2.utils.visualizer import Visualizer
 
+        storage = get_event_storage()
+        max_vis_prop = 20
+
+        for input, prop in zip(batched_inputs, proposals):
+            img = input["image"]
+            img = convert_image_to_rgb(img.permute(1, 2, 0), self.input_format)
+            v_gt = Visualizer(img, None)
+            v_gt = v_gt.overlay_instances(boxes=input["instances"].gt_boxes)
+            anno_img = v_gt.get_image()
+            box_size = min(len(prop.proposal_boxes), max_vis_prop)
+            v_pred = Visualizer(img, None)
+            v_pred = v_pred.overlay_instances(
+                boxes=prop.proposal_boxes[0:box_size].tensor.cpu().numpy()
+            )
+            prop_img = v_pred.get_image()
+            vis_img = np.concatenate((anno_img, prop_img), axis=1)
+            vis_name = "Left: GT bounding boxes;  Right: Predicted proposals"
+            vis_img = vis_img.transpose(2, 0, 1)
+            # import cv2
+            # cv2.imwrite(pg_name, vis_img)
+            storage.put_image(vis_name, vis_img)
+            break  # only visualize one image in a batch
+        
 def custom_detector_postprocess(
     results: Instances, output_height: int, output_width: int, mask_threshold: float = 0.5
 ):

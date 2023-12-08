@@ -43,3 +43,4 @@ TEST:
   SCORE_TYPE: 'ob_geo_cls'
   GEOMETRIC_FACT: 0.35
 OUTPUT_DIR: './output/ovcoco'
+VIS_PERIOD: 20
