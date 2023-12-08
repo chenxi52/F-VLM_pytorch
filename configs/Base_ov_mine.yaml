@@ -1,15 +1,11 @@
-# _BASE_: "Base_OVCOCO_C4_1x.yaml"
 MODEL:
   META_ARCHITECTURE: "SamOpenDetector" 
   BACKBONE:
     NAME: "build_sam_vit_det_backbone" #SAM vit_h
     TYPE: "vit_t"
     CLIP_TYPE: "ViT-B/16"
-    ADD_UNFROZEN: 'xxx' # unfrozen extra part of model, default='xxx'
+    ADD_UNFROZEN: 'xxx' # unfrozen extra part of model, the name is relative to sam and clip
   WEIGHTS: "mobile_sam.pt"
-  # WEIGHTS: "/opt/tiger/OpenVo-Seg-master/output/wo_mask_with_prompt_encoder_roi_head_withgrad/model_final.pth"
-  # WEIGHTS: "sam_vit_h_4b8939.pth"
-  # WEIGHTS: "output/Detic-COCO/RSPrompter_anchor/model_0000999.pth"
   FPN:
     OUT_CHANNELS: 256
     IN_CHANNELS: [256]
@@ -61,15 +57,14 @@ MODEL:
     POOLER_RESOLUTION: 7
     POOLER_SAMPLING_RATIO: 0
     POOLER_TYPE: "ROIAlignV2"
-    USE_SIGMOID_CE: True
+    USE_SIGMOID_CE: False
     BBOX_REG_LOSS_WEIGHT: 1.0
-    TRAIN_ON_PRED_BOXES: True
+    TRAIN_ON_PRED_BOXES: False
     BBOX_REG_WEIGHTS: (10.0, 10.0, 5.0, 5.0)
     SMOOTH_L1_BETA: 0.
     CLS_AGNOSTIC_BBOX_REG: True
     IGNORE_ZERO_CATS: True
     CAT_FREQ_PATH: 'datasets/coco/zero-shot/instances_train2017_seen_2_oriorder_cat_info.json'
-    USE_FED_LOSS: True
   ROI_MASK_HEAD:
     NAME: "samMaskHead"
     NUM_CONV: 4
@@ -82,13 +77,11 @@ MODEL:
     POOLER_TYPE: "ROIAlignV2"
     PER_QUERY_POINT: 4
   MASK_ON: True
-  NUM_SAMPLE_CATS: 50
 DATASETS:
   TRAIN: ("coco_zeroshot_train_oriorder",)
   TEST: ("coco_generalized_zeroshot_val",)
 DATALOADER:
   NUM_WORKERS: 16 # num_workers == batchsize_per_gpu
-  # PERSISTENT_WORKERS: True 
 SOLVER:
   IMS_PER_BATCH: 16  # change  # max 8 imgs per batch
   BASE_LR: 0.0005  # change0.000025
@@ -113,8 +106,6 @@ INPUT:
   PROMPT_SIZE: (90, 4)
   CUSTOM_AUG: ResizeLongestSize
   FORMAT: "RGB"
-  # PAD_MASK: True
-  # MASK_PAD_VAL: 0.0
   MASK_FORMAT: "bitmask"
   CLIP_TRAIN_SIZE: 224
 TEST:
@@ -124,8 +115,8 @@ TEST:
   EVAL_PERIOD: 90000 # change
   IMS_PER_BATCH: 1 #every gpu has most 2 images  # change
   SCORE_TYPE: 'ob_geo_cls'
-  GEOMETRIC_FACT: 0.65
+  GEOMETRIC_FACT: 0.35
 VERSION: 2
 FP16: True
-OUTPUT_DIR: './output/ovlvis'
+OUTPUT_DIR: './output/ovcoco'
 WANDB: False
