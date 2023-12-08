@@ -2,18 +2,16 @@ _BASE_: "Base_ov_mine.yaml"
 MODEL:
   BACKBONE:
     TYPE: "vit_t"
-    CLIP_TYPE: "ViT-B/16"
+    CLIP_TYPE: "RN50"
   WEIGHTS: "mobile_sam.pt"
   PROPOSAL_GENERATOR:
     NAME: "SAMRPN"
   RPN:
+    HEAD_NAME: "StandardRPNHead"
     PRE_NMS_TOPK_TRAIN: 2000  # Per FPN level
     PRE_NMS_TOPK_TEST: 1000  # Per FPN level
     POST_NMS_TOPK_TRAIN: 1000
     POST_NMS_TOPK_TEST: 300
-    BATCH_SIZE_PER_IMAGE: 256
-  ROI_HEADS:
-    BATCH_SIZE_PER_IMAGE: 128
   ROI_BOX_HEAD:
     BBOX_REG_WEIGHTS: (10.0, 10.0, 5.0, 5.0)
     IGNORE_ZERO_CATS: True # freq_weight for lvis
@@ -28,7 +26,7 @@ DATASETS:
   TRAIN: ("coco_zeroshot_train_oriorder",)
   TEST: ("coco_generalized_zeroshot_val",)
 DATALOADER:
-  NUM_WORKERS: 8 # num_workers == batchsize_per_gpu
+  NUM_WORKERS: 16 # num_workers == batchsize_per_gpu
 SOLVER:
   IMS_PER_BATCH: 16  # change  # max 8 imgs per batch
   BASE_LR: 0.0005  # change0.000025
