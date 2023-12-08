@@ -42,6 +42,7 @@ import torch.nn as nn
 import psutil
 import gc
 import multiprocessing  
+from memory_profiler import profile
 logger = logging.getLogger("detectron2")
 
 
