@@ -81,8 +81,6 @@ def do_test(cfg, model):
 
 
 def do_train(cfg, model, resume=False):
-    # set_model_mode(model)
-    model.train()
     if cfg.SOLVER.USE_CUSTOM_SOLVER:
         # also set requires_grad for module
         optimizer = build_sam_optimizer(cfg, model, logger)
@@ -94,14 +92,9 @@ def do_train(cfg, model, resume=False):
 
     scheduler = build_lr_scheduler(cfg, optimizer)
 
-    # checkpointer = DetectionCheckpointer(
-    #     model, cfg.OUTPUT_DIR, optimizer=optimizer, scheduler=scheduler
-    # )
-    ######
     checkpointer = samCheckpointer(
         model, cfg.OUTPUT_DIR, optimizer=optimizer, scheduler=scheduler, 
     )
-    ######
     start_iter = (
         checkpointer.resume_or_load(cfg.MODEL.WEIGHTS, resume=resume).get("iteration", -1) + 1
     )
@@ -205,7 +198,7 @@ def setup(args):
     cfg.freeze()
     default_setup(
         cfg, args
-    )  # if you don't like any of the default setup, write your own setup code
+    )  
     setup_logger(output=cfg.OUTPUT_DIR, \
         distributed_rank=comm.get_rank(), name="detic")
     return cfg
@@ -224,11 +217,6 @@ def main(args):
             cfg.MODEL.WEIGHTS, resume=args.resume
         )
         return do_test(cfg, model)
-
-    ##### freeze prompter params
-    for key, params in model.sam.prompt_encoder.named_parameters():
-        params.requires_grad = False
-    ########
 
     distributed = comm.get_world_size() > 1
     if distributed:

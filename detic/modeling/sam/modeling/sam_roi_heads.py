@@ -17,6 +17,8 @@ from detectron2.utils.events import get_event_storage
 from detectron2.modeling.poolers import ROIPooler
 from detectron2.layers import ShapeSpec, nonzero_tuple
 from detectron2.modeling.roi_heads.box_head import build_box_head
+import inspect
+
 @ROI_HEADS_REGISTRY.register()
 class samAnchorPromptRoiHeads(StandardROIHeads):
     """
@@ -50,7 +52,14 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         # super().from_config and _init_box_head, _init_mask_head
         _init_box_head has in_features, 
         """
-        ret = super().from_config(cfg, input_shape)
+        ret = super().from_config(cfg)
+        ret["train_on_pred_boxes"] = cfg.MODEL.ROI_BOX_HEAD.TRAIN_ON_PRED_BOXES
+        if inspect.ismethod(cls._init_box_head):
+            ret.update(cls._init_box_head(cfg, input_shape))
+        if inspect.ismethod(cls._init_mask_head):
+            ret.update(cls._init_mask_head(cfg, input_shape))
+        if inspect.ismethod(cls._init_keypoint_head):
+            ret.update(cls._init_keypoint_head(cfg, input_shape))
         mask_on   = cfg.MODEL.MASK_ON
         input_size = cfg.INPUT.TRAIN_SIZE
         ret['mask_on'] = mask_on
@@ -61,54 +70,22 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
                 cfg.MODEL.ROI_HEADS.IOU_LABELS,
                 allow_low_quality_matches=cfg.MODEL.ROI_HEADS.ALLOW_LOW_QUALITY_MATCHES,
             )
-        # update box_predictor for bbox_loss 
         return ret
     
     @classmethod
     def _init_box_head(cls, cfg, input_shape):
-        # fmt: off
-        in_features       = cfg.MODEL.ROI_HEADS.IN_FEATURES
-        pooler_resolution = cfg.MODEL.ROI_BOX_HEAD.POOLER_RESOLUTION
-        pooler_scales     = tuple(1.0 / input_shape[k].stride for k in in_features)
-        sampling_ratio    = cfg.MODEL.ROI_BOX_HEAD.POOLER_SAMPLING_RATIO
-        pooler_type       = cfg.MODEL.ROI_BOX_HEAD.POOLER_TYPE
-        # fmt: on
-
-        # If StandardROIHeads is applied on multiple feature maps (as in FPN),
-        # then we share the same predictors and therefore the channel counts must be the same
-        in_channels = [input_shape[f].channels for f in in_features]
-        # Check all channel counts are equal
-        assert len(set(in_channels)) == 1, in_channels
-        in_channels = in_channels[0]
-
-        box_pooler = ROIPooler(
-            output_size=pooler_resolution,
-            scales=pooler_scales,
-            sampling_ratio=sampling_ratio,
-            pooler_type=pooler_type,
-        )
-        # Here we split "box head" and "box predictor", which is mainly due to historical reasons.
-        # They are used together so the "box predictor" layers should be part of the "box head".
-        # New subclasses of ROIHeads do not need "box predictor"s.
-        box_head = build_box_head(
-            cfg, ShapeSpec(channels=in_channels, height=pooler_resolution, width=pooler_resolution)
-        )
-        ################
+        ret = super()._init_box_head(cfg, input_shape)
+        box_head = ret[box_head]
         #update the rcnn output layer
-        box_predictor = SamRCNNOutputLayers(cfg, box_head.output_shape)
-        return {
-            "box_in_features": in_features,
-            "box_pooler": box_pooler,
-            "box_head": box_head,
-            "box_predictor": box_predictor,
-        }
+        ret.update(box_predictor = SamRCNNOutputLayers(cfg, box_head.output_shape))
+        ################
+        return ret
 
 
     def _forward_mask(self, sam: nn.Module,  img_features: torch.Tensor,features: Dict[str, torch.Tensor],
-                      instances: List[Instances], clip:nn.Module, clip_images: torch.Tensor, clip_texts: torch.Tensor,
-                      context_former_pe:nn.Module=None):
+                      instances: List[Instances], clip_images: torch.Tensor, clip_texts: torch.Tensor,
+                      ):
         """
-        Forward logic of the mask prediction branch.
         Args:
             img_features: features output by image_encoder
             features: Multi-level features
@@ -137,7 +114,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
                 return results_instances
         else:
             features = [features[f] for f in self.mask_in_features]
-        return self.mask_head(features, img_features, instances, sam, clip, clip_images, clip_texts, context_former_pe)
+        return self.mask_head(features, img_features, instances, sam, clip_images, clip_texts)
 
 
     def forward( 
@@ -163,14 +140,11 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
                 detected instances. Returned during inference only; may be [] during training.
             mapping from a named loss to a tensor storing the loss. Used during training only.
         """
-        # import ipdb; ipdb.set_trace()
         if self.training:
             assert targets, "'targets' argument is required during training"
             # ROI assigner and sampler works.
             proposals = self.label_and_sample_proposals(proposals, targets)
         del targets
-        # pe map
-        # confusing
         x = [item[1] for item in list(features.items())]
         bs, _, h, w = x[-1].shape #
         mask_pe = torch.zeros((bs, h, w), device=x[0].device, dtype=torch.bool)
@@ -182,12 +156,10 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         
         if self.training:
             losses = self._forward_box(x, proposals)
-            # print(len(proposals[0].proposal_boxes))
             # Usually the original proposals used by the box head are used by the mask, keypoint
             # heads. But when `self.train_on_pred_boxes is True`, proposals will contain boxes
             # predicted by the box head. proposal_boxes are replaced by boxes predicted by box_head
             losses.update(self._forward_mask(sam, img_features, x, proposals, clip_images, clip_texts))
-            # self._forward_mask(sam, img_features, x, proposals)
 
             return proposals, losses
         else:
@@ -198,84 +170,10 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             # applied to the top scoring box detections.
             pred_instances = self.forward_with_given_boxes(sam, img_features, x, pred_instances, clip_images, clip_texts)
             return pred_instances, {}
-        
-    @torch.no_grad()
-    def label_and_sample_proposals(
-        self, proposals: List[Instances], targets: List[Instances]
-    ) -> List[Instances]:
-        """
-        Prepare some proposals to be used to train the ROI heads.
-        It performs box matching between `proposals` and `targets`, and assigns
-        training labels to the proposals.
-        It returns ``self.batch_size_per_image`` random samples from proposals and groundtruth
-        boxes, with a fraction of positives that is no larger than
-        ``self.positive_fraction``.
-
-        Args:
-            See :meth:`ROIHeads.forward`
-
-        Returns:
-            list[Instances]:
-                length `N` list of `Instances`s containing the proposals
-                sampled for training. Each `Instances` has the following fields:
-
-                - proposal_boxes: the proposal boxes
-                - gt_boxes: the ground-truth box that the proposal is assigned to
-                  (this is only meaningful if the proposal has a label > 0; if label = 0
-                  then the ground-truth box is random)
-
-                Other fields such as "gt_classes", "gt_masks", that's included in `targets`.
-        """
-        if self.proposal_append_gt:
-            proposals = add_ground_truth_to_proposals(targets, proposals)
-
-        proposals_with_gt = []
-
-        num_fg_samples = []
-        num_bg_samples = []
-        for proposals_per_image, targets_per_image in zip(proposals, targets):
-            has_gt = len(targets_per_image) > 0
-            match_quality_matrix = pairwise_iou(
-                targets_per_image.gt_boxes, proposals_per_image.proposal_boxes
-            )
-            matched_idxs, matched_labels = self.proposal_matcher(match_quality_matrix)
-            sampled_idxs, gt_classes = self._sample_proposals(
-                matched_idxs, matched_labels, targets_per_image.gt_classes
-            )
-
-            # Set target attributes of the sampled proposals:
-            proposals_per_image = proposals_per_image[sampled_idxs]
-            proposals_per_image.gt_classes = gt_classes
-
-            if has_gt:
-                sampled_targets = matched_idxs[sampled_idxs]
-                # We index all the attributes of targets that start with "gt_"
-                # and have not been added to proposals yet (="gt_classes").
-                # NOTE: here the indexing waste some compute, because heads
-                # like masks, keypoints, etc, will filter the proposals again,
-                # (by foreground/background, or number of keypoints in the image, etc)
-                # so we essentially index the data twice.
-                for (trg_name, trg_value) in targets_per_image.get_fields().items():
-                    if trg_name.startswith("gt_") and not proposals_per_image.has(trg_name):
-                        proposals_per_image.set(trg_name, trg_value[sampled_targets])
-            # If no GT is given in the image, we don't know what a dummy gt value can be.
-            # Therefore the returned proposals won't have any gt_* fields, except for a
-            # gt_classes full of background label.
-
-            num_bg_samples.append((gt_classes == self.num_classes).sum().item())
-            num_fg_samples.append(gt_classes.numel() - num_bg_samples[-1])
-            proposals_with_gt.append(proposals_per_image)
-
-        # Log the number of fg/bg samples that are selected for training ROI heads
-        storage = get_event_storage()
-        storage.put_scalar("roi_head/num_fg_samples", np.mean(num_fg_samples))
-        storage.put_scalar("roi_head/num_bg_samples", np.mean(num_bg_samples))
-
-        return proposals_with_gt
-
+    
     def forward_with_given_boxes(
         self, sam: nn.Module, img_features: torch.Tensor, features: Dict[str, torch.Tensor], instances: List[Instances],
-        clip:nn.Module, clip_images: torch.Tensor, clip_texts: torch.Tensor, context_former_pe:nn.Module=None
+        clip_images: torch.Tensor, clip_texts: torch.Tensor
         ) -> List[Instances]:
       
         assert not self.training

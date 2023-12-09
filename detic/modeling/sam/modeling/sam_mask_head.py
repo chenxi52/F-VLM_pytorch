@@ -34,7 +34,6 @@ class samMaskHead(BaseMaskRCNNHead):
             mask_loss_weight: float=1.0,
             vis_period: int = 0,
             clip_type: str = 'CLIP_400M_Large',
-            d_model: int=1024,
             score_thresh: float=0.02,
             top_per_instance: int=100,
             test_nms_thresh: float=0.5,
@@ -156,11 +155,7 @@ class samMaskHead(BaseMaskRCNNHead):
         Args:
             roi_feature: features after maskroi, multi-level---> roi box
             features: features from image encoder
-            instances: Instances(num_instances=1, image_height=1024, image_width=664,
-                fields=[proposal_boxes: Boxes(tensor([[214.0800, 907.2640, 235.6640, 963.2800]], device='cuda:0')), 
-                objectness_logits: tensor([23.0259], device='cuda:0'), gt_classes: tensor([0], device='cuda:0'), 
-                gt_boxes: Boxes(tensor([[214.0800, 907.2640, 235.6640, 963.2800]], device='cuda:0')), 
-                gt_masks: PolygonMasks(num_instances=1)])
+            instances: 
             clip: clip model
             clip_images: vit-B/16: 512
             clip_texts: cit-B/16: 512
@@ -345,21 +340,6 @@ class samMaskHead(BaseMaskRCNNHead):
         extracting only the masks for the predicted classes in pred_instances. For each
         predicted box, the mask of the same class is attached to the instance by adding a
         new "pred_masks" field to pred_instances.
-
-        Args:
-            pred_mask_logits (Tensor): A tensor of shape (B, C, Hmask, Wmask) or (B, 1, Hmask, Wmask)
-                for class-specific or class-agnostic, where B is the total number of predicted masks
-                in all images, C is the number of foreground classes, and Hmask, Wmask are the height
-                and width of the mask predictions. The values are logits.
-            pred_instances (list[Instances]): A list of N Instances, where N is the number of images
-                in the batch. Each Instances must have field "pred_classes".
-
-        Returns:
-            None. pred_instances will contain an extra "pred_masks" field storing a mask of size (Hmask,
-                Wmask) for predicted class. Note that the masks are returned as a soft (non-quantized)
-                masks the resolution predicted by the network; post-processing steps, such as resizing
-                the predicted masks to the original image resolution and/or binarizing them, is left
-                to the caller.
         """
         cls_agnostic_mask = pred_mask_logits.size(1) == 1
 
@@ -419,39 +399,7 @@ class samMaskHead(BaseMaskRCNNHead):
             new_instance.pred_classes = filter_inds[:,1]
             new_instance.pred_masks = masks[filter_inds[:,0]]
             instance_list.append(new_instance)
-        # instance_list,_ = select_foreground_proposals(instance_list, bg_label=self.data_classes)
         return instance_list
-    
-def select_foreground_predictions(
-    proposals: List[Instances], bg_label: int
-) -> Tuple[List[Instances], List[torch.Tensor]]:
-    """
-    Given a list of N Instances (for N images), each containing a `gt_classes` field,
-    return a list of Instances that contain only instances with `gt_classes != -1 &&
-    gt_classes != bg_label`.
-
-    Args:
-        proposals (list[Instances]): A list of N Instances, where N is the number of
-            images in the batch.
-        bg_label: label index of background class.
-
-    Returns:
-        list[Instances]: N Instances, each contains only the selected foreground instances.
-        list[Tensor]: N boolean vector, correspond to the selection mask of
-            each Instances object. True for selected instances.
-    """
-    assert isinstance(proposals, (list, tuple))
-    assert isinstance(proposals[0], Instances)
-    fg_proposals = []
-    fg_selection_masks = []
-    for proposals_per_image in proposals:
-        gt_classes = proposals_per_image.gt_classes
-        fg_selection_mask = (gt_classes != -1) & (gt_classes != bg_label)
-        fg_idxs = fg_selection_mask.nonzero().squeeze(1)
-        fg_proposals.append(proposals_per_image[fg_idxs])
-        fg_selection_masks.append(fg_selection_mask)
-    return fg_proposals, fg_selection_masks
-
 
 def dice_loss(pred,
             target,
