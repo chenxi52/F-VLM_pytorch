@@ -5,7 +5,7 @@ import torch
 from torch import nn
 from detectron2.config import configurable
 from detectron2.modeling import build_roi_heads, ROI_HEADS_REGISTRY, StandardROIHeads
-from detectron2.modeling.roi_heads import select_foreground_proposals
+from detectron2.modeling.roi_heads import select_foreground_proposals, ROIHeads
 from detectron2.structures import Instances, ImageList, pairwise_iou, BitMasks, Boxes
 from detectron2.modeling.matcher import Matcher
 from detic.modeling.roi_heads.sam_fast_rcnn import SamRCNNOutputLayers
@@ -52,7 +52,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         # super().from_config and _init_box_head, _init_mask_head
         _init_box_head has in_features, 
         """
-        ret = super().from_config(cfg)
+        ret = ROIHeads.from_config(cfg)
         ret["train_on_pred_boxes"] = cfg.MODEL.ROI_BOX_HEAD.TRAIN_ON_PRED_BOXES
         if inspect.ismethod(cls._init_box_head):
             ret.update(cls._init_box_head(cfg, input_shape))
@@ -75,7 +75,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
     @classmethod
     def _init_box_head(cls, cfg, input_shape):
         ret = super()._init_box_head(cfg, input_shape)
-        box_head = ret[box_head]
+        box_head = ret["box_head"]
         #update the rcnn output layer
         ret.update(box_predictor = SamRCNNOutputLayers(cfg, box_head.output_shape))
         ################

@@ -268,6 +268,7 @@ class SamOpenDetector(SamDetector):
             return results
         
     def extract_feat(self, batched_inputs, resized_images):
+        # preprocess: padding
         batched_inputs = [self.sam.image_encoder.preprocess(x) for x in batched_inputs.tensor]
         batched_inputs = torch.stack(batched_inputs,dim=0)
         with torch.no_grad():
@@ -299,9 +300,9 @@ class SamOpenDetector(SamDetector):
             return self.inference(batched_inputs, do_postprocess=self.do_postprocess)
         # batched_inputs have longes_side=1024, and prepocess need the shortest_side%32==0
         # images.size() is origin image size
-        # preprocess are normalized
-        resized_images = self.resize_norm_long_padding(batched_inputs, self.clip_train_size)
-        images = self.preprocess_image(batched_inputs)
+        images = [self._move_to_current_device(x["image"]) for x in batched_inputs]
+        resized_images = self.resize_norm_long_padding(images, self.clip_train_size)
+        images = self.preprocess_image(images)
         gt_instances = [x["instances"].to(self.device) for x in batched_inputs] #instance have img_Size with longest-size = 1024
         
         img_embedding_feat, inter_feats, clip_feats = self.extract_feat(images, resized_images) 
@@ -330,16 +331,16 @@ class SamOpenDetector(SamDetector):
         del resized_images, img_embedding_feat, fpn_features, proposals, gt_instances, clip_feats
         return losses
             
-    def resize_norm(self, batched_inputs, target_size=(224, 224)):
-        # Convert the numpy image to a torch tensor and ensure it is in CxHxW format
-        images = [self._move_to_current_device((x["image"]/255.).to(torch.float)) for x in batched_inputs]
-        if self.clip_type == 'ViT-B/16':
-            resized_images = [F.interpolate(x.unsqueeze(0), size=(224,224), mode='bilinear', align_corners=False).squeeze(1) for x in images]
-        # Apply normalization
-        elif self.clip_type == 'RN50':
-            resized_images = [F.interpolate(x.unsqueeze(0), size=(self.clip_train_size,self.clip_train_size), mode='bilinear', align_corners=False).squeeze(1) for x in images]
-        resized_images = [(x - self.clip_pixel_mean) / self.clip_pixel_std for x in resized_images]
-        return torch.cat(resized_images,dim=0)
+    # def resize_norm(self, batched_inputs, target_size=(224, 224)):
+    #     # Convert the numpy image to a torch tensor and ensure it is in CxHxW format
+    #     images = [self._move_to_current_device((x["image"]/255.).to(torch.float)) for x in batched_inputs]
+    #     if self.clip_type == 'ViT-B/16':
+    #         resized_images = [F.interpolate(x.unsqueeze(0), size=(224,224), mode='bilinear', align_corners=False).squeeze(1) for x in images]
+    #     # Apply normalization
+    #     elif self.clip_type == 'RN50':
+    #         resized_images = [F.interpolate(x.unsqueeze(0), size=(self.clip_train_size,self.clip_train_size), mode='bilinear', align_corners=False).squeeze(1) for x in images]
+    #     resized_images = [(x - self.clip_pixel_mean) / self.clip_pixel_std for x in resized_images]
+    #     return torch.cat(resized_images,dim=0)
     
     def resize_longest_image_size(self, input_image_size, longest_side: int):
         input_image_size = input_image_size.to(torch.float32)
@@ -348,19 +349,31 @@ class SamOpenDetector(SamDetector):
         transformed_size = torch.floor(transformed_size + 0.5).to(torch.int64)
         return tuple(transformed_size.tolist())
     
-    def resize_norm_long_padding(self, batched_inputs, long_size=224):
+    def resize_norm_long_padding(self, images, long_size=224):
         # Convert the numpy image to a torch tensor and ensure it is in CxHxW format
-        images = [self._move_to_current_device((x["image"].clone().detach()/255.).to(torch.float)) for x in batched_inputs]
         image_shapes = [self.resize_longest_image_size(torch.tensor(x.shape[-2:],device=x.device), long_size) for x in images]
+        images = [x.to(torch.float) for x in images]
         if self.clip_type == 'ViT-B/16':
             resized_images = [F.interpolate(x.unsqueeze(0), size=image_shapes[i], mode='bilinear', align_corners=False).squeeze(1) for i,x in enumerate(images)]
         # Apply normalization
         elif self.clip_type == 'RN50':
             resized_images = [F.interpolate(x.unsqueeze(0), size=(self.clip_train_size,self.clip_train_size), mode='bilinear', align_corners=False).squeeze(1) for x in images]
-
-        resized_images = [(x - self.clip_pixel_mean) / self.clip_pixel_std for x in resized_images]
+        
+        resized_images = [(x/255. - self.clip_pixel_mean) / self.clip_pixel_std for x in resized_images]
         resized_images = [self.padding(x, self.clip_train_size) for x in resized_images]
-        return torch.cat(resized_images,dim=0)
+        return torch.cat(resized_images, dim=0)
+    
+    def preprocess_image(self, images: List[Dict[str, torch.Tensor]]):
+        """
+        Normalize, pad and batch the input images.
+        """
+        images = [(x - self.pixel_mean) / self.pixel_std for x in images]
+        images = ImageList.from_tensors(
+            images,
+            self.backbone.size_divisibility,
+            padding_constraints=self.backbone.padding_constraints,
+        )
+        return images
     
     @torch.no_grad()
     def get_custom_text_feat(self, class_names):
