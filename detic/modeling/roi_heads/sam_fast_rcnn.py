@@ -108,10 +108,6 @@ class SamRCNNOutputLayers(FastRCNNOutputLayers):
         if len(proposals):
             proposal_boxes = cat([p.proposal_boxes.tensor for p in proposals], dim=0)  # Nx4
             assert not proposal_boxes.requires_grad, "Proposals should not require gradients!"
-            # If "gt_boxes" does not exist, the proposals must be all negative and
-            # should not be included in regression loss computation.
-            # Here we just use proposal_boxes as an arbitrary placeholder because its
-            # value won't be used in self.box_reg_loss().
             gt_boxes = cat(
                 [(p.gt_boxes if p.has("gt_boxes") else p.proposal_boxes).tensor for p in proposals],
                 dim=0,

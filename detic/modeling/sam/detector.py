@@ -270,17 +270,17 @@ class SamOpenDetector(SamDetector):
     def extract_feat(self, batched_inputs, resized_images):
         batched_inputs = [self.sam.image_encoder.preprocess(x) for x in batched_inputs.tensor]
         batched_inputs = torch.stack(batched_inputs,dim=0)
-        if 'det' in self.backbone_name:
-            feat,inter_features = self.sam.image_encoder(batched_inputs)
-            inter_features = feat
-        else:
-            # tiny image encoder are not implemented now
-            feat, inter_features = self.sam.image_encoder(batched_inputs)
         with torch.no_grad():
+            if 'det' in self.backbone_name:
+                feat,inter_features = self.sam.image_encoder(batched_inputs)
+                inter_features = feat
+            else:
+                # tiny image encoder are not implemented now
+                feat, inter_features = self.sam.image_encoder(batched_inputs)
             clip_feat = self.clip.encode_image_feature(resized_images)
-        if 'RN' in self.clip_type:
-            assert False, 'not implemented'
-            clip_feat = clip_feat.permute(1, 0, 2)
+            if 'RN' in self.clip_type:
+                assert False, 'not implemented'
+                clip_feat = clip_feat.permute(1, 0, 2)
         # feat: Tensor[bz, 256, 64, 64]  inter_feats: List[32*Tensor[bz,64,64,1280]]
         # rn_50 clip: [bz, img_dim, c]
         return feat, inter_features, clip_feat
@@ -327,6 +327,7 @@ class SamOpenDetector(SamDetector):
         losses = {}
         losses.update(detector_losses)
         losses.update(proposal_losses)
+        del resized_images, img_embedding_feat, fpn_features, proposals, gt_instances, clip_feats
         return losses
             
     def resize_norm(self, batched_inputs, target_size=(224, 224)):
@@ -413,6 +414,7 @@ class SamOpenDetector(SamDetector):
             # cv2.imwrite(pg_name, vis_img)
             storage.put_image(vis_name, vis_img)
             break  # only visualize one image in a batch
+        del img, v_gt, anno_img, v_pred, prop_img, vis_img
         
 def custom_detector_postprocess(
     results: Instances, output_height: int, output_width: int, mask_threshold: float = 0.5

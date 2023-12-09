@@ -198,9 +198,9 @@ class build_contextformer(nn.Module):
             q = self.ln_mask(self.q_proj(mask_token))
         else:
             q = self.q_proj(mask_token)
-        mask_text = self.decoder1(q, kv)
+        # mask_text = self.decoder1(q, kv)
 
-        mask_img = self.decoder2(mask_text, visual_tokens)
+        mask_img = self.decoder2(q, visual_tokens)
         return self.get_logits(mask_img.squeeze(), clip_txt)
 
     def get_logits(self, image, text):

@@ -46,6 +46,7 @@ class samMaskHead(BaseMaskRCNNHead):
             fed_loss_freq_weight: float=0.5,
             use_fed_loss: bool=False,
             fed_loss_num_cat: int=50,
+            mask_thr_binary: float=0.5,
             ) -> None:
         super().__init__()
         if with_sincos:
@@ -108,6 +109,7 @@ class samMaskHead(BaseMaskRCNNHead):
             self.register_buffer('freq_weight', freq_weight)
         self.use_fed_loss = use_fed_loss
         self.fed_loss_num_cat = fed_loss_num_cat
+        self.mask_thr_binary = mask_thr_binary
             
     @classmethod
     def from_config(cls, cfg, input_shape):
@@ -140,6 +142,7 @@ class samMaskHead(BaseMaskRCNNHead):
                 'fed_loss_freq_weight': cfg.MODEL.ROI_BOX_HEAD.FED_LOSS_FREQ_WEIGHT,
                 'use_fed_loss': cfg.MODEL.ROI_BOX_HEAD.USE_FED_LOSS,
                 'fed_loss_num_cat': cfg.MODEL.NUM_SAMPLE_CATS,
+                'mask_thr_binary': cfg.TEST.MASK_THR_BINARY
                 }
     
     def forward(
@@ -186,7 +189,7 @@ class samMaskHead(BaseMaskRCNNHead):
         img_pe = sam.prompt_encoder.get_dense_pe()
         img_pe = repeat(img_pe, 'b c h w -> (b n) c h w', n=img_embeddings.shape[0])
         # select foreGround proposals first will save computation here.
-        low_res_masks, iou_preds, mask_tokens = sam.mask_decoder.forward_batch(
+        low_res_masks, mask_tokens = sam.mask_decoder.forward_batch(
             image_embeddings=img_embeddings,
             image_pe=img_pe,
             sparse_prompt_embeddings=point_emd,
@@ -208,7 +211,7 @@ class samMaskHead(BaseMaskRCNNHead):
             target_classes_onehot.scatter_(1, gt_classes.unsqueeze(-1), 1)
             # what if the classification not include background. The classification will not be interupted?
             loss ={"loss_mask": self.custom_mask_rcnn_loss(low_res_masks, instances, self.vis_period) * self.loss_weight,
-                   "loss_cls": self.sigmoid_focal_loss(logits_image, target_classes_onehot,gt_classes)}
+                   "loss_cls": self.sigmoid_focal_loss(logits_image, target_classes_onehot, gt_classes)}
             del instances, low_res_masks, logits_image, mask_tokens, clip_img_embeddings, img_embeddings
             return loss
         else:
@@ -311,11 +314,14 @@ class samMaskHead(BaseMaskRCNNHead):
         storage.put_scalar("mask_rcnn/false_negative", false_negative)
         if vis_period > 0 and storage.iter % vis_period == 0:
             pred_masks = pred_mask_logits.sigmoid()
-            vis_masks = torch.cat([pred_masks, gt_masks], axis=2)
-            name = "Left: mask prediction;   Right: mask GT"
+            pred_masks_thre = pred_masks > self.mask_thr_binary
+            vis_masks = torch.cat([pred_masks, pred_masks_thre, gt_masks], axis=2)
+            name = "Left: mask prediction;   Middle: thre0.5 ;Right: mask GT"
             for idx, vis_mask in enumerate(vis_masks):
                 vis_mask = torch.stack([vis_mask] * 3, axis=0)
-                storage.put_image(name + f" ({idx})", vis_mask)
+                storage.put_image(name, vis_mask)
+                break
+            del vis_masks, pred_masks, pred_masks_thre
 
         if self.mask_loss_type == 'ce':
             mask_loss = F.binary_cross_entropy_with_logits(pred_mask_logits, gt_masks, reduction="mean")
@@ -341,25 +347,6 @@ class samMaskHead(BaseMaskRCNNHead):
     def custom_mask_rcnn_inference(self, pred_mask_logits: torch.Tensor, pred_instances: List[Instances], logits_image: torch.Tensor,
                                 score_thresh: float, top_per_instance: int = 100, nms_thresh: float = 0.5):
         """
-        Convert pred_mask_logits to estimated foreground probability masks while also
-        extracting only the masks for the predicted classes in pred_instances. For each
-        predicted box, the mask of the same class is attached to the instance by adding a
-        new "pred_masks" field to pred_instances.
-
-        Args:
-            pred_mask_logits (Tensor): A tensor of shape (B, C, Hmask, Wmask) or (B, 1, Hmask, Wmask)
-                for class-specific or class-agnostic, where B is the total number of predicted masks
-                in all images, C is the number of foreground classes, and Hmask, Wmask are the height
-                and width of the mask predictions. The values are logits.
-            pred_instances (list[Instances]): A list of N Instances, where N is the number of images
-                in the batch. Each Instances must have field "pred_classes".
-
-        Returns:
-            None. pred_instances will contain an extra "pred_masks" field storing a mask of size (Hmask,
-                Wmask) for predicted class. Note that the masks are returned as a soft (non-quantized)
-                masks the resolution predicted by the network; post-processing steps, such as resizing
-                the predicted masks to the original image resolution and/or binarizing them, is left
-                to the caller.
         """
         cls_agnostic_mask = pred_mask_logits.size(1) == 1
 
@@ -419,22 +406,12 @@ class samMaskHead(BaseMaskRCNNHead):
             new_instance.pred_classes = filter_inds[:,1]
             new_instance.pred_masks = masks[filter_inds[:,0]]
             instance_list.append(new_instance)
-        # instance_list,_ = select_foreground_proposals(instance_list, bg_label=self.data_classes)
         return instance_list
     
 def select_foreground_predictions(
     proposals: List[Instances], bg_label: int
 ) -> Tuple[List[Instances], List[torch.Tensor]]:
     """
-    Given a list of N Instances (for N images), each containing a `gt_classes` field,
-    return a list of Instances that contain only instances with `gt_classes != -1 &&
-    gt_classes != bg_label`.
-
-    Args:
-        proposals (list[Instances]): A list of N Instances, where N is the number of
-            images in the batch.
-        bg_label: label index of background class.
-
     Returns:
         list[Instances]: N Instances, each contains only the selected foreground instances.
         list[Tensor]: N boolean vector, correspond to the selection mask of

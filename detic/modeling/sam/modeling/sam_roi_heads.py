@@ -105,8 +105,8 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
 
 
     def _forward_mask(self, sam: nn.Module,  img_features: torch.Tensor,features: Dict[str, torch.Tensor],
-                      instances: List[Instances], clip:nn.Module, clip_images: torch.Tensor, clip_texts: torch.Tensor,
-                      context_former_pe:nn.Module=None):
+                      instances: List[Instances], clip_images: torch.Tensor, clip_texts: torch.Tensor,
+                      ):
         """
         Forward logic of the mask prediction branch.
         Args:
@@ -137,7 +137,8 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
                 return results_instances
         else:
             features = [features[f] for f in self.mask_in_features]
-        return self.mask_head(features, img_features, instances, sam, clip, clip_images, clip_texts, context_former_pe)
+        del boxes
+        return self.mask_head(features, img_features, instances, sam, clip_images, clip_texts)
 
 
     def forward( 
@@ -170,7 +171,6 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             proposals = self.label_and_sample_proposals(proposals, targets)
         del targets
         # pe map
-        # confusing
         x = [item[1] for item in list(features.items())]
         bs, _, h, w = x[-1].shape #
         mask_pe = torch.zeros((bs, h, w), device=x[0].device, dtype=torch.bool)
@@ -187,13 +187,11 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             # heads. But when `self.train_on_pred_boxes is True`, proposals will contain boxes
             # predicted by the box head. proposal_boxes are replaced by boxes predicted by box_head
             losses.update(self._forward_mask(sam, img_features, x, proposals, clip_images, clip_texts))
-            # self._forward_mask(sam, img_features, x, proposals)
 
             return proposals, losses
         else:
             # dscard the nms from fast_rcnn
             pred_instances = self._forward_box(x, proposals)
-            # pred_boxes = Boxes(boxes)   result.scores = scores  pred_classes
             # During inference cascaded prediction is used: the mask and keypoints heads are only
             # applied to the top scoring box detections.
             pred_instances = self.forward_with_given_boxes(sam, img_features, x, pred_instances, clip_images, clip_texts)

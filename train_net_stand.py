@@ -82,7 +82,7 @@ def do_test(cfg, model):
 
 def do_train(cfg, model, resume=False):
     # set_model_mode(model)
-    model.train()
+    # model.train()
     if cfg.SOLVER.USE_CUSTOM_SOLVER:
         # also set requires_grad for module
         optimizer = build_sam_optimizer(cfg, model, logger)
@@ -131,7 +131,7 @@ def do_train(cfg, model, resume=False):
                 cfg, True, augmentations=build_custom_augmentation(cfg, True))
     #####
     
-    data_loader = build_detection_train_loader(cfg, mapper=mapper, pin_memory=True)
+    data_loader = build_detection_train_loader(cfg, mapper=mapper)
     if cfg.FP16:
         scaler = GradScaler()
     logger.info("Starting training from iteration {}".format(start_iter))
@@ -191,7 +191,6 @@ def set_model_mode(model):
     # 如果模型是 DDP 模型，获取其内部的原始模型
     if isinstance(model, nn.parallel.DistributedDataParallel):
         model = model.module
-
     model.sam.eval()
 
 def setup(args):
