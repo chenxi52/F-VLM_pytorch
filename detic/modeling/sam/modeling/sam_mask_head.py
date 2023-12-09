@@ -45,6 +45,7 @@ class samMaskHead(BaseMaskRCNNHead):
             fed_loss_freq_weight: float=0.5,
             use_fed_loss: bool=False,
             fed_loss_num_cat: int=50,
+            mask_thr_binary: float=0.5,
             ) -> None:
         super().__init__()
         if with_sincos:
@@ -107,6 +108,7 @@ class samMaskHead(BaseMaskRCNNHead):
             self.register_buffer('freq_weight', freq_weight)
         self.use_fed_loss = use_fed_loss
         self.fed_loss_num_cat = fed_loss_num_cat
+        self.mask_thr_binary = mask_thr_binary
             
     @classmethod
     def from_config(cls, cfg, input_shape):
@@ -139,6 +141,7 @@ class samMaskHead(BaseMaskRCNNHead):
                 'fed_loss_freq_weight': cfg.MODEL.ROI_BOX_HEAD.FED_LOSS_FREQ_WEIGHT,
                 'use_fed_loss': cfg.MODEL.ROI_BOX_HEAD.USE_FED_LOSS,
                 'fed_loss_num_cat': cfg.MODEL.NUM_SAMPLE_CATS,
+                'mask_thr_binary': cfg.TEST.MASK_THR_BINARY
                 }
     
     def forward(
@@ -181,7 +184,7 @@ class samMaskHead(BaseMaskRCNNHead):
         img_pe = sam.prompt_encoder.get_dense_pe()
         img_pe = repeat(img_pe, 'b c h w -> (b n) c h w', n=img_embeddings.shape[0])
         # select foreGround proposals first will save computation here.
-        low_res_masks, iou_preds, mask_tokens = sam.mask_decoder.forward_batch(
+        low_res_masks, mask_tokens = sam.mask_decoder.forward_batch(
             image_embeddings=img_embeddings,
             image_pe=img_pe,
             sparse_prompt_embeddings=point_emd,
@@ -203,7 +206,7 @@ class samMaskHead(BaseMaskRCNNHead):
             target_classes_onehot.scatter_(1, gt_classes.unsqueeze(-1), 1)
             # what if the classification not include background. The classification will not be interupted?
             loss ={"loss_mask": self.custom_mask_rcnn_loss(low_res_masks, instances, self.vis_period) * self.loss_weight,
-                   "loss_cls": self.sigmoid_focal_loss(logits_image, target_classes_onehot,gt_classes)}
+                   "loss_cls": self.sigmoid_focal_loss(logits_image, target_classes_onehot, gt_classes)}
             del instances, low_res_masks, logits_image, mask_tokens, clip_img_embeddings, img_embeddings
             return loss
         else:
@@ -306,11 +309,14 @@ class samMaskHead(BaseMaskRCNNHead):
         storage.put_scalar("mask_rcnn/false_negative", false_negative)
         if vis_period > 0 and storage.iter % vis_period == 0:
             pred_masks = pred_mask_logits.sigmoid()
-            vis_masks = torch.cat([pred_masks, gt_masks], axis=2)
-            name = "Left: mask prediction;   Right: mask GT"
+            pred_masks_thre = pred_masks > self.mask_thr_binary
+            vis_masks = torch.cat([pred_masks, pred_masks_thre, gt_masks], axis=2)
+            name = "Left: mask prediction;   Middle: thre0.5 ;Right: mask GT"
             for idx, vis_mask in enumerate(vis_masks):
                 vis_mask = torch.stack([vis_mask] * 3, axis=0)
-                storage.put_image(name + f" ({idx})", vis_mask)
+                storage.put_image(name, vis_mask)
+                break
+            del vis_masks, pred_masks, pred_masks_thre
 
         if self.mask_loss_type == 'ce':
             mask_loss = F.binary_cross_entropy_with_logits(pred_mask_logits, gt_masks, reduction="mean")
@@ -400,6 +406,7 @@ class samMaskHead(BaseMaskRCNNHead):
             new_instance.pred_masks = masks[filter_inds[:,0]]
             instance_list.append(new_instance)
         return instance_list
+
 
 def dice_loss(pred,
             target,

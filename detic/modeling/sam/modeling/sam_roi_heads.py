@@ -114,6 +114,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
                 return results_instances
         else:
             features = [features[f] for f in self.mask_in_features]
+        del boxes
         return self.mask_head(features, img_features, instances, sam, clip_images, clip_texts)
 
 
@@ -165,7 +166,6 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         else:
             # dscard the nms from fast_rcnn
             pred_instances = self._forward_box(x, proposals)
-            # pred_boxes = Boxes(boxes)   result.scores = scores  pred_classes
             # During inference cascaded prediction is used: the mask and keypoints heads are only
             # applied to the top scoring box detections.
             pred_instances = self.forward_with_given_boxes(sam, img_features, x, pred_instances, clip_images, clip_texts)

@@ -14,6 +14,10 @@ MODEL:
     BATCH_SIZE_PER_IMAGE: 256
   ROI_HEADS:
     BATCH_SIZE_PER_IMAGE: 64
+<<<<<<< HEAD
+=======
+    POSITIVE_FRACTION: 0.25
+>>>>>>> 886db2c0a75e7cd7c4e318de949a7e68933ed63d
   ROI_BOX_HEAD:
     BBOX_REG_WEIGHTS: (10.0, 10.0, 5.0, 5.0)
     IGNORE_ZERO_CATS: True # freq_weight for lvis
