@@ -173,12 +173,13 @@ class build_contextformer(nn.Module):
                                             return_intermediate=return_intermediate_dec)
         self.decoder2 = TransformerDecoder(attenLayer2, num_decoder_layers, decoder_norm2,
                                             return_intermediate=return_intermediate_dec)
-        self.q_proj = nn.Linear(mask_dim, d_model)# for mask_token
-        self.kv_proj = nn.Linear(2*clip_txt_dim, d_model)# for k,v
+        self.q_proj = nn.Linear(mask_dim, d_model) # for mask_token
+        self.kv_proj = nn.Linear(2*clip_txt_dim, d_model) # for k,v
         self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
         self.use_ln = use_ln
         if use_ln:
             self.ln_mask = nn.LayerNorm(d_model)
+        self.dropout = nn.Dropout()
 
     def get_qs(self, q, cls):
         # concat[cls*txt,txt]
@@ -206,6 +207,7 @@ class build_contextformer(nn.Module):
     def get_logits(self, image, text):
         image = image/image.norm(dim=-1, keepdim=True)
         text = text/text.norm(dim=-1, keepdim=True)
+    
         logit_scale = self.logit_scale.exp()
         mask_cls_img = logit_scale * image @ text.t()
         mask_cls_txt = mask_cls_img.t()

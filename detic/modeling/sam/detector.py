@@ -12,13 +12,14 @@ from detectron2.modeling.meta_arch.build import META_ARCH_REGISTRY
 from detectron2.modeling.meta_arch.rcnn import GeneralizedRCNN
 from detectron2.utils.visualizer import Visualizer
 from detectron2.data.detection_utils import convert_image_to_rgb
-from detectron2.modeling import build_backbone, build_proposal_generator, build_roi_heads, build_mask_head
+from detectron2.modeling import build_backbone, build_proposal_generator, build_roi_heads
 from detic.modeling.sam import sam_model_registry
 import torch.nn.functional as F
-from detectron2.modeling.roi_heads.mask_head import mask_rcnn_loss
 from detic.modeling.clip import clip
 from detic.prompt_engineering import get_prompt_templates
 from detic import constants
+from torch.cuda.amp import autocast
+
 
 @META_ARCH_REGISTRY.register()
 class SamOpenDetector(GeneralizedRCNN):
@@ -105,8 +106,6 @@ class SamOpenDetector(GeneralizedRCNN):
         ):
         assert not self.training
         assert detected_instances is None
-        # normalize images
-        # batched_inputs is a dict
         resized_images = self.resize_norm_long_padding(batched_inputs, self.clip_train_size)
         images = self.preprocess_image(batched_inputs)
         img_embedding_feat, inter_feats, clip_images = self.extract_feat(images, resized_images)
@@ -129,14 +128,16 @@ class SamOpenDetector(GeneralizedRCNN):
         images = [self.sam.image_encoder.preprocess(x) for x in images.tensor]
         images = torch.stack(images,dim=0)
         if self.fp16: 
-            feat, inter_features = self.sam.image_encoder(images.half())
+            with autocast():
+                feat, inter_features = self.sam.image_encoder(images.half())
         else:
             feat,inter_features = self.sam.image_encoder(images.float())
         if 'det' in self.backbone_name:
             # as VitDet
             inter_features = feat
         if self.fp16:
-            clip_feat = self.clip.encode_image_feature(resized_images.half())
+            with autocast():
+                clip_feat = self.clip.encode_image_feature(resized_images.half())
         else:
             clip_feat = self.clip.encode_image_feature(resized_images.float())
         if 'RN' in self.clip_type:
@@ -184,7 +185,6 @@ class SamOpenDetector(GeneralizedRCNN):
         losses = {}
         losses.update(detector_losses)
         losses.update(proposal_losses)
-        del resized_images, img_embedding_feat, fpn_features, proposals, gt_instances, clip_feats
         return losses
             
     def resize_longest_image_size(self, input_image_size, longest_side: int):
@@ -220,17 +220,16 @@ class SamOpenDetector(GeneralizedRCNN):
             padding_constraints=self.backbone.padding_constraints,
         )
         return images
+    
     def postprocess(self, pred_instances, batched_inputs: List[Dict[str, torch.Tensor]], mask_threshold:float):
         """
         Rescale the output instances to the target size.
         image_sizes should be the origin size of images
         """
-        # note: private function; subject to changes
         processed_results = []
         for results_per_image, input_per_image in zip(
             pred_instances, batched_inputs
         ):
-            # height, width: input_image_sizes， 原本的 img_size
             height = input_per_image.get("height")
             width = input_per_image.get("width")
             r = custom_detector_postprocess(results_per_image, height, width, mask_threshold=mask_threshold)
@@ -288,9 +287,8 @@ class SamOpenDetector(GeneralizedRCNN):
             # cv2.imwrite(pg_name, vis_img)
             storage.put_image(vis_name, vis_img)
             break  # only visualize one image in a batch
-        del img, v_gt, anno_img, v_pred, prop_img, vis_img
         
-
+@torch.jit.unused
 def custom_detector_postprocess(
     results: Instances, output_height: int, output_width: int, mask_threshold: float = 0.5
 ):

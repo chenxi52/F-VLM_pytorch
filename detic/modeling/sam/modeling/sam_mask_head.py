@@ -16,6 +16,8 @@ from fvcore.nn import sigmoid_focal_loss_jit
 from detic.modeling.utils import load_class_freq, get_fed_loss_inds
 import fvcore.nn.weight_init as weight_init
 from detectron2.modeling.roi_heads.mask_head import mask_rcnn_loss
+from torch.cuda.amp import autocast
+
 # add classification with clip text
 @ROI_MASK_HEAD_REGISTRY.register()
 class samMaskHead(BaseMaskRCNNHead):
@@ -24,14 +26,28 @@ class samMaskHead(BaseMaskRCNNHead):
             self,
             vis_period: int = 0,
             with_sincos: bool = False,
+            per_query_point: int = 4,
+            clip_type: str = 'ViT-B/16',
+            ignore_zero_cats: bool = False,
+            cat_freq_path: str = '',
+            fed_loss_freq_weight: float = 0.0,
             **kwargs
             ) -> None:
         super().__init__(vis_period=vis_period)
-        self._init(locals())
+        for name, value in locals().items():
+            if name == 'self':
+                continue
+            elif name == 'kwargs':
+                for kw_name, kw_value in value.items():
+                    setattr(self, kw_name, kw_value)
+            else:
+                setattr(self, name, value)
+
         if with_sincos:
             sincos = 2
         else:
             sincos = 1
+
         # Prompt encoder
         point_emb = nn.Sequential(
             nn.Conv2d(256, 256, 3, stride=2, padding=1),
@@ -42,19 +58,19 @@ class samMaskHead(BaseMaskRCNNHead):
             nn.ReLU(inplace=True),
             nn.Linear(256, 256),
             nn.ReLU(inplace=True),
-            nn.Linear(256, 256*sincos*self.per_query_point)
+            nn.Linear(256, 256*sincos*per_query_point)
         )
         self.point_emb = point_emb
 
-        if self.clip_type == 'ViT-B/16':
+        if clip_type == 'ViT-B/16':
             self.text_dim = 512
             self.emb_dim = 768
             self.down_dim = self.emb_dim
-        elif self.clip_type == 'RN50':
+        elif clip_type == 'RN50':
             self.text_dim = 1024
             self.emb_dim = 2048
             self.down_dim = self.emb_dim
-        elif self.clip_type == 'RN50x64':
+        elif clip_type == 'RN50x64':
             self.text_dim = 1024
             self.emb_dim = 4096
             self.down_dim = self.emb_dim
@@ -70,8 +86,9 @@ class samMaskHead(BaseMaskRCNNHead):
             elif type(m) == nn.Conv2d:
                 weight_init.c2_msra_fill(m)
         self.point_emb.apply(init_weights)
-        if self.ignore_zero_cats:
-            freq_weight = load_class_freq(self.cat_freq_path, self.fed_loss_freq_weight)
+        self.contextformer.apply(init_weights)
+        if ignore_zero_cats:
+            freq_weight = load_class_freq(cat_freq_path, fed_loss_freq_weight)
             self.register_buffer('freq_weight', freq_weight)
 
     @classmethod
@@ -141,19 +158,20 @@ class samMaskHead(BaseMaskRCNNHead):
         img_pe = sam.prompt_encoder.get_dense_pe()
         img_pe = repeat(img_pe, 'b c h w -> (b n) c h w', n=img_embeddings.shape[0])
         # select foreGround proposals first will save computation here.
-        low_res_masks, mask_tokens = sam.mask_decoder.forward_batch(
-            image_embeddings=img_embeddings,
-            image_pe=img_pe,
-            sparse_prompt_embeddings=point_emd,
-            dense_prompt_embeddings=nomask_dense_embeddings,
-            multimask_output=False,
-        )
-        clip_texts = move_device_like(clip_texts, low_res_masks)
-        logits_image,_ = self.contextformer(mask_tokens, clip_img_embeddings, clip_texts)#mask_tokens: (batch_size, 1, self.emb_dim),clip: [bz,self.emb_dim, 32,32]
+
+        with autocast():
+            low_res_masks, mask_tokens = sam.mask_decoder.forward_batch(
+                image_embeddings=img_embeddings,
+                image_pe=img_pe,
+                sparse_prompt_embeddings=point_emd,
+                dense_prompt_embeddings=nomask_dense_embeddings,
+                multimask_output=False,
+            )
+            logits_image,_ = self.contextformer(mask_tokens, clip_img_embeddings, clip_texts)#mask_tokens: (batch_size, 1, self.emb_dim),clip: [bz,self.emb_dim, 32,32]
         low_res_masks = torch.nn.functional.interpolate(low_res_masks, size=(self.train_size, self.train_size), mode='bilinear', align_corners=False)
         if self.training:
             gt_classes = (
-                cat([p.gt_classes for p in instances], dim=0) if len(instances) else torch.empty(0)
+                cat([p.gt_classes for p in instances], dim=0)
                 )
             target_classes_onehot = torch.zeros(logits_image.shape, dtype=logits_image.dtype, device=logits_image.device)
             if len(logits_image.shape) < 2:
@@ -161,15 +179,14 @@ class samMaskHead(BaseMaskRCNNHead):
             assert len(logits_image.shape) == 2, print('logits_image.shape: ', logits_image.shape)
             target_classes_onehot.scatter_(1, gt_classes.unsqueeze(-1), 1)
             # what if the classification not include background. The classification will not be interupted?
-            loss ={"loss_mask": mask_rcnn_loss(low_res_masks, instances, self.vis_period) * self.mask_loss_weight,
+            loss ={"loss_mask": self.custom_mask_rcnn_loss(low_res_masks, instances, self.vis_period) * self.mask_loss_weight,
                    "loss_cls": self.sigmoid_focal_loss(logits_image, target_classes_onehot, gt_classes)}
-            del instances, low_res_masks, logits_image, mask_tokens, clip_img_embeddings, img_embeddings
             return loss
         else:
             new_instances = self.custom_mask_rcnn_inference(low_res_masks, instances, logits_image[:,:-1], self.score_thresh, self.top_per_instance, self.test_nms_thresh)
-            del instances, low_res_masks, logits_image, mask_tokens, clip_img_embeddings, img_embeddings
             return new_instances
         
+    @torch.jit.unused
     def sigmoid_focal_loss(self, inputs, targets, gt_classes, alpha: float = 0.25, gamma: float = 2):
         """Compute the sigmoid focal loss."""
         _log_classification_stats(inputs, gt_classes, 'clip_fast_rcnn')
@@ -200,12 +217,12 @@ class samMaskHead(BaseMaskRCNNHead):
     
     def get_logits(self, region_features, text_features, logit_scale):
         # 计算image_features @ text_features.T相似度矩阵
-        # set unseen class weights to zero
         region_features = region_features / (region_features.norm(dim=-1, keepdim=True) + 1e-7)
         logits_per_image = logit_scale * region_features @ (text_features.unsqueeze(0).transpose(1, 2))
         logits_per_text = logit_scale * (text_features.unsqueeze(0)) @ region_features.transpose(1, 2)
         return logits_per_image, logits_per_text
     
+    @torch.jit.unused
     def custom_mask_rcnn_loss(self, pred_mask_logits: torch.Tensor, instances: List[Instances], vis_period: int = 0):
         """
         remove gt_masks.crop_and_resize from original mask_rcnn_loss 
@@ -272,7 +289,6 @@ class samMaskHead(BaseMaskRCNNHead):
                 vis_mask = torch.stack([vis_mask] * 3, axis=0)
                 storage.put_image(name, vis_mask)
                 break
-            del vis_masks, pred_masks, pred_masks_thre
 
         if self.mask_loss_type == 'ce':
             mask_loss = F.binary_cross_entropy_with_logits(pred_mask_logits, gt_masks, reduction="mean")
@@ -363,7 +379,7 @@ class samMaskHead(BaseMaskRCNNHead):
             instance_list.append(new_instance)
         return instance_list
 
-
+@torch.jit.unused
 def dice_loss(pred,
             target,
             weight=None,
@@ -396,7 +412,7 @@ def dice_loss(pred,
         assert len(weight) == len(pred)
     loss = weight_reduce_loss(loss, weight, reduction, avg_factor)
     return loss
-
+@torch.jit.unused
 def weight_reduce_loss(loss, weight=None, reduction='mean', avg_factor=None):
     # if weight is specified, apply element-wise weight
     if weight is not None:
@@ -409,11 +425,10 @@ def weight_reduce_loss(loss, weight=None, reduction='mean', avg_factor=None):
         # if reduction is mean, then average the loss by avg_factor
         if reduction == 'mean':
             loss = loss.sum() / avg_factor
-        # if reduction is 'none', then do nothing, otherwise raise an error
         elif reduction != 'none':
             raise ValueError('avg_factor can not be used with reduction="sum"')
     return loss
-
+@torch.jit.unused
 def reduce_loss(loss, reduction):
     reduction_enum = F._Reduction.get_enum(reduction)
     # none: 0, elementwise_mean:1, sum: 2

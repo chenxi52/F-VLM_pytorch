@@ -123,9 +123,6 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             targets (list[Instances], optional): length `N` list of `Instances`. The i-th
                 `Instances` contains the ground-truth per-instance annotations
         Return: pred_instances
-            list[Instances]: length `N` list of `Instances` containing the
-                detected instances. Returned during inference only; may be [] during training.
-            mapping from a named loss to a tensor storing the loss. Used during training only.
         """
         if self.training:
             assert targets, "'targets' argument is required during training"
