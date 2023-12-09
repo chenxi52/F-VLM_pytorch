@@ -246,10 +246,6 @@ class DetrDatasetMapper:
                 )
 
         image_shape = image.shape[:2]  # h, w
-
-        # Pytorch's dataloader is efficient on torch.Tensor due to shared-memory,
-        # but not efficient on large generic data structures due to the use of pickle & mp.Queue.
-        # Therefore it's important to use torch.Tensor.
         dataset_dict["image"] = torch.as_tensor(np.ascontiguousarray(image.transpose(2, 0, 1)))
 
         if not self.is_train:
@@ -281,64 +277,14 @@ class SamDatasetMapper(DatasetMapper):
     def __init__(self, is_train: bool, **kwargs):
         super().__init__(is_train, **kwargs)
 
-    def __call__(self, dataset_dict):
-        """
-        Args:
-            dataset_dict (dict): Metadata of one image, in Detectron2 Dataset format.
 
-        Returns:
-            dict: a format that builtin models in detectron2 accept
-        """
-        dataset_dict = copy.deepcopy(dataset_dict)  # it will be modified by code below
-        # USER: Write your own image loading if it's not from a file
-        image = utils.read_image(dataset_dict["file_name"], format=self.image_format)
-        utils.check_image_size(dataset_dict, image)
-        # USER: Remove if you don't do semantic/panoptic segmentation.
-        if "sem_seg_file_name" in dataset_dict:
-            sem_seg_gt = utils.read_image(dataset_dict.pop("sem_seg_file_name"), "L").squeeze(2)
-        else:
-            sem_seg_gt = None
-
-        aug_input = T.AugInput(image, sem_seg=sem_seg_gt)
-        transforms = self.augmentations(aug_input)
-        image, sem_seg_gt = aug_input.image, aug_input.sem_seg
-
-        image_shape = image.shape[:2]  #h,w
-        # Pytorch's dataloader is efficient on torch.Tensor due to shared-memory,
-        # but not efficient on large generic data structures due to the use of pickle & mp.Queue.
-        # Therefore it's important to use torch.Tensor.
-        dataset_dict["image"] = torch.as_tensor(np.ascontiguousarray(image.transpose(2, 0, 1)))
-        if sem_seg_gt is not None:
-            dataset_dict["sem_seg"] = torch.as_tensor(sem_seg_gt.astype("long"))
-        # dataset_dict["input_height"] = dataset_dict["image"].size(-2)
-        # dataset_dict["input_width"] = dataset_dict["image"].size(-1)
-        # USER: Remove if you don't use pre-computed proposals.
-        # Most users would not need this feature.
-        if self.proposal_topk is not None:
-            utils.transform_proposals(
-                dataset_dict, image_shape, transforms, proposal_topk=self.proposal_topk
-            )
-        
-        # # test into 
-        if not self.is_train:
-            # USER: Modify this if you want to keep them for some reason.
-            dataset_dict.pop("annotations", None)
-            dataset_dict.pop("sem_seg_file_name", None)
-            return dataset_dict
-
-        if "annotations" in dataset_dict:
-            self._transform_annotations(dataset_dict, transforms, image_shape)
-        return dataset_dict
-    
     def _transform_annotations(self, dataset_dict, transforms, image_shape):
-        # USER: Modify this if you want to keep them for some reason.
         for anno in dataset_dict["annotations"]:
             if not self.use_instance_mask:
                 anno.pop("segmentation", None)
             if not self.use_keypoint:
                 anno.pop("keypoints", None)
 
-        # USER: Implement additional transformations if you have other types of data
         annos = [
             utils.transform_instance_annotations(
                 obj, transforms, image_shape, keypoint_hflip_indices=self.keypoint_hflip_indices
@@ -347,27 +293,19 @@ class SamDatasetMapper(DatasetMapper):
             if obj.get("iscrowd", 0) == 0
         ]
 
-        # pad the instances.gt_mask
         instances = self.annotations_to_instances(
             annos, image_shape, mask_format=self.instance_mask_format
         )
-        del annos
-        # After transforms such as cropping are applied, the bounding box may no longer
-        # tightly bound the object. As an example, imagine a triangle object
-        # [(0,0), (2,0), (0,2)] cropped by a box [(1,0),(2,2)] (XYXY format). The tight
-        # bounding box of the cropped triangle should be [(1,0),(2,1)], which is not equal to
-        # the intersection of original bounding box and the cropping box.
         if self.recompute_boxes:
             instances.gt_boxes = instances.gt_masks.get_bounding_boxes()
 
         instances = utils.filter_empty_instances(instances, by_mask=False)
         dataset_dict["instances"] = utils.filter_empty_instances(instances, by_box=False)
-        # return dataset_dict
+
 
     def annotations_to_instances(self, annos, image_size, mask_format="polygon"):
         """
-        Create an :class:`Instances` object used by the models,
-        from instance annotations in the dataset dict.
+        choose bitmask as format of masks
         """
         boxes = (
             np.stack(
@@ -397,16 +335,13 @@ class SamDatasetMapper(DatasetMapper):
                 masks = []
                 for segm in segms:
                     if isinstance(segm, list):
-                        # polygon
-                        # pad the bitmask
+                        # assert False, "slurm not supported"
+                        # masks.append(polygons_to_bitmask(segm, *image_size))
+                     
                         np_mask = polygons_to_bitmask(segm, *image_size)
-                        np_mask = np.pad(np_mask, ((0, 1024 - np_mask.shape[0]), (0, 1024 - np_mask.shape[1])), mode='constant')
-                        # tensor_mask = torch.from_numpy(np_mask).unsqueeze(0).float()
-
-                        # # Interpolate tensor_mask to (256, 256)
-                        # interpolated_mask = torch.nn.functional.interpolate(tensor_mask, size=(256, 256), mode='bilinear', align_corners=False)
-                        # np_mask = interpolated_mask.squeeze(0).numpy()
+                        # np_mask = np.pad(np_mask, ((0, 1024 - np_mask.shape[0]), (0, 1024 - np_mask.shape[1])), mode='constant')
                         masks.append(np_mask)
+
                     elif isinstance(segm, dict):
                         # COCO RLE
                         masks.append(mask_util.decode(segm))
@@ -414,7 +349,6 @@ class SamDatasetMapper(DatasetMapper):
                         assert segm.ndim == 2, "Expect segmentation of 2 dimensions, got {}.".format(
                             segm.ndim
                         )
-                        # mask array
                         masks.append(segm)
                     else:
                         raise ValueError(
@@ -423,7 +357,6 @@ class SamDatasetMapper(DatasetMapper):
                             " COCO-style RLE as a dict, or a binary segmentation mask "
                             " in a 2D numpy array of shape HxW.".format(type(segm))
                         )
-                # torch.from_numpy does not support array with negative stride.
                 masks = BitMasks(
                     torch.stack([torch.from_numpy(np.ascontiguousarray(x)) for x in masks])
                 )

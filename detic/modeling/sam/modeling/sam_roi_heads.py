@@ -38,7 +38,6 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
 
         Args:
             positional_encoding: added to FPN features
-            mask_on: whether to use mask head
             input_size: input size for sam image_encoder
         """
         super().__init__(**kwargs)
@@ -164,7 +163,6 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
 
             return proposals, losses
         else:
-            # dscard the nms from fast_rcnn
             pred_instances = self._forward_box(x, proposals)
             # During inference cascaded prediction is used: the mask and keypoints heads are only
             # applied to the top scoring box detections.
@@ -175,12 +173,9 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         self, sam: nn.Module, img_features: torch.Tensor, features: Dict[str, torch.Tensor], instances: List[Instances],
         clip_images: torch.Tensor, clip_texts: torch.Tensor
         ) -> List[Instances]:
-      
         assert not self.training
         assert instances[0].has("pred_boxes")
-
         instances = self._forward_mask(sam, img_features, features, instances, clip_images, clip_texts)
-        # NMS , this is semantic token classification
         return instances
 
 

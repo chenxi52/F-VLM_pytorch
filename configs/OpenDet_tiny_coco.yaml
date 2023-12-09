@@ -36,6 +36,7 @@ SOLVER:
   CHECKPOINT_PERIOD: 5000  #  change
 INPUT:
   CLIP_TRAIN_SIZE: 224
+  # MASK_FORMAT: "polygon"
 TEST:
   DETECTIONS_PER_IMAGE: 300  #test_topk_per_image
   EVAL_PERIOD: 90000 # change

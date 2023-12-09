@@ -18,7 +18,7 @@ from detectron2.layers import nonzero_tuple
 from fvcore.nn import sigmoid_focal_loss_jit
 from detic.modeling.utils import load_class_freq, get_fed_loss_inds
 import fvcore.nn.weight_init as weight_init
-
+from detectron2.modeling.roi_heads.mask_head import mask_rcnn_loss
 # add classification with clip text
 @ROI_MASK_HEAD_REGISTRY.register()
 class samMaskHead(BaseMaskRCNNHead):
@@ -109,7 +109,7 @@ class samMaskHead(BaseMaskRCNNHead):
         self.use_fed_loss = use_fed_loss
         self.fed_loss_num_cat = fed_loss_num_cat
         self.mask_thr_binary = mask_thr_binary
-            
+        self.mask_loss_weight = mask_loss_weight
     @classmethod
     def from_config(cls, cfg, input_shape):
         with_sincos = cfg.MODEL.ROI_MASK_HEAD.WITH_SINCOS
@@ -141,7 +141,8 @@ class samMaskHead(BaseMaskRCNNHead):
                 'fed_loss_freq_weight': cfg.MODEL.ROI_BOX_HEAD.FED_LOSS_FREQ_WEIGHT,
                 'use_fed_loss': cfg.MODEL.ROI_BOX_HEAD.USE_FED_LOSS,
                 'fed_loss_num_cat': cfg.MODEL.NUM_SAMPLE_CATS,
-                'mask_thr_binary': cfg.TEST.MASK_THR_BINARY
+                'mask_thr_binary': cfg.TEST.MASK_THR_BINARY,
+                'mask_loss_weight':mask_loss_weight
                 }
     
     def forward(
@@ -191,9 +192,8 @@ class samMaskHead(BaseMaskRCNNHead):
             dense_prompt_embeddings=nomask_dense_embeddings,
             multimask_output=False,
         )
-        with amp.autocast(enabled=True):
-            clip_texts = move_device_like(clip_texts, low_res_masks)
-            logits_image,_ = self.contextformer(mask_tokens, clip_img_embeddings, clip_texts)#mask_tokens: (batch_size, 1, self.emb_dim),clip: [bz,self.emb_dim, 32,32]
+        clip_texts = move_device_like(clip_texts, low_res_masks)
+        logits_image,_ = self.contextformer(mask_tokens, clip_img_embeddings, clip_texts)#mask_tokens: (batch_size, 1, self.emb_dim),clip: [bz,self.emb_dim, 32,32]
         low_res_masks = torch.nn.functional.interpolate(low_res_masks, size=(self.train_size, self.train_size), mode='bilinear', align_corners=False)
         if self.training:
             gt_classes = (
@@ -205,7 +205,7 @@ class samMaskHead(BaseMaskRCNNHead):
             assert len(logits_image.shape) == 2, print('logits_image.shape: ', logits_image.shape)
             target_classes_onehot.scatter_(1, gt_classes.unsqueeze(-1), 1)
             # what if the classification not include background. The classification will not be interupted?
-            loss ={"loss_mask": self.custom_mask_rcnn_loss(low_res_masks, instances, self.vis_period) * self.loss_weight,
+            loss ={"loss_mask": mask_rcnn_loss(low_res_masks, instances, self.vis_period) * self.mask_loss_weight,
                    "loss_cls": self.sigmoid_focal_loss(logits_image, target_classes_onehot, gt_classes)}
             del instances, low_res_masks, logits_image, mask_tokens, clip_img_embeddings, img_embeddings
             return loss
@@ -262,15 +262,15 @@ class samMaskHead(BaseMaskRCNNHead):
         gt_masks = []
         fg_inds_list = []
         num_instance_list = []
-        # store the gt_mask to gpu first 
         for instances_per_image in instances:
             gt_classes_per_image = instances_per_image.gt_classes.to(dtype=torch.int64)
             # duplicated when select foreground proposals before, but not a big deal
             fg_inds = nonzero_tuple((gt_classes_per_image >= 0) & (gt_classes_per_image < self.data_classes))[0]
-
+            gt_mask_size = instances_per_image.gt_masks.tensor.shape[-2:]
             gt_classes.append(gt_classes_per_image[fg_inds])
             # A tensor of shape (N, M, M), N=#instances in the image; M=mask_side_len
             gt_masks_per_image = instances_per_image.gt_masks.tensor[fg_inds]
+            gt_masks_per_image = F.pad(gt_masks_per_image, (0, self.train_size-gt_mask_size[1], 0, self.train_size-gt_mask_size[0]), value=0)
             gt_masks.append(gt_masks_per_image)
             fg_inds_list.append(fg_inds)
             num_instance_list.append(len(instances_per_image))

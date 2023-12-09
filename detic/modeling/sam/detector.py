@@ -253,13 +253,10 @@ class SamOpenDetector(SamDetector):
         img_embedding_feat, inter_feats, clip_images = self.extract_feat(images, resized_images)
         
         fpn_features = self.backbone(inter_feats)
-        # proposal_generator need to be trained before testing
         proposals, _ = self.proposal_generator(images, fpn_features, None) #samFpn # proposals: img_height=img_width=1024
         results, _ = self.roi_heads(self.sam, img_embedding_feat, fpn_features, proposals, targets=None,
                                     clip=self.clip, clip_images=clip_images, clip_texts=self.text_feats,
                                     context_former_pe=self.context_former_pe)
-        # batched_inputs have ori_image_sizes
-        # images.image_sizes have input_image_sizes
         if do_postprocess:
             assert not torch.jit.is_scripting(), \
                 "Scripting is not supported for postprocess."
@@ -267,22 +264,25 @@ class SamOpenDetector(SamDetector):
         else:
             return results
         
-    def extract_feat(self, batched_inputs, resized_images):
+    def extract_feat(self, images, resized_images):
         # preprocess: padding
-        batched_inputs = [self.sam.image_encoder.preprocess(x) for x in batched_inputs.tensor]
-        batched_inputs = torch.stack(batched_inputs,dim=0)
+        images = [self.sam.image_encoder.preprocess(x) for x in images.tensor]
+        images = torch.stack(images,dim=0)
         with torch.no_grad():
-            if 'det' in self.backbone_name:
-                feat,inter_features = self.sam.image_encoder(batched_inputs)
-                inter_features = feat
+            if self.fp16: 
+                feat, inter_features = self.sam.image_encoder(images.half())
             else:
-                # tiny image encoder are not implemented now
-                feat, inter_features = self.sam.image_encoder(batched_inputs)
-            clip_feat = self.clip.encode_image_feature(resized_images)
+                feat,inter_features = self.sam.image_encoder(images.float())
+            if 'det' in self.backbone_name:
+                # as VitDet
+                inter_features = feat
+            if self.fp16:
+                clip_feat = self.clip.encode_image_feature(resized_images.half())
+            else:
+                clip_feat = self.clip.encode_image_feature(resized_images.float())
             if 'RN' in self.clip_type:
                 assert False, 'not implemented'
                 clip_feat = clip_feat.permute(1, 0, 2)
-        # feat: Tensor[bz, 256, 64, 64]  inter_feats: List[32*Tensor[bz,64,64,1280]]
         # rn_50 clip: [bz, img_dim, c]
         return feat, inter_features, clip_feat
     
@@ -299,7 +299,6 @@ class SamOpenDetector(SamDetector):
         if not self.training:
             return self.inference(batched_inputs, do_postprocess=self.do_postprocess)
         # batched_inputs have longes_side=1024, and prepocess need the shortest_side%32==0
-        # images.size() is origin image size
         images = [self._move_to_current_device(x["image"]) for x in batched_inputs]
         resized_images = self.resize_norm_long_padding(images, self.clip_train_size)
         images = self.preprocess_image(images)
@@ -307,7 +306,6 @@ class SamOpenDetector(SamDetector):
         
         img_embedding_feat, inter_feats, clip_feats = self.extract_feat(images, resized_images) 
         fpn_features = self.backbone(inter_feats)
-        # fpn_features: Dict{'feat0': Tuple[2*Tensor[256,32,32]], 'feat1': Tuple[2*Tensor[256,64,64]], ...}
         proposals, proposal_losses = self.proposal_generator(
             images, fpn_features, gt_instances)
         if self.vis_period > 0:
@@ -331,17 +329,6 @@ class SamOpenDetector(SamDetector):
         del resized_images, img_embedding_feat, fpn_features, proposals, gt_instances, clip_feats
         return losses
             
-    # def resize_norm(self, batched_inputs, target_size=(224, 224)):
-    #     # Convert the numpy image to a torch tensor and ensure it is in CxHxW format
-    #     images = [self._move_to_current_device((x["image"]/255.).to(torch.float)) for x in batched_inputs]
-    #     if self.clip_type == 'ViT-B/16':
-    #         resized_images = [F.interpolate(x.unsqueeze(0), size=(224,224), mode='bilinear', align_corners=False).squeeze(1) for x in images]
-    #     # Apply normalization
-    #     elif self.clip_type == 'RN50':
-    #         resized_images = [F.interpolate(x.unsqueeze(0), size=(self.clip_train_size,self.clip_train_size), mode='bilinear', align_corners=False).squeeze(1) for x in images]
-    #     resized_images = [(x - self.clip_pixel_mean) / self.clip_pixel_std for x in resized_images]
-    #     return torch.cat(resized_images,dim=0)
-    
     def resize_longest_image_size(self, input_image_size, longest_side: int):
         input_image_size = input_image_size.to(torch.float32)
         scale = longest_side / torch.max(input_image_size)
@@ -377,7 +364,6 @@ class SamOpenDetector(SamDetector):
     
     @torch.no_grad()
     def get_custom_text_feat(self, class_names):
-
         def extract_mean_emb(text):
             tokens = clip.tokenize(text).cuda()
             if len(text) > 10000:
@@ -429,6 +415,7 @@ class SamOpenDetector(SamDetector):
             break  # only visualize one image in a batch
         del img, v_gt, anno_img, v_pred, prop_img, vis_img
         
+
 def custom_detector_postprocess(
     results: Instances, output_height: int, output_width: int, mask_threshold: float = 0.5
 ):
@@ -438,8 +425,6 @@ def custom_detector_postprocess(
         output_height, output_width: the original img sie 
     """
     if isinstance(output_width, torch.Tensor):
-        # This shape might (but not necessarily) be tensors during tracing.
-        # Converts integer tensors to float temporaries to ensure true
         # division is performed when computing scale_x and scale_y.
         output_width_tmp = output_width.float()
         output_height_tmp = output_height.float()
@@ -459,23 +444,9 @@ def custom_detector_postprocess(
         output_boxes = None
     assert output_boxes is not None, "Predictions must contain boxes!"
 
-    # resize box from 
-    # output_boxes.scale(scale_x, scale_y)
-    # output_boxes.clip(results.image_size)
-
     results = results[output_boxes.nonempty()]
-    #1. paste mask to [1024,1024], original is [1024,1024]
     if results.has("pred_masks"):
-        # if isinstance(results.pred_masks, ROIMasks):
-        #     roi_masks = results.pred_masks
-        # else:
-        #     # pred_masks is a tensor of shape (N, 1, M, M)
-        #     roi_masks = ROIMasks(results.pred_masks[:, 0, :, :])
         mask_tensor = results.pred_masks
-        # mask_tensor = roi_masks.tensor
-        # results.pred_masks = roi_masks.to_bitmasks(
-        #     results.pred_boxes, 1024, 1024, mask_threshold
-        # ).tensor  # TODO return ROIMasks/BitMask object in the future
         #2. clip up the paddings
         mask_tensor = mask_tensor[:, :, :input_size[0], :input_size[1]]
         #3. resize the box and mask, give it to the results
