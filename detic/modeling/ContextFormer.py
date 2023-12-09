@@ -186,6 +186,7 @@ class build_contextformer(nn.Module):
         C, dim = q.shape
         bs, _ = cls.shape
         q = q.expand(bs, -1, -1)
+
         q1 = torch.einsum("bd,bcd->bcd", cls, q) #bs, dim, C
         q_ = torch.concat((q1, q),dim=-1) # for cls token and text token have align, there are no laynorms
         return q_
@@ -205,8 +206,8 @@ class build_contextformer(nn.Module):
         return self.get_logits(mask_img.squeeze(), clip_txt)
 
     def get_logits(self, image, text):
-        image = image/image.norm(dim=-1, keepdim=True)
-        text = text/text.norm(dim=-1, keepdim=True)
+        image = image/(image.norm(dim=-1, keepdim=True) + 1e-7)
+        text = text/(text.norm(dim=-1, keepdim=True)+ 1e-7)
     
         logit_scale = self.logit_scale.exp()
         mask_cls_img = logit_scale * image @ text.t()
