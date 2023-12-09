@@ -4,14 +4,11 @@ from typing import Tuple, List
 from detectron2.modeling import BaseMaskRCNNHead, ROI_MASK_HEAD_REGISTRY
 from detectron2.config import configurable
 from einops import repeat
-from detectron2.structures import Instances, ImageList, Boxes
+from detectron2.structures import Instances, Boxes
 import torch.nn.functional as F
-from timm.models.layers import trunc_normal_
 from detectron2.utils.events import get_event_storage
-from detectron2.layers import cat, cross_entropy, batched_nms
+from detectron2.layers import cat, batched_nms
 from detectron2.layers.wrappers import move_device_like
-import torch.cuda.amp as amp
-from detectron2.modeling.roi_heads.roi_heads import select_foreground_proposals
 from detic.modeling.ContextFormer import build_contextformer
 from detectron2.modeling.roi_heads.fast_rcnn import _log_classification_stats
 from detectron2.layers import nonzero_tuple
@@ -25,29 +22,12 @@ class samMaskHead(BaseMaskRCNNHead):
     @configurable
     def __init__(
             self,
-            class_agnostic: bool=True,
-            per_query_point: int=5,
-            with_sincos: bool=True,
-            train_size: int=1024,
-            num_classes: int = 1,
-            mask_loss_type: str = 'ce',
-            mask_loss_weight: float=1.0,
             vis_period: int = 0,
-            clip_type: str = 'CLIP_400M_Large',
-            score_thresh: float=0.02,
-            top_per_instance: int=100,
-            test_nms_thresh: float=0.5,
-            data_classes: int=80,
-            test_score_type: str='score',
-            test_geometric_fact: float= 0.5,
-            ignore_zero_cats: bool=True,
-            cat_freq_path: str='',
-            fed_loss_freq_weight: float=0.5,
-            use_fed_loss: bool=False,
-            fed_loss_num_cat: int=50,
-            mask_thr_binary: float=0.5,
+            with_sincos: bool = False,
+            **kwargs
             ) -> None:
-        super().__init__()
+        super().__init__(vis_period=vis_period)
+        self._init(locals())
         if with_sincos:
             sincos = 2
         else:
@@ -62,24 +42,19 @@ class samMaskHead(BaseMaskRCNNHead):
             nn.ReLU(inplace=True),
             nn.Linear(256, 256),
             nn.ReLU(inplace=True),
-            nn.Linear(256, 256*sincos*per_query_point)
+            nn.Linear(256, 256*sincos*self.per_query_point)
         )
         self.point_emb = point_emb
-        self.class_agnostic = class_agnostic
-        self.per_query_point = per_query_point
-        self.with_sincos = with_sincos
-        self.train_size = train_size
-        self.num_classes = num_classes
-        self.vis_period = vis_period
-        if clip_type == 'ViT-B/16':
+
+        if self.clip_type == 'ViT-B/16':
             self.text_dim = 512
             self.emb_dim = 768
             self.down_dim = self.emb_dim
-        elif clip_type == 'RN50':
+        elif self.clip_type == 'RN50':
             self.text_dim = 1024
             self.emb_dim = 2048
             self.down_dim = self.emb_dim
-        elif clip_type == 'RN50x64':
+        elif self.clip_type == 'RN50x64':
             self.text_dim = 1024
             self.emb_dim = 4096
             self.down_dim = self.emb_dim
@@ -95,40 +70,23 @@ class samMaskHead(BaseMaskRCNNHead):
             elif type(m) == nn.Conv2d:
                 weight_init.c2_msra_fill(m)
         self.point_emb.apply(init_weights)
-        self.score_thresh = score_thresh
-        self.top_per_instance = top_per_instance
-        self.test_nms_thresh = test_nms_thresh
-        self.mask_loss_type = mask_loss_type
-        self.data_classes  = data_classes
-        self.test_score_type = test_score_type
-        self.test_geometric_fact = test_geometric_fact
-        self.ignore_zero_cats = ignore_zero_cats
         if self.ignore_zero_cats:
-            freq_weight = load_class_freq(cat_freq_path, fed_loss_freq_weight)
+            freq_weight = load_class_freq(self.cat_freq_path, self.fed_loss_freq_weight)
             self.register_buffer('freq_weight', freq_weight)
-        self.use_fed_loss = use_fed_loss
-        self.fed_loss_num_cat = fed_loss_num_cat
-        self.mask_thr_binary = mask_thr_binary
-        self.mask_loss_weight = mask_loss_weight
+
     @classmethod
     def from_config(cls, cfg, input_shape):
-        with_sincos = cfg.MODEL.ROI_MASK_HEAD.WITH_SINCOS
-        per_query_point = cfg.MODEL.ROI_MASK_HEAD.PER_QUERY_POINT
-        class_agnostic = cfg.MODEL.ROI_MASK_HEAD.CLS_AGNOSTIC_MASK
-        mask_loss_weight = cfg.MODEL.ROI_MASK_HEAD.MASK_LOSS_WEIGHT
-        clip_type = cfg.MODEL.BACKBONE.CLIP_TYPE
         if cfg.MODEL.ROI_MASK_HEAD.CLS_AGNOSTIC_MASK:
             num_classes = 1
         else:
             num_classes = cfg.MODEL.ROI_HEADS.NUM_CLASSES
-        train_size = cfg.INPUT.TRAIN_SIZE
-        return {'class_agnostic': class_agnostic,
-                'per_query_point': per_query_point,
-                'with_sincos': with_sincos,
-                'train_size': train_size,
+        return {'class_agnostic': cfg.MODEL.ROI_MASK_HEAD.CLS_AGNOSTIC_MASK,
+                'per_query_point': cfg.MODEL.ROI_MASK_HEAD.PER_QUERY_POINT,
+                'with_sincos': cfg.MODEL.ROI_MASK_HEAD.WITH_SINCOS,
+                'train_size':  cfg.INPUT.TRAIN_SIZE,
                 'num_classes': num_classes,
                 'vis_period': cfg.VIS_PERIOD,
-                'clip_type': clip_type,
+                'clip_type': cfg.MODEL.BACKBONE.CLIP_TYPE,
                 'score_thresh': cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST,
                 'top_per_instance': cfg.TEST.DETECTIONS_PER_IMAGE,
                 'test_nms_thresh': cfg.MODEL.ROI_HEADS.NMS_THRESH_TEST,
@@ -142,7 +100,7 @@ class samMaskHead(BaseMaskRCNNHead):
                 'use_fed_loss': cfg.MODEL.ROI_BOX_HEAD.USE_FED_LOSS,
                 'fed_loss_num_cat': cfg.MODEL.NUM_SAMPLE_CATS,
                 'mask_thr_binary': cfg.TEST.MASK_THR_BINARY,
-                'mask_loss_weight':mask_loss_weight
+                'mask_loss_weight':cfg.MODEL.ROI_MASK_HEAD.MASK_LOSS_WEIGHT
                 }
     
     def forward(
@@ -159,7 +117,6 @@ class samMaskHead(BaseMaskRCNNHead):
         Args:
             roi_feature: features after maskroi, multi-level---> roi box
             features: features from image encoder
-            instances: 
             clip: clip model
             clip_images: vit-B/16: 512
             clip_texts: cit-B/16: 512
@@ -171,7 +128,6 @@ class samMaskHead(BaseMaskRCNNHead):
         point_emd = point_emd.view(batch_size, self.per_query_point, -1)
         if self.with_sincos: 
             point_emd = torch.sin(point_emd[..., ::2] + point_emd[..., 1::2])
-        #::2, 从 0 列开始+2 取列， 1::2, 从 1 列开始+2 取列
         nomask_dense_embeddings = sam.prompt_encoder.no_mask_embed.weight.reshape(1, -1, 1, 1).expand(
             point_emd.shape[0], -1, *img_features.shape[-2:]
         )

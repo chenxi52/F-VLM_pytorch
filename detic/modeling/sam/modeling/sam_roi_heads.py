@@ -1,22 +1,15 @@
 # Copyright (c) Facebook, Inc. and its affiliates.
-import numpy as np
 from typing import Dict, List, Optional, Tuple
 import torch
 from torch import nn
 from detectron2.config import configurable
-from detectron2.modeling import build_roi_heads, ROI_HEADS_REGISTRY, StandardROIHeads
+from detectron2.modeling import ROI_HEADS_REGISTRY, StandardROIHeads
 from detectron2.modeling.roi_heads import select_foreground_proposals, ROIHeads
-from detectron2.structures import Instances, ImageList, pairwise_iou, BitMasks, Boxes
+from detectron2.structures import Instances
 from detectron2.modeling.matcher import Matcher
 from detic.modeling.roi_heads.sam_fast_rcnn import SamRCNNOutputLayers
 from torch import Tensor
-from detic.modeling.custom_poolers import customRoiPooler
-from detectron2.modeling.proposal_generator.proposal_utils import add_ground_truth_to_proposals
 import math
-from detectron2.utils.events import get_event_storage
-from detectron2.modeling.poolers import ROIPooler
-from detectron2.layers import ShapeSpec, nonzero_tuple
-from detectron2.modeling.roi_heads.box_head import build_box_head
 import inspect
 
 @ROI_HEADS_REGISTRY.register()
@@ -48,8 +41,6 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
     @classmethod
     def from_config(cls, cfg, input_shape):
         """
-        # super().from_config and _init_box_head, _init_mask_head
-        _init_box_head has in_features, 
         """
         ret = ROIHeads.from_config(cfg)
         ret["train_on_pred_boxes"] = cfg.MODEL.ROI_BOX_HEAD.TRAIN_ON_PRED_BOXES
@@ -59,10 +50,9 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             ret.update(cls._init_mask_head(cfg, input_shape))
         if inspect.ismethod(cls._init_keypoint_head):
             ret.update(cls._init_keypoint_head(cfg, input_shape))
-        mask_on   = cfg.MODEL.MASK_ON
-        input_size = cfg.INPUT.TRAIN_SIZE
-        ret['mask_on'] = mask_on
-        ret['input_size'] = input_size
+
+        ret['mask_on'] = cfg.MODEL.MASK_ON
+        ret['input_size'] = cfg.INPUT.TRAIN_SIZE
         # add allow_quality to the cfg.
         ret['proposal_matcher'] = Matcher(
                 cfg.MODEL.ROI_HEADS.IOU_THRESHOLDS,
@@ -95,8 +85,6 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
                         In training, they can be the proposals.
                         In inference, they can be the boxes predicted by R-CNN box head.
         """
-        if not self.mask_on:
-            return {} if self.training else instances
         if self.training:
             instances, _ = select_foreground_proposals(instances, self.num_classes)
         boxes = [i.proposal_boxes if self.training else i.pred_boxes for i in instances]
@@ -104,7 +92,6 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             # the box here are fused together, but will be assigned to each level in mask_pooler
             features = [features[f] for f in self.mask_in_features]
             features = self.mask_pooler(features, boxes)
-            # mask_roi_inds = [box.tensor.size(0).to(box.device) for box in boxes]
             if features.size(0)==0:
                 results_instances = []
                 for ins in instances:
@@ -159,14 +146,16 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             # Usually the original proposals used by the box head are used by the mask, keypoint
             # heads. But when `self.train_on_pred_boxes is True`, proposals will contain boxes
             # predicted by the box head. proposal_boxes are replaced by boxes predicted by box_head
-            losses.update(self._forward_mask(sam, img_features, x, proposals, clip_images, clip_texts))
+            if self.mask_on:
+                losses.update(self._forward_mask(sam, img_features, x, proposals, clip_images, clip_texts))
 
             return proposals, losses
         else:
             pred_instances = self._forward_box(x, proposals)
             # During inference cascaded prediction is used: the mask and keypoints heads are only
             # applied to the top scoring box detections.
-            pred_instances = self.forward_with_given_boxes(sam, img_features, x, pred_instances, clip_images, clip_texts)
+            if self.mask_on:
+                pred_instances = self.forward_with_given_boxes(sam, img_features, x, pred_instances, clip_images, clip_texts)
             return pred_instances, {}
     
     def forward_with_given_boxes(

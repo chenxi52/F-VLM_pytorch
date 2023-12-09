@@ -5,7 +5,7 @@
 # from .modeling.backbone import swintransformer
 # from .modeling.backbone import timm
 from .modeling.sam.modeling.Samfpn import SAMAggregatorNeck
-from .modeling.sam.detector import SamDetector
+from .modeling.sam.detector import SamOpenDetector
 from .modeling.sam.modeling.image_encoder import ImageEncoderViT
 from .modeling.sam.modeling.sam_roi_heads import samAnchorPromptRoiHeads
 from .modeling.custom_rpn import SAMRPN

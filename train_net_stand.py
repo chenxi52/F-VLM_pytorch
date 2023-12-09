@@ -6,7 +6,6 @@ from collections import OrderedDict
 import torch
 from torch.nn.parallel import DistributedDataParallel
 import datetime
-import time
 import detectron2.utils.comm as comm
 from detectron2.checkpoint import PeriodicCheckpointer
 from detectron2.config import get_cfg
@@ -39,16 +38,12 @@ from detic.custom_solver import build_sam_optimizer
 from detic.evaluation.custom_coco_eval import CustomCOCOEvaluator
 import wandb
 import torch.nn as nn
-import psutil
-import gc
-import multiprocessing  
 logger = logging.getLogger("detectron2")
 
 
 def do_test(cfg, model):
     results = OrderedDict()
     for dataset_name in cfg.DATASETS.TEST:
-        # data_loader = build_detection_test_loader(cfg, dataset_name)
         #####
         mapper = None if cfg.INPUT.TEST_INPUT_TYPE == 'default' \
             else SamDatasetMapper(

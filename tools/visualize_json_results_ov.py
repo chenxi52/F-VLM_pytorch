@@ -134,7 +134,6 @@ def create_instances(predictions, image_size):
     # filter out the categories that are not in seen and unseen categories
     # set their score to 0
     score = np.asarray([x["score"] for x in predictions])
-    import ipdb; ipdb.set_trace()
     unuse_conti_ids = set(list(range(80))) - set(dataset_id_map(id) for id in (categories_seen_id + categories_unseen_id))
     chosen = (score > args.conf_threshold).nonzero()[0]
     score = score[chosen]
