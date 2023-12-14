@@ -253,15 +253,9 @@ class VisionTransformer(nn.Module):
         x = x.permute(1, 0, 2)  # LND -> NLD
         x = self.ln_post(x)
         x = x @ self.proj
-        global_feature = x[:, 0, :]
-        visual_feature = x[:, 1:, :]
-        global_feature = global_feature.unsqueeze(1)
-        global_feature = global_feature/ global_feature.norm(dim=1, keepdim=True)
-        visual_feature = visual_feature/ visual_feature.norm(dim=1, keepdim=True)
-        return torch.cat([global_feature, visual_feature], dim=1)
+        return x
 
     # maskclip 
-    
 
     def forward(self, x: torch.Tensor):
         x = self.forward_featuremap(x)
