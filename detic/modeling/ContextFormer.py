@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from torch import nn, Tensor
 import numpy as np
 from timm.models.layers import trunc_normal_
-from detic.modeling.sam.modeling.prompt_encoder import PositionEmbeddingRandom
+# from detic.modeling.sam.modeling.prompt_encoder import PositionEmbeddingRandom
 def _get_activation_fn(activation):
     """Return an activation function given a string"""
     if activation == "relu":
@@ -180,7 +180,7 @@ class build_contextformer(nn.Module):
         if use_ln:
             self.ln_mask = nn.LayerNorm(d_model)
         self.dropout = nn.Dropout()
-        self.pe = PositionEmbeddingRandom(d_model)
+        self.pe = PositionalEncoding(d_model)
 
     def get_qs(self, q, cls):
         # concat[cls*txt,txt]
@@ -202,7 +202,8 @@ class build_contextformer(nn.Module):
         else:
             q = self.q_proj(mask_token)
         mask_text = self.decoder1(q, kv)
-        pe = torch.repeat_interleave(self.pe, visual_tokens.shape[0], dim=0)
+        pe = self.pe(visual_tokens.shape[-2]).unsqueeze(0)
+        pe = torch.repeat_interleave(pe, visual_tokens.shape[0], dim=0)
         mask_img = self.decoder2(mask_text, visual_tokens, pos=pe)
         return self.get_logits(mask_img.squeeze(), clip_txt)
 
@@ -214,3 +215,20 @@ class build_contextformer(nn.Module):
         mask_cls_img = logit_scale * image @ text.t()
         mask_cls_txt = mask_cls_img.t()
         return mask_cls_img, mask_cls_txt
+import math
+class PositionalEncoding(nn.Module):
+    def __init__(self, D, max_len=5000):
+        super(PositionalEncoding, self).__init__()
+        
+        # Create a long enough `pe` matrix
+        pe = torch.zeros(max_len, D)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, D, 2).float() * -(math.log(10000.0) / D))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        # Register `pe` as a buffer
+        self.register_buffer('pe', pe)
+
+    def forward(self, size):
+        # Add `pe` to input
+        return self.pe[:size, :]
