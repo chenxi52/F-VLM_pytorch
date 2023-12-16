@@ -4,8 +4,6 @@ MODEL:
     TYPE: "vit_t"
     CLIP_TYPE: "RN50"
   WEIGHTS: "mobile_sam.pt"
-  PROPOSAL_GENERATOR:
-    NAME: "SAMRPN"
   RPN:
     HEAD_NAME: "StandardRPNHead"
     PRE_NMS_TOPK_TRAIN: 2000  # Per FPN level
@@ -33,7 +31,7 @@ SOLVER:
   MAX_ITER: 90000
   CHECKPOINT_PERIOD: 5000  #  change
 INPUT:
-  CLIP_TRAIN_SIZE: 224
+  CLIP_TRAIN_SIZE: 1024
 TEST:
   DETECTIONS_PER_IMAGE: 300  #test_topk_per_image
   EVAL_PERIOD: 90000 # change

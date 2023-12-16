@@ -1,8 +1,15 @@
-Stage1: 
+<!-- Stage1: 
     train RPN in base classes
     (test rpn recall first)
 Stage2:
-    change contextformer
+    change contextformer -->
+
+1. 将 rpn 移动到 clip image encoder
+    1. fpn 构建到 clip resnet
+    2. (先复现f-vlm) box head, mask head都是 mask-rcnn一样的
+    
+![Alt text](image.png)
+
 # Open-Vocabulary segmentation
 运行配置基本都在config-file
 

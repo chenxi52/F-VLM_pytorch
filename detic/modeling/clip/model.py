@@ -5,7 +5,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
-
+from typing import Dict
+from detectron2.layers import  ShapeSpec
 
 class Bottleneck(nn.Module):
     expansion = 4
@@ -121,14 +122,35 @@ class ModifiedResNet(nn.Module):
 
         # residual layers
         self._inplanes = width  # this is a *mutable* variable used during construction
+        self._out_feature_channels = {'stem': width}
+        # the stride of stem
+        current_stride = 4
+        self._out_feature_strides = {'stem':current_stride}
         self.layer1 = self._make_layer(width, layers[0])
+        self._out_feature_channels['res2']  = width * 2
+        self._out_feature_strides['res2'] = current_stride = int(current_stride
+                                                                 * np.prod([l.stride for l in self.layer1.children()][0]))
+        
         self.layer2 = self._make_layer(width * 2, layers[1], stride=2)
+        self._out_feature_channels['res3']  = width * 4
+        self._out_feature_strides['res3'] = current_stride = int(current_stride
+                                                                 * np.prod([l.stride for l in self.layer2.children()][0]))
+        
         self.layer3 = self._make_layer(width * 4, layers[2], stride=2)
+        self._out_feature_channels['res4']  = width * 8
+        self._out_feature_strides['res4'] = current_stride = int(current_stride
+                                                                 * np.prod([l.stride for l in self.layer3.children()][0]))
+        
         self.layer4 = self._make_layer(width * 8, layers[3], stride=2)
-
+        self._out_feature_channels['res5']  = width * 16
+        self._out_feature_strides['res5'] = current_stride = int(current_stride
+                                                                 * np.prod([l.stride for l in self.layer4.children()][0]))
+        
         embed_dim = width * 32  # the ResNet feature dimension
         self.attnpool = AttentionPool2d(input_resolution // 32, embed_dim, heads, output_dim)
-
+        self._out_feature_strides['atten'] = current_stride
+        self._out_feature_channels['atten'] = embed_dim
+        
     def _make_layer(self, planes, blocks, stride=1):
         layers = [Bottleneck(self._inplanes, planes, stride)]
 
@@ -145,15 +167,18 @@ class ModifiedResNet(nn.Module):
             x = self.relu3(self.bn3(self.conv3(x)))
             x = self.avgpool(x)
             return x
-
+        outputs = {}
         x = x.type(self.conv1.weight.dtype)
         x = stem(x)
         x = self.layer1(x)
+        outputs['res2'] = x
         x = self.layer2(x)
+        outputs['res3'] = x
         x = self.layer3(x)
+        outputs['res4'] = x
         x = self.layer4(x)
-        x = self.attnpool.forward_fea(x)
-        return x
+        outputs['res5'] = x
+        return outputs
 
     def forward(self, x):
         def stem(x):
@@ -162,7 +187,6 @@ class ModifiedResNet(nn.Module):
             x = self.relu3(self.bn3(self.conv3(x)))
             x = self.avgpool(x)
             return x
-
         x = x.type(self.conv1.weight.dtype)
         x = stem(x)
         x = self.layer1(x)
@@ -172,7 +196,22 @@ class ModifiedResNet(nn.Module):
         x = self.attnpool(x)
         return x
 
+    @property
+    def size_divisibility(self) -> int:
+        return 0
 
+    @property
+    def padding_constraints(self) -> Dict[str, int]:
+        pass
+
+    @property
+    def output_shape(self):
+        # stride 相对原图大小
+        # 
+        return {name: ShapeSpec(channels=self._out_feature_channels[name],stride=self._out_feature_strides[name])
+                 for name  in ['stem', 'res2', 'res3', 'res4', 'res5', 'atten']}
+                
+    
 class LayerNorm(nn.LayerNorm):
     """Subclass torch's LayerNorm to handle fp16."""
 

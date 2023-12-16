@@ -143,8 +143,8 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             # Usually the original proposals used by the box head are used by the mask, keypoint
             # heads. But when `self.train_on_pred_boxes is True`, proposals will contain boxes
             # predicted by the box head. proposal_boxes are replaced by boxes predicted by box_head
-            if self.mask_on:
-                losses.update(self._forward_mask(sam, img_features, x, proposals, clip_images, clip_texts))
+            # if self.mask_on:
+            #     losses.update(self._forward_mask(sam, img_features, x, proposals, clip_images, clip_texts))
 
             return proposals, losses
         else:

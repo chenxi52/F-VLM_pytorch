@@ -22,15 +22,15 @@ from torch.cuda.amp import autocast
 
 
 @META_ARCH_REGISTRY.register()
-class SamOpenDetector(GeneralizedRCNN):
+class ClipOpenDetector(GeneralizedRCNN):
     @configurable
     def __init__(
         self,
         fp16=False,
         sam_type=None,
-        clip_type=None,
         mask_thr_binary=0.5,
         do_postprocess=True,
+        clip=None,
         backbone_name=None,
         class_name=constants.COCO_UNSEEN_CLS,
         add_unfrozen='xxx',
@@ -44,28 +44,14 @@ class SamOpenDetector(GeneralizedRCNN):
         self.class_name = class_name
         assert self.proposal_generator is not None
         self.sam = sam_model_registry[sam_type]()
-        self.clip = clip.load(clip_type, jit=False)[0]
-        self.clip_type = clip_type
-        if 'RN' in clip_type:
-            L,W = self.clip.visual.attnpool.positional_embedding.shape
-            scale = W ** -0.5
-            # self.context_former_pe = nn.Parameter(scale*torch.randn(L,W).to(device))
-        elif 'ViT' in clip_type:
-            L,W = self.clip.visual.positional_embedding.shape
-            scale = W ** -0.5
-            device = self.clip.visual.positional_embedding.device
-            # self.context_former_pe = nn.Parameter(scale*torch.randn(L,W).to(device))
-
+        self.clip = clip
         self.mask_thr_binary = mask_thr_binary
         self.do_postprocess = do_postprocess
         self.backbone_name = backbone_name
         self.text_feats =  self.get_custom_text_feat(self.class_name)
         # set params in sam and clip to no_grad
         for name, params in self.sam.named_parameters():
-            if add_unfrozen in name:
-                params.requires_grad = True
-            else:
-                params.requires_grad = False
+            params.requires_grad = False
         for name, params in self.clip.named_parameters():
             params.requires_grad = False
         self.clip_train_size = clip_train_size
@@ -75,19 +61,19 @@ class SamOpenDetector(GeneralizedRCNN):
         # roi_heads include box_heads, mask_heads
         if 'coco' in cfg.DATASETS.TRAIN[0]:
             class_name = constants.COCO_INSTANCE_CLASSES
-        backbone = build_backbone(cfg)
+        clip_model,  _ = clip.load(cfg.MODEL.BACKBONE.CLIP_TYPE)
+        backbone = build_backbone(cfg, clip_model.visual)
         ret=({
-            "backbone": backbone,
-            "proposal_generator": build_proposal_generator(cfg, backbone.output_shape),
-            "roi_heads": build_roi_heads(cfg, backbone.output_shape),
+            "backbone": backbone, 
+            "proposal_generator": build_proposal_generator(cfg, backbone.output_shape()),
+            "roi_heads": build_roi_heads(cfg, backbone.output_shape()),
             "input_format": cfg.INPUT.FORMAT,
             "vis_period": cfg.VIS_PERIOD,
             "pixel_mean": cfg.MODEL.PIXEL_MEAN,
             "pixel_std": cfg.MODEL.PIXEL_STD,
-
+            "clip": clip_model,
             'fp16': cfg.FP16,
             "sam_type": cfg.MODEL.BACKBONE.TYPE,
-            "clip_type": cfg.MODEL.BACKBONE.CLIP_TYPE,
             "do_postprocess": cfg.TEST.DO_POSTPROCESS,
             "backbone_name":cfg.MODEL.BACKBONE.NAME,
             "class_name":class_name,
@@ -124,27 +110,23 @@ class SamOpenDetector(GeneralizedRCNN):
             
     @torch.no_grad()    
     def extract_feat(self, images, resized_images):
-        # preprocess: padding
+        # extrac feat from clip(multi-level feats) and sam;
+        # preprocess: padding 
         images = [self.sam.image_encoder.preprocess(x) for x in images.tensor]
         images = torch.stack(images,dim=0)
         if self.fp16: 
             with autocast():
-                feat, inter_features = self.sam.image_encoder(images.half())
+                sam_feat, _ = self.sam.image_encoder(images.half())
         else:
-            feat,inter_features = self.sam.image_encoder(images.float())
-        if 'det' in self.backbone_name:
-            # as VitDet
-            inter_features = feat
+            sam_feat, _ = self.sam.image_encoder(images.float())
         if self.fp16:
             with autocast():
                 clip_feat = self.clip.encode_image_feature(resized_images.half())
+                # have gone through the FPN network
         else:
             clip_feat = self.clip.encode_image_feature(resized_images.float())
-        if 'RN' in self.clip_type:
-            assert False, 'not implemented'
-            clip_feat = clip_feat.permute(1, 0, 2)
-        # rn_50 clip: [bz, img_dim, c]
-        return feat, inter_features, clip_feat
+        fpn_features = [clip_feat[name] for name in  self.proposal_generator.in_features]
+        return sam_feat, fpn_features
     
     def padding(self, x: torch.Tensor, length:int) -> torch.Tensor:
         # Normalize colors have done 
@@ -163,24 +145,15 @@ class SamOpenDetector(GeneralizedRCNN):
         images = self.preprocess_image(images)
         gt_instances = [x["instances"].to(self.device) for x in batched_inputs] #instance have img_Size with longest-size = 1024
         
-        img_embedding_feat, inter_feats, clip_feats = self.extract_feat(images, resized_images) 
-        fpn_features = self.backbone(inter_feats)
+        img_embedding_feat, fpn_features = self.extract_feat(images, resized_images) 
         proposals, proposal_losses = self.proposal_generator(
             images, fpn_features, gt_instances)
         if self.vis_period > 0:
             storage = get_event_storage()
             if storage.iter % self.vis_period == 0:
                 self.visualize_training(batched_inputs, proposals)
-                # self.visualize_training(batched_inputs, proposals, 'gt.jpg')
-                # for img, ins in zip(resized_images, batched_inputs):
-                    # ins['image'] = img
-                    # print('img_shape', img.shape)
-                # self.visualize_training(batched_inputs, proposals, 'resized.jpg')
-            # import sys
-            # sys.exit()
-        # proposals:max(h,w)=1024,  gt_instance:max(h,w)=1024
         del images
-        _, detector_losses = self.roi_heads(self.sam, img_embedding_feat, fpn_features, proposals, gt_instances, clip_feats, self.text_feats)
+        _, detector_losses = self.roi_heads(self.sam, img_embedding_feat, fpn_features, proposals, gt_instances, self.text_feats)
         
         losses = {}
         losses.update(detector_losses)
@@ -196,16 +169,8 @@ class SamOpenDetector(GeneralizedRCNN):
     
     def resize_norm_long_padding(self, images, long_size=224):
         # Convert the numpy image to a torch tensor and ensure it is in CxHxW format
-        image_shapes = [self.resize_longest_image_size(torch.tensor(x.shape[-2:],device=x.device), long_size) for x in images]
-        images = [x.to(torch.float) for x in images]
-        if self.clip_type == 'ViT-B/16':
-            resized_images = [F.interpolate(x.unsqueeze(0), size=image_shapes[i], mode='bilinear', align_corners=False).squeeze(1) for i,x in enumerate(images)]
-        # Apply normalization
-        elif self.clip_type == 'RN50':
-            resized_images = [F.interpolate(x.unsqueeze(0), size=(self.clip_train_size,self.clip_train_size), mode='bilinear', align_corners=False).squeeze(1) for x in images]
-        else:
-            assert NotImplementedError
-        resized_images = [(x/255. - self.clip_pixel_mean) / self.clip_pixel_std for x in resized_images]
+        # not padding yet
+        resized_images = [(x.to(torch.float).unsqueeze(0)/255. - self.clip_pixel_mean) / self.clip_pixel_std for x in images]
         resized_images = [self.padding(x, self.clip_train_size) for x in resized_images]
         return torch.cat(resized_images, dim=0)
     
