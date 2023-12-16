@@ -124,13 +124,13 @@ class ClipOpenDetector(GeneralizedRCNN):
             sam_feat, _ = self.sam.image_encoder(images.float())
         return sam_feat
     
-    def padding(self, x: torch.Tensor, length:int) -> torch.Tensor:
-        # Normalize colors have done 
-        h, w = x.shape[-2:]
-        padh = length - h
-        padw = length - w
-        x = F.pad(x, (0, padw, 0, padh)) #(左, 右, 上, 下) 
-        return x
+    # def padding(self, x: torch.Tensor, length:int) -> torch.Tensor:
+    #     # Normalize colors have done 
+    #     h, w = x.shape[-2:]
+    #     padh = length - h
+    #     padw = length - w
+    #     x = F.pad(x, (0, padw, 0, padh)) #(左, 右, 上, 下) 
+    #     return x
     
     def forward(self, batched_inputs: List[Dict[str, torch.Tensor]]):
         if not self.training:
