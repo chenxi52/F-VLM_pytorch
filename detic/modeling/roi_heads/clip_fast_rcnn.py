@@ -39,8 +39,7 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
             x = torch.flatten(x, start_dim=1) 
         x_norm = x/x.norm(dim=1,keepdim=True)
         logits_scale = self.logit_scale.exp()
-        scores = logits_scale * x_norm @ self.text_feats.t()
-
+        scores = logits_scale * x_norm @ (self.text_feats.t().to(x.device))
         proposal_deltas = self.bbox_pred(x)
         return  scores, proposal_deltas
     
