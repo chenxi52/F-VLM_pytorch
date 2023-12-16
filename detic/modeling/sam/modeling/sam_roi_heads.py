@@ -61,14 +61,14 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             )
         return ret
     
-    @classmethod
-    def _init_box_head(cls, cfg, input_shape):
-        ret = super()._init_box_head(cfg, input_shape)
-        box_head = ret["box_head"]
-        #update the rcnn output layer
-        ret.update(box_predictor = SamRCNNOutputLayers(cfg, box_head.output_shape))
-        ################
-        return ret
+    # @classmethod
+    # def _init_box_head(cls, cfg, input_shape):
+    #     ret = super()._init_box_head(cfg, input_shape)
+    #     box_head = ret["box_head"]
+    #     #update the rcnn output layer
+    #     ret.update(box_predictor = SamRCNNOutputLayers(cfg, box_head.output_shape))
+    #     ################
+    #     return ret
 
 
     def _forward_mask(self, sam: nn.Module,  img_features: torch.Tensor,features: Dict[str, torch.Tensor],

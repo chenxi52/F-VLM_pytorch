@@ -101,7 +101,6 @@ def build_sam_optimizer(cfg: CfgNode, model: torch.nn.Module, logger) -> torch.o
         if optimizer_type != 'ADAMW':
             param['weight_decay'] = weight_decay
         params += [param]
-       
     if comm.is_main_process():
         logger.info('Optimized parameters:\n%s', pformat(key_memo))
     def maybe_add_full_model_gradient_clipping(optim):  # optim: the optimizer class

@@ -2,7 +2,7 @@ _BASE_: "Base_ov_mine.yaml"
 MODEL:
   BACKBONE:
     TYPE: "vit_t"
-    CLIP_TYPE: "ViT-B/16"
+    # CLIP_TYPE: "ViT-B/16"
   WEIGHTS: "mobile_sam.pt"
   PROPOSAL_GENERATOR:
     NAME: "SAMRPN"

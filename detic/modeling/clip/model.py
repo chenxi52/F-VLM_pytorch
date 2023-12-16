@@ -22,7 +22,6 @@ class Bottleneck(nn.Module):
         self.conv2 = nn.Conv2d(planes, planes, 3, padding=1, bias=False)
         self.bn2 = nn.BatchNorm2d(planes)
         self.relu2 = nn.ReLU(inplace=True)
-
         self.avgpool = nn.AvgPool2d(stride) if stride > 1 else nn.Identity()
 
         self.conv3 = nn.Conv2d(planes, planes * self.expansion, 1, bias=False)
@@ -125,24 +124,25 @@ class ModifiedResNet(nn.Module):
         self._out_feature_channels = {'stem': width}
         # the stride of stem
         current_stride = 4
-        self._out_feature_strides = {'stem':current_stride}
+        self._out_feature_strides = {'stem': current_stride}
         self.layer1 = self._make_layer(width, layers[0])
-        self._out_feature_channels['res2']  = width * 2
+        # expansion = 4
+        self._out_feature_channels['res2']  = width * 4
         self._out_feature_strides['res2'] = current_stride = int(current_stride
                                                                  * np.prod([l.stride for l in self.layer1.children()][0]))
         
         self.layer2 = self._make_layer(width * 2, layers[1], stride=2)
-        self._out_feature_channels['res3']  = width * 4
+        self._out_feature_channels['res3']  = width * 8
         self._out_feature_strides['res3'] = current_stride = int(current_stride
                                                                  * np.prod([l.stride for l in self.layer2.children()][0]))
         
         self.layer3 = self._make_layer(width * 4, layers[2], stride=2)
-        self._out_feature_channels['res4']  = width * 8
+        self._out_feature_channels['res4']  = width * 16
         self._out_feature_strides['res4'] = current_stride = int(current_stride
                                                                  * np.prod([l.stride for l in self.layer3.children()][0]))
         
         self.layer4 = self._make_layer(width * 8, layers[3], stride=2)
-        self._out_feature_channels['res5']  = width * 16
+        self._out_feature_channels['res5']  = width * 32
         self._out_feature_strides['res5'] = current_stride = int(current_stride
                                                                  * np.prod([l.stride for l in self.layer4.children()][0]))
         
@@ -202,12 +202,11 @@ class ModifiedResNet(nn.Module):
 
     @property
     def padding_constraints(self) -> Dict[str, int]:
-        pass
+        return {"square_size": 1024}
 
     @property
     def output_shape(self):
         # stride 相对原图大小
-        # 
         return {name: ShapeSpec(channels=self._out_feature_channels[name],stride=self._out_feature_strides[name])
                  for name  in ['stem', 'res2', 'res3', 'res4', 'res5', 'atten']}
                 
@@ -274,7 +273,6 @@ class VisionTransformer(nn.Module):
         self.ln_pre = LayerNorm(width)
 
         self.transformer = Transformer(width, layers, heads)
-
         self.ln_post = LayerNorm(width)
         self.proj = nn.Parameter(scale * torch.randn(width, output_dim))
 
@@ -293,8 +291,6 @@ class VisionTransformer(nn.Module):
         x = self.ln_post(x)
         x = x @ self.proj
         return x
-
-    # maskclip 
 
     def forward(self, x: torch.Tensor):
         x = self.forward_featuremap(x)

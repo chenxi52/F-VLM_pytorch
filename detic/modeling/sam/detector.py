@@ -34,6 +34,7 @@ class ClipOpenDetector(GeneralizedRCNN):
         backbone_name=None,
         class_name=constants.COCO_UNSEEN_CLS,
         add_unfrozen='xxx',
+        fpn_in_features=[],
         clip_train_size=1024,
         **kwargs
     ):
@@ -48,6 +49,7 @@ class ClipOpenDetector(GeneralizedRCNN):
         self.mask_thr_binary = mask_thr_binary
         self.do_postprocess = do_postprocess
         self.backbone_name = backbone_name
+        self.fpn_in_features = fpn_in_features
         self.text_feats =  self.get_custom_text_feat(self.class_name)
         # set params in sam and clip to no_grad
         for name, params in self.sam.named_parameters():
@@ -79,7 +81,8 @@ class ClipOpenDetector(GeneralizedRCNN):
             "class_name":class_name,
             "add_unfrozen":cfg.MODEL.BACKBONE.ADD_UNFROZEN,
             "clip_train_size":cfg.INPUT.CLIP_TRAIN_SIZE,
-            "mask_thr_binary":cfg.TEST.MASK_THR_BINARY
+            "mask_thr_binary":cfg.TEST.MASK_THR_BINARY,
+            'fpn_in_features': cfg.MODEL.FPN.IN_FEATURES,
         })
         return ret
     
@@ -109,7 +112,7 @@ class ClipOpenDetector(GeneralizedRCNN):
             return results
             
     @torch.no_grad()    
-    def extract_feat(self, images, resized_images):
+    def extract_feat(self, images):
         # extrac feat from clip(multi-level feats) and sam;
         # preprocess: padding 
         images = [self.sam.image_encoder.preprocess(x) for x in images.tensor]
@@ -119,14 +122,7 @@ class ClipOpenDetector(GeneralizedRCNN):
                 sam_feat, _ = self.sam.image_encoder(images.half())
         else:
             sam_feat, _ = self.sam.image_encoder(images.float())
-        if self.fp16:
-            with autocast():
-                clip_feat = self.clip.encode_image_feature(resized_images.half())
-                # have gone through the FPN network
-        else:
-            clip_feat = self.clip.encode_image_feature(resized_images.float())
-        fpn_features = [clip_feat[name] for name in  self.proposal_generator.in_features]
-        return sam_feat, fpn_features
+        return sam_feat
     
     def padding(self, x: torch.Tensor, length:int) -> torch.Tensor:
         # Normalize colors have done 
@@ -141,19 +137,22 @@ class ClipOpenDetector(GeneralizedRCNN):
             return self.inference(batched_inputs, do_postprocess=self.do_postprocess)
         # batched_inputs have longes_side=1024, and prepocess need the shortest_side%32==0
         images = [self._move_to_current_device(x["image"]) for x in batched_inputs]
-        resized_images = self.resize_norm_long_padding(images, self.clip_train_size)
-        images = self.preprocess_image(images)
+        clip_images = self.resize_norm_long_padding(images, self.clip_train_size) # ImageList
+        sam_images = self.preprocess_image(images)
         gt_instances = [x["instances"].to(self.device) for x in batched_inputs] #instance have img_Size with longest-size = 1024
         
-        img_embedding_feat, fpn_features = self.extract_feat(images, resized_images) 
+        sam_image_feats = self.extract_feat(sam_images) 
+        fpn_features = self.backbone(clip_images.tensor)
         proposals, proposal_losses = self.proposal_generator(
-            images, fpn_features, gt_instances)
+            clip_images, fpn_features, gt_instances)
+        
         if self.vis_period > 0:
             storage = get_event_storage()
             if storage.iter % self.vis_period == 0:
                 self.visualize_training(batched_inputs, proposals)
         del images
-        _, detector_losses = self.roi_heads(self.sam, img_embedding_feat, fpn_features, proposals, gt_instances, self.text_feats)
+
+        _, detector_losses = self.roi_heads(self.sam, sam_image_feats, fpn_features, proposals, gt_instances, self.text_feats)
         
         losses = {}
         losses.update(detector_losses)
@@ -167,12 +166,16 @@ class ClipOpenDetector(GeneralizedRCNN):
         transformed_size = torch.floor(transformed_size + 0.5).to(torch.int64)
         return tuple(transformed_size.tolist())
     
-    def resize_norm_long_padding(self, images, long_size=224):
-        # Convert the numpy image to a torch tensor and ensure it is in CxHxW format
-        # not padding yet
-        resized_images = [(x.to(torch.float).unsqueeze(0)/255. - self.clip_pixel_mean) / self.clip_pixel_std for x in images]
-        resized_images = [self.padding(x, self.clip_train_size) for x in resized_images]
-        return torch.cat(resized_images, dim=0)
+    def resize_norm_long_padding(self, images, long_size=1024):
+        # padding to 1024
+        resized_images = [(x.to(torch.float)/255. - self.clip_pixel_mean) / self.clip_pixel_std for x in images]
+        # backbone换为 fpn 了
+        resized_images = ImageList.from_tensors(
+            resized_images,
+            self.backbone.bottom_up.size_divisibility,
+            padding_constraints=self.backbone.bottom_up.padding_constraints,
+        )
+        return resized_images
     
     def preprocess_image(self, images: List[Dict[str, torch.Tensor]]):
         """
@@ -181,8 +184,8 @@ class ClipOpenDetector(GeneralizedRCNN):
         images = [(x - self.pixel_mean) / self.pixel_std for x in images]
         images = ImageList.from_tensors(
             images,
-            self.backbone.size_divisibility,
-            padding_constraints=self.backbone.padding_constraints,
+            self.backbone.bottom_up.size_divisibility,
+            padding_constraints=self.backbone.bottom_up.padding_constraints,
         )
         return images
     
