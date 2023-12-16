@@ -3,6 +3,7 @@ MODEL:
   BACKBONE:
     TYPE: "vit_t"
     CLIP_TYPE: "RN50"
+  CLIP_TEXT_FEATS_PATH: "datasets/coco/coco_cls.pkl"
   WEIGHTS: "mobile_sam.pt"
   RPN:
     HEAD_NAME: "StandardRPNHead"
@@ -12,6 +13,7 @@ MODEL:
     POST_NMS_TOPK_TEST: 300
   ROI_HEADS:
     NMS_THRESH_TEST: 0.4
+    BATCH_SIZE_PER_IMAGE: 512 
   ROI_BOX_HEAD:
     BBOX_REG_WEIGHTS: (10.0, 10.0, 5.0, 5.0)
     IGNORE_ZERO_CATS: True # freq_weight for lvis

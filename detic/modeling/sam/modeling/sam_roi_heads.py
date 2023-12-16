@@ -7,7 +7,7 @@ from detectron2.modeling import ROI_HEADS_REGISTRY, StandardROIHeads
 from detectron2.modeling.roi_heads import select_foreground_proposals, ROIHeads
 from detectron2.structures import Instances
 from detectron2.modeling.matcher import Matcher
-from detic.modeling.roi_heads.sam_fast_rcnn import SamRCNNOutputLayers
+from detic.modeling.roi_heads import ClipRCNNOutputLayers
 from torch import Tensor
 import math
 import inspect
@@ -61,18 +61,18 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             )
         return ret
     
-    # @classmethod
-    # def _init_box_head(cls, cfg, input_shape):
-    #     ret = super()._init_box_head(cfg, input_shape)
-    #     box_head = ret["box_head"]
-    #     #update the rcnn output layer
-    #     ret.update(box_predictor = SamRCNNOutputLayers(cfg, box_head.output_shape))
-    #     ################
-    #     return ret
+    @classmethod
+    def _init_box_head(cls, cfg, input_shape):
+        ret = super()._init_box_head(cfg, input_shape)
+        box_head = ret["box_head"]
+        #update the rcnn output layer
+        ret.update(box_predictor = ClipRCNNOutputLayers(cfg, box_head.output_shape))
+        ################
+        return ret
 
 
     def _forward_mask(self, sam: nn.Module,  img_features: torch.Tensor,features: Dict[str, torch.Tensor],
-                      instances: List[Instances], clip_images: torch.Tensor, clip_texts: torch.Tensor,
+                      instances: List[Instances], clip_images: torch.Tensor
                       ):
         """
         Args:
@@ -101,7 +101,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         else:
             features = [features[f] for f in self.mask_in_features]
         del boxes
-        return self.mask_head(features, img_features, instances, sam, clip_images, clip_texts)
+        return self.mask_head(features, img_features, instances, sam, clip_images)
 
 
     def forward( 
@@ -111,8 +111,6 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             features: Dict[str, torch.Tensor],
             proposals: List[Instances],
             targets: Optional[List[Instances]] = None,
-            clip_images: torch.Tensor=None,
-            clip_texts: torch.Tensor=None,
             )-> Tuple[List[Instances], Dict[str, torch.Tensor]]:
         """
             img_features: output of image_encoder
@@ -152,7 +150,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             # During inference cascaded prediction is used: the mask and keypoints heads are only
             # applied to the top scoring box detections.
             if self.mask_on:
-                pred_instances = self.forward_with_given_boxes(sam, img_features, x, pred_instances, clip_images, clip_texts)
+                pred_instances = self.forward_with_given_boxes(sam, img_features, x, pred_instances)
             return pred_instances, {}
     
     def forward_with_given_boxes(

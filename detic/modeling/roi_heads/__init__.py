@@ -1,1 +1,2 @@
 from detic.modeling.roi_heads.sam_fast_rcnn import SamRCNNOutputLayers
+from detic.modeling.roi_heads.clip_fast_rcnn import ClipRCNNOutputLayers

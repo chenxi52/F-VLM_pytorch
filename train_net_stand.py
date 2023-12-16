@@ -207,7 +207,6 @@ def main(args):
         wandb.init(project='SamDetector', name=TIMESTAMP, config=cfg)
 
     model = build_model(cfg)
-    logger.info("Model:\n{}".format(model))
     if args.eval_only:
         samCheckpointer(model, save_dir=cfg.OUTPUT_DIR).resume_or_load(
             cfg.MODEL.WEIGHTS, resume=args.resume

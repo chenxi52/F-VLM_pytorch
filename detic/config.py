@@ -141,6 +141,8 @@ def add_rsprompter_config(cfg):
     _C.MODEL.RPN.OBJECTNESS_LOSS_TYPE = 'binary_ce'
     _C.MODEL.NUM_SAMPLE_CATS = 50
 
+    _C.MODEL.CLIP_TEXT_FEATS_PATH = 'san'
+
     _C.MODEL.FPN.INNER_CHANNELS  = 32
     _C.MODEL.FPN.UP_SAMPLE_SCALE = 4
     _C.MODEL.FPN.ANCHOR_STRIDE = [8, 16, 32]

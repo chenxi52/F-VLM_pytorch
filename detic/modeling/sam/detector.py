@@ -19,7 +19,9 @@ from detic.modeling.clip import clip
 from detic.prompt_engineering import get_prompt_templates
 from detic import constants
 from torch.cuda.amp import autocast
-
+import detectron2.utils.comm as comm
+import pickle
+import sys
 
 @META_ARCH_REGISTRY.register()
 class ClipOpenDetector(GeneralizedRCNN):
@@ -50,7 +52,10 @@ class ClipOpenDetector(GeneralizedRCNN):
         self.do_postprocess = do_postprocess
         self.backbone_name = backbone_name
         self.fpn_in_features = fpn_in_features
-        self.text_feats =  self.get_custom_text_feat(self.class_name)
+        # self.text_feats =  self.get_custom_text_feat(self.class_name)
+        # if comm.is_main_process():
+        #     with open('datasets/coco_cls.pkl', 'wb') as f:
+        #         pickle.dump(self.text_feats, f)
         # set params in sam and clip to no_grad
         for name, params in self.sam.named_parameters():
             params.requires_grad = False
@@ -95,15 +100,15 @@ class ClipOpenDetector(GeneralizedRCNN):
         ):
         assert not self.training
         assert detected_instances is None
-        resized_images = self.resize_norm_long_padding(batched_inputs, self.clip_train_size)
-        images = self.preprocess_image(batched_inputs)
-        img_embedding_feat, inter_feats, clip_images = self.extract_feat(images, resized_images)
+        images = [self._move_to_current_device(x["image"]) for x in batched_inputs]
+        clip_images = self.resize_norm_long_padding(images, self.clip_train_size) # ImageList
+        sam_images = self.preprocess_image(images)
+        gt_instances = [x["instances"].to(self.device) for x in batched_inputs] #instance have img_Size with longest-size = 1024
         
-        fpn_features = self.backbone(inter_feats)
+        sam_image_feats = self.extract_feat(sam_images) 
+        fpn_features = self.backbone(clip_images.tensor)
         proposals, _ = self.proposal_generator(images, fpn_features, None) #samFpn # proposals: img_height=img_width=1024
-        results, _ = self.roi_heads(self.sam, img_embedding_feat, fpn_features, proposals, targets=None,
-                                    clip=self.clip, clip_images=clip_images, clip_texts=self.text_feats,
-                                    context_former_pe=self.context_former_pe)
+        results, _ = self.roi_heads(self.sam, sam_image_feats, fpn_features, proposals, targets=None)
         if do_postprocess:
             assert not torch.jit.is_scripting(), \
                 "Scripting is not supported for postprocess."
@@ -124,18 +129,9 @@ class ClipOpenDetector(GeneralizedRCNN):
             sam_feat, _ = self.sam.image_encoder(images.float())
         return sam_feat
     
-    # def padding(self, x: torch.Tensor, length:int) -> torch.Tensor:
-    #     # Normalize colors have done 
-    #     h, w = x.shape[-2:]
-    #     padh = length - h
-    #     padw = length - w
-    #     x = F.pad(x, (0, padw, 0, padh)) #(左, 右, 上, 下) 
-    #     return x
-    
     def forward(self, batched_inputs: List[Dict[str, torch.Tensor]]):
         if not self.training:
             return self.inference(batched_inputs, do_postprocess=self.do_postprocess)
-        # batched_inputs have longes_side=1024, and prepocess need the shortest_side%32==0
         images = [self._move_to_current_device(x["image"]) for x in batched_inputs]
         clip_images = self.resize_norm_long_padding(images, self.clip_train_size) # ImageList
         sam_images = self.preprocess_image(images)
@@ -151,8 +147,10 @@ class ClipOpenDetector(GeneralizedRCNN):
             if storage.iter % self.vis_period == 0:
                 self.visualize_training(batched_inputs, proposals)
         del images
-
-        _, detector_losses = self.roi_heads(self.sam, sam_image_feats, fpn_features, proposals, gt_instances, self.text_feats)
+        # f-vlm clip image features后面再加
+        _, detector_losses = self.roi_heads(self.sam, img_features=sam_image_feats, 
+                                            features=fpn_features, proposals=proposals, 
+                                            targets=gt_instances)
         
         losses = {}
         losses.update(detector_losses)
