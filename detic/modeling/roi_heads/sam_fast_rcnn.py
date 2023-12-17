@@ -1,11 +1,10 @@
 # Copyright (c) Facebook, Inc. and its affiliates.
 import logging
 import torch
-import torch.nn as nn
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import List, Tuple
 
 from detectron2.config import configurable
-from detectron2.layers import ShapeSpec, batched_nms, cat, cross_entropy, nonzero_tuple
+from detectron2.layers import ShapeSpec, cat, cross_entropy, nonzero_tuple
 from detectron2.structures import Boxes, Instances
 from fvcore.nn import giou_loss, smooth_l1_loss
 from detectron2.modeling.roi_heads.fast_rcnn import FastRCNNOutputLayers

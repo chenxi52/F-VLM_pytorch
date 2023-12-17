@@ -1,16 +1,17 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
 from typing import Dict, List, Optional, Tuple
 import torch
 from torch import nn
 from detectron2.config import configurable
 from detectron2.modeling import ROI_HEADS_REGISTRY, StandardROIHeads
 from detectron2.modeling.roi_heads import select_foreground_proposals, ROIHeads
-from detectron2.structures import Instances
+from detectron2.structures import Instances, Boxes
+from detectron2.modeling.poolers import ROIPooler
 from detectron2.modeling.matcher import Matcher
 from detic.modeling.roi_heads import ClipRCNNOutputLayers
 from torch import Tensor
 import math
 import inspect
+
 
 @ROI_HEADS_REGISTRY.register()
 class samAnchorPromptRoiHeads(StandardROIHeads):
@@ -24,6 +25,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         positional_encoding = dict(num_feats=128, normalize=True),
         mask_on: bool=True,
         input_size: int = 1024,
+        test_pooler: nn.Module,
         **kwargs
     ):
         """
@@ -37,7 +39,8 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         self.generator_pe = SinePositionalEncoding(**positional_encoding)
         self.mask_on = mask_on 
         self.input_size = input_size
-
+        self.test_pooler = test_pooler
+        
     @classmethod
     def from_config(cls, cfg, input_shape):
         """
@@ -59,6 +62,13 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
                 cfg.MODEL.ROI_HEADS.IOU_LABELS,
                 allow_low_quality_matches=cfg.MODEL.ROI_HEADS.ALLOW_LOW_QUALITY_MATCHES,
             )
+        test_pooler = ROIPooler(
+            output_size=cfg.MODEL.ROI_BOX_HEAD.POOLER_RESOLUTION,
+            scales=tuple(1.),
+            sampling_ratio=cfg.MODEL.ROI_BOX_HEAD.POOLER_SAMPLING_RATIO,
+            pooler_type=cfg.MODEL.ROI_BOX_HEAD.POOLER_TYPE
+        )
+        ret['test_pooler'] = test_pooler
         return ret
     
     @classmethod
@@ -103,10 +113,41 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         del boxes
         return self.mask_head(features, img_features, instances, sam, clip_images)
 
+    def _forward_box(self,attenpool, clip_feats: torch.Tensor, features: Dict[str, torch.Tensor], proposals: List[Instances]):
+        """
+        add VLM pooling layer
+        """
+        features = [features[f] for f in self.box_in_features]
+        
+        box_features = self.box_pooler(features, [x.proposal_boxes for x in proposals])
+        box_features = self.box_head(box_features) # here, box
+        predictions = self.box_predictor(box_features)
+        del box_features
+    
+        if self.training:
+            losses = self.box_predictor.losses(predictions, proposals)
+            # proposals is modified in-place below, so losses must be computed first.
+            if self.train_on_pred_boxes:
+                with torch.no_grad():
+                    pred_boxes = self.box_predictor.predict_boxes_for_gt_classes(
+                        predictions, proposals
+                    )
+                    for proposals_per_image, pred_boxes_per_image in zip(proposals, pred_boxes):
+                        proposals_per_image.proposal_boxes = Boxes(pred_boxes_per_image)
+            return losses
+        else:
+            # propsal_boxes is relative to the original image size.
+            vlm_box_features = self.test_pooler(clip_feats, [x.proposal_boxes for x in proposals])
+            # vlm pooler layer: clip attenpool
+            vlm_box_features = attenpool(vlm_box_features)
+            pred_instances, _ = self.box_predictor.inference(predictions, proposals, vlm_box_features)
+            return pred_instances
+        
 
     def forward( 
             self,
             sam: nn.Module,
+            clip: nn.Module,
             img_features: torch.Tensor,
             features: Dict[str, torch.Tensor],
             proposals: List[Instances],
@@ -162,7 +203,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         instances = self._forward_mask(sam, img_features, features, instances, clip_images, clip_texts)
         return instances
 
-
+    
 class SinePositionalEncoding(nn.Module):
     """Position encoding with sine and cosine functions.
 

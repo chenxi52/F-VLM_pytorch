@@ -103,11 +103,10 @@ class ClipOpenDetector(GeneralizedRCNN):
         images = [self._move_to_current_device(x["image"]) for x in batched_inputs]
         clip_images = self.resize_norm_long_padding(images, self.clip_train_size) # ImageList
         sam_images = self.preprocess_image(images)
-        gt_instances = [x["instances"].to(self.device) for x in batched_inputs] #instance have img_Size with longest-size = 1024
         
         sam_image_feats = self.extract_feat(sam_images) 
         fpn_features = self.backbone(clip_images.tensor)
-        proposals, _ = self.proposal_generator(images, fpn_features, None) #samFpn # proposals: img_height=img_width=1024
+        proposals, _ = self.proposal_generator(clip_images, fpn_features, None) #samFpn # proposals: img_height=img_width=1024
         results, _ = self.roi_heads(self.sam, sam_image_feats, fpn_features, proposals, targets=None)
         if do_postprocess:
             assert not torch.jit.is_scripting(), \
@@ -249,8 +248,6 @@ class ClipOpenDetector(GeneralizedRCNN):
             vis_img = np.concatenate((anno_img, prop_img), axis=1)
             vis_name = "Left: GT bounding boxes;  Right: Predicted proposals"
             vis_img = vis_img.transpose(2, 0, 1)
-            # import cv2
-            # cv2.imwrite(pg_name, vis_img)
             storage.put_image(vis_name, vis_img)
             break  # only visualize one image in a batch
         
