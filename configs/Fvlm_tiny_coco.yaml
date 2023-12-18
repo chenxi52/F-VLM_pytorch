@@ -1,4 +1,4 @@
-_BASE_: "Fvlm_tiny_coco.yaml"
+_BASE_: "Base_ov_mine.yaml"
 MODEL:
   BACKBONE:
     TYPE: "vit_t"
@@ -10,16 +10,17 @@ MODEL:
     PRE_NMS_TOPK_TRAIN: 2000  # Per FPN level
     PRE_NMS_TOPK_TEST: 1000  # Per FPN level
     POST_NMS_TOPK_TRAIN: 1000
-    POST_NMS_TOPK_TEST: 300
+    POST_NMS_TOPK_TEST: 1000
   ROI_HEADS:
     NMS_THRESH_TEST: 0.4
     BATCH_SIZE_PER_IMAGE: 512 
+    SCORE_THRESH_TEST: 0.02
   ROI_BOX_HEAD:
     BBOX_REG_WEIGHTS: (10.0, 10.0, 5.0, 5.0)
     IGNORE_ZERO_CATS: True 
     CAT_FREQ_PATH: 'datasets/coco/zero-shot/instances_train2017_seen_2_oriorder_cat_info.json'
-    BASE_ALPHA: 0.35
-    NOVEL_BETA: 0.65
+    BASE_ALPHA: 0.2
+    NOVEL_BETA: 0.45
   ROI_MASK_HEAD:
     NAME: "MaskRCNNConvUpsampleHead"
     NUM_CONV: 4
@@ -51,6 +52,4 @@ TEST:
   DETECTIONS_PER_IMAGE: 300  #test_topk_per_image
   EVAL_PERIOD: 11250 # change
   IMS_PER_BATCH: 1 #every gpu has most 2 images  # change
-  SCORE_TYPE: 'ob_geo_cls'
-  GEOMETRIC_FACT: 0.35
 OUTPUT_DIR: './output/ovcoco'

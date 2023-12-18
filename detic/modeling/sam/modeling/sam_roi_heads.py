@@ -5,7 +5,6 @@ from detectron2.config import configurable
 from detectron2.modeling import ROI_HEADS_REGISTRY, StandardROIHeads
 from detectron2.modeling.roi_heads import select_foreground_proposals, ROIHeads
 from detectron2.structures import Instances, Boxes
-from detectron2.modeling.poolers import ROIPooler
 from detectron2.modeling.matcher import Matcher
 from detic.modeling.roi_heads import ClipRCNNOutputLayers
 from torch import Tensor
@@ -25,7 +24,6 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         positional_encoding = dict(num_feats=128, normalize=True),
         mask_on: bool=True,
         input_size: int = 1024,
-        test_pooler: nn.Module,
         **kwargs
     ):
         """
@@ -39,7 +37,6 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         self.generator_pe = SinePositionalEncoding(**positional_encoding)
         self.mask_on = mask_on 
         self.input_size = input_size
-        self.test_pooler = test_pooler
         
     @classmethod
     def from_config(cls, cfg, input_shape):
@@ -62,13 +59,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
                 cfg.MODEL.ROI_HEADS.IOU_LABELS,
                 allow_low_quality_matches=cfg.MODEL.ROI_HEADS.ALLOW_LOW_QUALITY_MATCHES,
             )
-        test_pooler = ROIPooler(
-            output_size=cfg.MODEL.ROI_BOX_HEAD.POOLER_RESOLUTION,
-            scales=[1.,],
-            sampling_ratio=cfg.MODEL.ROI_BOX_HEAD.POOLER_SAMPLING_RATIO,
-            pooler_type=cfg.MODEL.ROI_BOX_HEAD.POOLER_TYPE
-        )
-        ret['test_pooler'] = test_pooler
+        
         return ret
     
     @classmethod
@@ -139,10 +130,9 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             return losses
         else:
             # propsal_boxes is relative to the original image size.
-            vlm_box_features = self.test_pooler([clip_feats], [x.proposal_boxes for x in proposals])
-            # vlm pooler layer: clip attenpool
-            vlm_box_features = avgpool(vlm_box_features)
-            pred_instances, _ = self.box_predictor.inference(predictions, proposals, vlm_box_features)
+            # roi align will assign level
+
+            pred_instances, _ = self.box_predictor.inference(predictions, proposals, clip_feats, avgpool)
             return pred_instances
         
 

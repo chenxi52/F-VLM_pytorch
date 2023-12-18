@@ -106,6 +106,7 @@ class CustomDatasetMapper(DatasetMapper):
                 self.dataset_ann[dataset_dict['dataset_source']] != 'box'
 
         aug_input = T.AugInput(copy.deepcopy(ori_image), sem_seg=sem_seg_gt)
+        # add aug_input for clip
         if self.use_diff_bs_size and self.is_train:
             transforms = \
                 self.dataset_augs[dataset_dict['dataset_source']](aug_input)

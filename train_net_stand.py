@@ -102,7 +102,6 @@ def do_train(cfg, model, resume=False):
         checkpointer, cfg.SOLVER.CHECKPOINT_PERIOD, max_iter=max_iter
     )
 
-    # writers = default_writers(cfg.OUTPUT_DIR, max_iter) if comm.is_main_process() else []
     TIMESTAMP = "{0:%Y-%m-%dT%H-%M-%S/}".format(datetime.datetime.now())
     writers = (
         [

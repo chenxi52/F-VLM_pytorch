@@ -101,7 +101,7 @@ class ClipOpenDetector(GeneralizedRCNN):
         assert not self.training
         assert detected_instances is None
         images = [self._move_to_current_device(x["image"]) for x in batched_inputs]
-        clip_images = self.resize_norm_long_padding(images, self.clip_train_size) # ImageList
+        clip_images = self.resize_norm_long_padding(images) # ImageList
         # sam_images = self.preprocess_image(images)
         
         # sam_image_feats = self.extract_feat(sam_images)
@@ -142,7 +142,7 @@ class ClipOpenDetector(GeneralizedRCNN):
         if not self.training:
             return self.inference(batched_inputs, do_postprocess=self.do_postprocess)
         images = [self._move_to_current_device(x["image"]) for x in batched_inputs]
-        clip_images = self.resize_norm_long_padding(images, self.clip_train_size) # ImageList
+        clip_images = self.resize_norm_long_padding(images) # ImageList
         # sam_images = self.preprocess_image(images)
         gt_instances = [x["instances"].to(self.device) for x in batched_inputs] #instance have img_Size with longest-size = 1024
         
@@ -177,16 +177,16 @@ class ClipOpenDetector(GeneralizedRCNN):
         transformed_size = torch.floor(transformed_size + 0.5).to(torch.int64)
         return tuple(transformed_size.tolist())
     
-    def resize_norm_long_padding(self, images, long_size=1024):
+    def resize_norm_long_padding(self, images):
         # padding to 1024
-        resized_images = [(x.to(torch.float)/255. - self.clip_pixel_mean) / self.clip_pixel_std for x in images]
+        # resized_images = [(x.to(torch.float)/255. - self.clip_pixel_mean) / self.clip_pixel_std for x in images]
         # backbone换为 fpn 了
-        resized_images = ImageList.from_tensors(
-            resized_images,
+        images = ImageList.from_tensors(
+            images,
             self.backbone.bottom_up.size_divisibility,
             padding_constraints=self.backbone.bottom_up.padding_constraints,
         )
-        return resized_images
+        return images
     
     def preprocess_image(self, images: List[Dict[str, torch.Tensor]]):
         """

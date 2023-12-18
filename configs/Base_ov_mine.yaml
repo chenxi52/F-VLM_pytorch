@@ -29,7 +29,7 @@ MODEL:
     # (See "modeling/rpn/rpn_outputs.py" for details of this legacy issue)
     # which is approximately 1000 proposals per-image since the default batch size for FPN is 2.
     POST_NMS_TOPK_TRAIN: 1000
-    POST_NMS_TOPK_TEST: 300
+    POST_NMS_TOPK_TEST: 1000
     IOU_THRESHOLDS: [0.3, 0.7]
     BATCH_SIZE_PER_IMAGE: 256 # the sampling num 
     POSITIVE_FRACTION: 0.5
@@ -115,8 +115,6 @@ TEST:
   DO_POSTPROCESS: True
   EVAL_PERIOD: 90000 # change
   IMS_PER_BATCH: 1 #every gpu has most 2 images  # change
-  SCORE_TYPE: 'ob_geo_cls'
-  GEOMETRIC_FACT: 0.35
 VERSION: 2
 FP16: True
 OUTPUT_DIR: './output/ovcoco'

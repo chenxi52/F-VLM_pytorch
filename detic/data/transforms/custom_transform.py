@@ -114,3 +114,16 @@ class EfficientDetResizeCropTransform(Transform):
         trans_boxes = np.concatenate((minxy, maxxy), axis=1)
         return trans_boxes
     
+class OpTransform(Transform):
+    """
+    normalize or rescale
+    """
+    def __init__(self, op) -> None:
+        super().__init__()
+        self.op = op
+    
+    def apply_image(self, img: np.ndarray):
+        return self.op(img)
+    
+    def apply_coords(self, coords: np.ndarray):
+        return coords

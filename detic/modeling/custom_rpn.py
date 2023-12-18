@@ -14,40 +14,16 @@ from detectron2.modeling.matcher import Matcher
 
 @PROPOSAL_GENERATOR_REGISTRY.register()
 class SAMRPN(RPN):
+    """
+    add objectness_loss_type
+    add objectness cfg
+    """
     @configurable
     def __init__(self, 
                  *,
-                in_features: List[str],
-                head: nn.Module,
-                anchor_generator: nn.Module,
-                anchor_matcher: Matcher,
-                box2box_transform: Box2BoxTransform,
-                batch_size_per_image: int,
-                positive_fraction: float,
-                pre_nms_topk: Tuple[float, float],
-                post_nms_topk: Tuple[float, float],
-                nms_thresh: float = 0.7,
-                min_box_size: float = 0.0,
-                anchor_boundary_thresh: float = -1.0,
-                loss_weight: Union[float, Dict[str, float]] = 1.0,
-                box_reg_loss_type: str = "smooth_l1",
-                smooth_l1_beta: float = 0.0,
-                objectness_loss_type: str = 'sigmoid_focal_loss',):
-        super().__init__(in_features=in_features,
-                         head=head,
-                         anchor_generator=anchor_generator,
-                         anchor_matcher=anchor_matcher,
-                         box2box_transform=box2box_transform,
-                         batch_size_per_image=batch_size_per_image,
-                         positive_fraction=positive_fraction,
-                         pre_nms_topk=pre_nms_topk,
-                         post_nms_topk=post_nms_topk,
-                         nms_thresh=nms_thresh,
-                         min_box_size=min_box_size,
-                         anchor_boundary_thresh=anchor_boundary_thresh,
-                         loss_weight=loss_weight,
-                         box_reg_loss_type=box_reg_loss_type,
-                         smooth_l1_beta=smooth_l1_beta)
+                objectness_loss_type: str = 'sigmoid_focal_loss',
+                **kwargs):
+        super().__init__(**kwargs)
         self.objectness_loss_type = objectness_loss_type
 
     @classmethod
@@ -63,6 +39,7 @@ class SAMRPN(RPN):
         self, anchors: List[Boxes], gt_instances: List[Instances]
     ) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
         """
+        add self.objectness_loss_type == 'centerness':
         """
         anchors = Boxes.cat(anchors)
         gt_boxes = [x.gt_boxes for x in gt_instances]
@@ -71,8 +48,6 @@ class SAMRPN(RPN):
 
         gt_labels = []
         matched_gt_boxes = []
-        # for each gt_box, calculate the iou with all anchors,and assign objectness label to the anchor
-        # now, for each gt_box, calculate the centerness target for all anchors
         for image_size_i, gt_boxes_i in zip(image_sizes, gt_boxes):
             """
             image_size_i: (h, w) for the i-th image

@@ -15,10 +15,9 @@ from fvcore.transforms.transform import (
     VFlipTransform,
 )
 from PIL import Image
-
 import detectron2.data.transforms as T
 from detectron2.data.transforms import ResizeTransform
-from .custom_transform import EfficientDetResizeCropTransform
+from .custom_transform import EfficientDetResizeCropTransform,OpTransform
 from typing import Tuple
 __all__ = [
     "EfficientDetResizeCrop","ResizeLongestSizeFlip"
@@ -62,9 +61,9 @@ class EfficientDetResizeCrop(T.Augmentation):
             scaled_h, scaled_w, offset_y, offset_x, img_scale, self.target_size, self.interp)
 
 
-class ResizeLongestSizeFlip(T.Augmentation):
+class ResizeLongestSize(T.Augmentation):
     @torch.jit.unused
-    def __init__(self, longest_length,interp=Image.BILINEAR) -> None:
+    def __init__(self, longest_length, interp=Image.BILINEAR) -> None:
         super().__init__()
         self._init(locals())
 
@@ -86,3 +85,20 @@ class ResizeLongestSizeFlip(T.Augmentation):
         neww = int(neww + 0.5)
         newh = int(newh + 0.5)
         return (newh, neww)
+
+class DivideBy255(T.Augmentation):
+    def __init__(self):
+        super().__init__()
+        self._init(locals())
+
+    def get_transform(self):
+        return OpTransform(lambda x: x/255.0)
+
+
+class Normalize(T.Augmentation):
+    def __init__(self, mean, std):
+        super().__init__()
+        self._init(locals())
+
+    def get_transform(self):
+        return OpTransform(lambda x: (x - self.mean) / self.std)

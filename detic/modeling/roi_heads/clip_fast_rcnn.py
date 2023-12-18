@@ -11,6 +11,7 @@ from detectron2.modeling.roi_heads.fast_rcnn import FastRCNNOutputLayers, _log_c
 from detic.modeling.utils import load_class_freq
 import numpy as np
 import pickle
+from detectron2.modeling.poolers import ROIPooler
 from torch.cuda.amp import autocast
 __all__ = ["SamRCNNOutputLayers"]
 logger = logging.getLogger(__name__)
@@ -34,6 +35,7 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         fed_loss_freq_weight: float,
         base_alpha: float,
         novel_beta: float,
+        test_pooler: ROIPooler,
         **kwargs
     ):
         super().__init__(input_shape, **kwargs)
@@ -48,6 +50,7 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         self.fed_loss_num_cat = fed_loss_num_cat
         self.base_alpha = base_alpha
         self.novel_beta = novel_beta
+        self.test_pooler = test_pooler
 
     @classmethod
     def from_config(cls, cfg, input_shape):
@@ -61,6 +64,13 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         ret['fed_loss_freq_weight'] = cfg.MODEL.ROI_BOX_HEAD.FED_LOSS_FREQ_WEIGHT
         ret['base_alpha'] = cfg.MODEL.ROI_BOX_HEAD.BASE_ALPHA
         ret['novel_beta'] = cfg.MODEL.ROI_BOX_HEAD.NOVEL_BETA
+        test_pooler = ROIPooler(
+            output_size=cfg.MODEL.ROI_BOX_HEAD.POOLER_RESOLUTION,
+            scales=[1./32,],
+            sampling_ratio=cfg.MODEL.ROI_BOX_HEAD.POOLER_SAMPLING_RATIO,
+            pooler_type=cfg.MODEL.ROI_BOX_HEAD.POOLER_TYPE
+        )
+        ret['test_pooler'] = test_pooler
         return ret 
     
     def forward(self,x):
@@ -118,7 +128,8 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
     
     
     def inference(self, predictions: Tuple[torch.Tensor, torch.Tensor], 
-                  proposals: List[Instances], vlm_box_features: torch.Tensor):
+                  proposals: List[Instances], clip_feats: torch.Tensor,
+                  avgpool: nn.AdaptiveAvgPool2d):
         """
         align vlm_box_features with text_feats
         """
@@ -126,8 +137,11 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         scores = self.predict_probs(predictions, proposals)
         image_shapes = [x.image_size for x in proposals]
 
+        vlm_box_features = self.test_pooler([clip_feats], [Boxes(box) for box in boxes])
+        # vlm pooler layer: clip attenpool
+        vlm_box_features = avgpool(vlm_box_features)
         vlm_box_features = vlm_box_features / vlm_box_features.norm(dim=1,keepdim=True)
-        logits_scale = 0.01
+        logits_scale = 1/0.01
         vlm_scores = logits_scale * vlm_box_features @ (self.text_feats.t().to(vlm_box_features.device))
         num_inst_per_image = [len(p) for p in proposals]
         vlm_scores = torch.nn.functional.softmax(vlm_scores, dim=1)
@@ -197,7 +211,6 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         boxes = Boxes(boxes.reshape(-1, 4))
         boxes.clip(image_shape)
         boxes = boxes.tensor.view(-1, num_bbox_reg_classes, 4)  # R x C x 4
-
         # 1. Filter results based on detection scores. It can make NMS more efficient
         #    by filtering out low-confidence detections.
         filter_mask = scores > score_thresh  # R x K
