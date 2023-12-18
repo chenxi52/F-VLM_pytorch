@@ -102,16 +102,26 @@ class ClipOpenDetector(GeneralizedRCNN):
         assert detected_instances is None
         images = [self._move_to_current_device(x["image"]) for x in batched_inputs]
         clip_images = self.resize_norm_long_padding(images, self.clip_train_size) # ImageList
-        sam_images = self.preprocess_image(images)
+        # sam_images = self.preprocess_image(images)
         
-        sam_image_feats = self.extract_feat(sam_images) 
-        fpn_features = self.backbone(clip_images.tensor)
+        # sam_image_feats = self.extract_feat(sam_images)
+        if self.fp16:
+            with autocast():
+                fpn_features, clip_feats = self.backbone(clip_images.tensor.half())
+        else:
+            fpn_features, clip_feats = self.backbone(clip_images.tensor)
         proposals, _ = self.proposal_generator(clip_images, fpn_features, None) #samFpn # proposals: img_height=img_width=1024
-        results, _ = self.roi_heads(self.sam, sam_image_feats, fpn_features, proposals, targets=None)
+        results, _ = self.roi_heads(self.sam, 
+                                    attnpool=self.clip.visual.attnpool,
+                                    clip_features=clip_feats,
+                                    fpn_features=fpn_features, 
+                                    proposals=proposals, 
+                                    targets=None)
         if do_postprocess:
             assert not torch.jit.is_scripting(), \
                 "Scripting is not supported for postprocess."
-            return self.postprocess(pred_instances=results, batched_inputs=batched_inputs, mask_threshold=self.mask_thr_binary)
+            # return self.postprocess(pred_instances=results, batched_inputs=batched_inputs, mask_threshold=self.mask_thr_binary)
+            return GeneralizedRCNN._postprocess(results, batched_inputs, clip_images.image_sizes)
         else:
             return results
             

@@ -20,6 +20,7 @@ def build_clip_fpn_backbone(cfg, clip_model, input_shape=None):
         norm=cfg.MODEL.FPN.NORM,
         top_block=LastLevelMaxPool(),
         fuse_type=cfg.MODEL.FPN.FUSE_TYPE,
+        fp16=cfg.FP16
     )
     return backbone
 
@@ -38,10 +39,12 @@ class ClipFPN(FPN):
         top_block=None,
         fuse_type="sum",
         square_pad=0,
+        fp16=True,
     ):
         """
         remove assert(bottom_up, Backbone)
         output: [p1,p2...]
+        fp16: whether to use fp16
         """
         super(FPN, self).__init__()
         assert in_features, in_features
@@ -98,6 +101,7 @@ class ClipFPN(FPN):
         self._square_pad = square_pad
         assert fuse_type in {"avg", "sum"}
         self._fuse_type = fuse_type
+        self.fp16 = fp16
 
     def forward(self, x):
         """
@@ -105,6 +109,8 @@ class ClipFPN(FPN):
         """
         with torch.no_grad():
             bottom_up_features = self.bottom_up.forward_featuremap(x)
+        if self.fp16:
+            bottom_up_features = {k: v.half() for k, v in bottom_up_features.items()}   
         results = []
         prev_features = self.lateral_convs[0](bottom_up_features[self.in_features[-1]])
         results.append(self.output_convs[0](prev_features))

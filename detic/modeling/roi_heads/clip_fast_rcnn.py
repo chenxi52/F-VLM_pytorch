@@ -11,6 +11,7 @@ from detectron2.modeling.roi_heads.fast_rcnn import FastRCNNOutputLayers, _log_c
 from detic.modeling.utils import load_class_freq
 import numpy as np
 import pickle
+from torch.cuda.amp import autocast
 __all__ = ["SamRCNNOutputLayers"]
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,8 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         use_fed_loss: bool,
         fed_loss_num_cat: int,
         fed_loss_freq_weight: float,
+        base_alpha: float,
+        novel_beta: float,
         **kwargs
     ):
         super().__init__(input_shape, **kwargs)
@@ -43,13 +46,31 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         self.ignore_zero_cats = ignore_zero_cats
         self.use_fed_loss = use_fed_loss
         self.fed_loss_num_cat = fed_loss_num_cat
+        self.base_alpha = base_alpha
+        self.novel_beta = novel_beta
 
+    @classmethod
+    def from_config(cls, cfg, input_shape):
+        ret = super().from_config(cfg, input_shape)
+        with open(cfg.MODEL.CLIP_TEXT_FEATS_PATH,'rb') as f:
+            ret['text_feats'] = pickle.load(f)
+        ret['ignore_zero_cats'] = cfg.MODEL.ROI_BOX_HEAD.IGNORE_ZERO_CATS
+        ret['cat_freq_path'] = cfg.MODEL.ROI_BOX_HEAD.CAT_FREQ_PATH
+        ret['use_fed_loss'] = cfg.MODEL.ROI_BOX_HEAD.USE_FED_LOSS
+        ret['fed_loss_num_cat'] = cfg.MODEL.NUM_SAMPLE_CATS
+        ret['fed_loss_freq_weight'] = cfg.MODEL.ROI_BOX_HEAD.FED_LOSS_FREQ_WEIGHT
+        ret['base_alpha'] = cfg.MODEL.ROI_BOX_HEAD.BASE_ALPHA
+        ret['novel_beta'] = cfg.MODEL.ROI_BOX_HEAD.NOVEL_BETA
+        return ret 
+    
     def forward(self,x):
         if x.dim()>2:
             x = torch.flatten(x, start_dim=1) 
         x_norm = x/x.norm(dim=1,keepdim=True)
         logits_scale = self.logit_scale.exp()
-        scores = logits_scale * x_norm @ (self.text_feats.t().to(x.device))
+        with autocast():
+            scores = logits_scale * x_norm @ (self.text_feats.t().to(x.device))
+       
         proposal_deltas = self.bbox_pred(x)
         return  scores, proposal_deltas
     
@@ -72,8 +93,7 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
             )
         else:
             proposal_boxes = gt_boxes = torch.empty((0, 4), device=proposal_deltas.device)
-        w = (self.freq_weight.view(-1) > 1e-4).float()
-        w = torch.cat([w, w.new_ones(1)])
+        
         if self.use_sigmoid_ce:
             if self.ignore_zero_cats:
                 assert NotImplementedError
@@ -81,6 +101,8 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
                 loss_cls = self.sigmoid_cross_entropy_loss(scores, gt_classes)
         else:
             if self.ignore_zero_cats:
+                w = (self.freq_weight.view(-1) > 1e-4).float()
+                w = torch.cat([w, w.new_ones(1)])
                 loss_cls = cross_entropy(scores, gt_classes, reduction="mean", weight=w)
             else:
                 loss_cls = cross_entropy(scores, gt_classes, reduction="mean")
@@ -93,17 +115,7 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         }
         return {k: v * self.loss_weight.get(k, 1.0) for k, v in losses.items()}
 
-    @classmethod
-    def from_config(cls, cfg, input_shape):
-        ret = super().from_config(cfg, input_shape)
-        with open(cfg.MODEL.CLIP_TEXT_FEATS_PATH,'rb') as f:
-            ret['text_feats'] = pickle.load(f)
-        ret['ignore_zero_cats'] = cfg.MODEL.ROI_BOX_HEAD.IGNORE_ZERO_CATS
-        ret['cat_freq_path'] = cfg.MODEL.ROI_BOX_HEAD.CAT_FREQ_PATH
-        ret['use_fed_loss'] = cfg.MODEL.ROI_BOX_HEAD.USE_FED_LOSS
-        ret['fed_loss_num_cat'] = cfg.MODEL.NUM_SAMPLE_CATS
-        ret['fed_loss_freq_weight'] = cfg.MODEL.ROI_BOX_HEAD.FED_LOSS_FREQ_WEIGHT
-        return ret 
+    
     
     def inference(self, predictions: Tuple[torch.Tensor, torch.Tensor], 
                   proposals: List[Instances], vlm_box_features: torch.Tensor):
@@ -122,7 +134,7 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         vlm_scores = vlm_scores.split(num_inst_per_image, dim=0)
         # scores are differnent for base and novel class, and background score comes from the detector
 
-        return ov_fast_rcnn_inference(
+        return self.ov_fast_rcnn_inference(
             boxes,
             scores,
             vlm_scores,
@@ -132,74 +144,80 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
             self.test_topk_per_image,
         )
     
-def ov_fast_rcnn_inference(
-    boxes: List[torch.Tensor],
-    scores: List[torch.Tensor],
-    vlm_scores: List[torch.Tensor],
-    image_shapes: List[Tuple[int, int]],
-    score_thresh: float,
-    nms_thresh: float,
-    topk_per_image: int,
-):
-    """
-    add vlm_scores to fast_rcnn_inference
-    """
-    result_per_image = [
-        ov_fast_rcnn_inference_single_image(
-            boxes_per_image, scores_per_image, vlm_scores_per_image, image_shape, score_thresh, nms_thresh, topk_per_image
-        )
-        for scores_per_image, vlm_scores_per_image, boxes_per_image, image_shape in zip(scores, vlm_scores, boxes, image_shapes)
-    ]
-    return [x[0] for x in result_per_image], [x[1] for x in result_per_image]
+    def ov_fast_rcnn_inference(
+            self,
+            boxes: List[torch.Tensor],
+            scores: List[torch.Tensor],
+            vlm_scores: List[torch.Tensor],
+            image_shapes: List[Tuple[int, int]],
+            score_thresh: float,
+            nms_thresh: float,
+            topk_per_image: int,
+        ):
+        """
+        add vlm_scores to fast_rcnn_inference
+        """
+        result_per_image = [
+            self.ov_fast_rcnn_inference_single_image(
+                boxes_per_image, scores_per_image, vlm_scores_per_image, image_shape, score_thresh, nms_thresh, topk_per_image
+            )
+            for scores_per_image, vlm_scores_per_image, boxes_per_image, image_shape in zip(scores, vlm_scores, boxes, image_shapes)
+        ]
+        return [x[0] for x in result_per_image], [x[1] for x in result_per_image]
 
-def ov_fast_rcnn_inference_single_image(
-    boxes,
-    scores,
-    vlm_scores,
-    image_shape: Tuple[int, int],
-    score_thresh: float,
-    nms_thresh: float,
-    topk_per_image: int,
-):
-    """
-    add vlm_scores to fast_rcnn_inference_single_image
-    final_score_base = vlm_score^0.65 * vlm_scores^0.35    
-    final_score_novel = vlm_score^0.35 * vlm_scores^0.65    
-    """
-    valid_mask = torch.isfinite(boxes).all(dim=1) & torch.isfinite(scores).all(dim=1)
-    if not valid_mask.all():
-        boxes = boxes[valid_mask]
-        scores = scores[valid_mask]
-        vlm_scores = vlm_scores[valid_mask]
+    def ov_fast_rcnn_inference_single_image(
+            self,
+            boxes,
+            scores,
+            vlm_scores,
+            image_shape: Tuple[int, int],
+            score_thresh: float,
+            nms_thresh: float,
+            topk_per_image: int,
+        ):
+        """
+        add vlm_scores to fast_rcnn_inference_single_image
+        final_score_base = vlm_score^0.65 * vlm_scores^0.35    
+        final_score_novel = vlm_score^0.35 * vlm_scores^0.65    
+        """
+        valid_mask = torch.isfinite(boxes).all(dim=1) & torch.isfinite(scores).all(dim=1)
+        if not valid_mask.all():
+            boxes = boxes[valid_mask]
+            scores = scores[valid_mask]
+            vlm_scores = vlm_scores[valid_mask]
+        scores = scores[:, :-1]
+        vlm_scores = vlm_scores[:, :-1]
+        w = (self.freq_weight.view(-1) > 1e-4).float()
 
-    scores = scores[:, :-1]
-    
-    num_bbox_reg_classes = boxes.shape[1] // 4
-    # Convert to Boxes to use the `clip` function ...
-    boxes = Boxes(boxes.reshape(-1, 4))
-    boxes.clip(image_shape)
-    boxes = boxes.tensor.view(-1, num_bbox_reg_classes, 4)  # R x C x 4
+        base_scores = ((scores * w)**(1-self.base_alpha)) * ((vlm_scores*w)**(self.base_alpha))
+        novel_scores = ((scores * (1-w))**(1-self.novel_beta)) * ((vlm_scores*(1-w))**(self.novel_beta))
+        scores = base_scores + novel_scores
 
-    # 1. Filter results based on detection scores. It can make NMS more efficient
-    #    by filtering out low-confidence detections.
-    filter_mask = scores > score_thresh  # R x K
-    # R' x 2. First column contains indices of the R predictions;
-    # Second column contains indices of classes.
-    filter_inds = filter_mask.nonzero()
-    if num_bbox_reg_classes == 1:
-        boxes = boxes[filter_inds[:, 0], 0]
-    else:
-        boxes = boxes[filter_mask]
-    scores = scores[filter_mask]
+        num_bbox_reg_classes = boxes.shape[1] // 4
+        boxes = Boxes(boxes.reshape(-1, 4))
+        boxes.clip(image_shape)
+        boxes = boxes.tensor.view(-1, num_bbox_reg_classes, 4)  # R x C x 4
 
-    # 2. Apply NMS for each class independently.
-    keep = batched_nms(boxes, scores, filter_inds[:, 1], nms_thresh)
-    if topk_per_image >= 0:
-        keep = keep[:topk_per_image]
-    boxes, scores, filter_inds = boxes[keep], scores[keep], filter_inds[keep]
+        # 1. Filter results based on detection scores. It can make NMS more efficient
+        #    by filtering out low-confidence detections.
+        filter_mask = scores > score_thresh  # R x K
+        # R' x 2. First column contains indices of the R predictions;
+        # Second column contains indices of classes.
+        filter_inds = filter_mask.nonzero()
+        if num_bbox_reg_classes == 1:
+            boxes = boxes[filter_inds[:, 0], 0]
+        else:
+            boxes = boxes[filter_mask]
+        scores = scores[filter_mask]
 
-    result = Instances(image_shape)
-    result.pred_boxes = Boxes(boxes)
-    result.scores = scores
-    result.pred_classes = filter_inds[:, 1]
-    return result, filter_inds[:, 0]
+        # 2. Apply NMS for each class independently.
+        keep = batched_nms(boxes, scores, filter_inds[:, 1], nms_thresh)
+        if topk_per_image >= 0:
+            keep = keep[:topk_per_image]
+        boxes, scores, filter_inds = boxes[keep], scores[keep], filter_inds[keep]
+
+        result = Instances(image_shape)
+        result.pred_boxes = Boxes(boxes)
+        result.scores = scores
+        result.pred_classes = filter_inds[:, 1]
+        return result, filter_inds[:, 0]

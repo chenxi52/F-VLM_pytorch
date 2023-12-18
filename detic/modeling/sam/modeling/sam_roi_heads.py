@@ -126,7 +126,6 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         box_features = self.box_head(box_features) # here, box
         predictions = self.box_predictor(box_features)
         del box_features
-    
         if self.training:
             losses = self.box_predictor.losses(predictions, proposals)
             # proposals is modified in-place below, so losses must be computed first.
@@ -140,7 +139,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             return losses
         else:
             # propsal_boxes is relative to the original image size.
-            vlm_box_features = self.test_pooler(clip_feats, [x.proposal_boxes for x in proposals])
+            vlm_box_features = self.test_pooler([clip_feats], [x.proposal_boxes for x in proposals])
             # vlm pooler layer: clip attenpool
             vlm_box_features = avgpool(vlm_box_features)
             pred_instances, _ = self.box_predictor.inference(predictions, proposals, vlm_box_features)
@@ -149,7 +148,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
 
     def forward( 
             self,
-            sam: nn.Module,
+            sam,
             attnpool: nn.Module,
             clip_features: torch.Tensor,
             fpn_features: Dict[str, torch.Tensor],
@@ -181,27 +180,21 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         x = {list(fpn_features.keys())[i]: x[i] for i in range(len(fpn_features))}
         if self.training:
             losses = self._forward_box(attnpool, clip_features, x, proposals)
-            # Usually the original proposals used by the box head are used by the mask, keypoint
-            # heads. But when `self.train_on_pred_boxes is True`, proposals will contain boxes
-            # predicted by the box head. proposal_boxes are replaced by boxes predicted by box_head
             if self.mask_on:
                 losses.update(self._forward_mask(x, proposals))
             return proposals, losses
         else:
             pred_instances = self._forward_box(attnpool, clip_features, x, proposals)
-            # During inference cascaded prediction is used: the mask and keypoints heads are only
-            # applied to the top scoring box detections.
             if self.mask_on:
                 pred_instances = self.forward_with_given_boxes(sam, clip_features, x, pred_instances)
             return pred_instances, {}
     
     def forward_with_given_boxes(
-        self, sam: nn.Module, img_features: torch.Tensor, features: Dict[str, torch.Tensor], instances: List[Instances],
-        clip_images: torch.Tensor, clip_texts: torch.Tensor
+        self, sam: nn.Module, clip_features: torch.Tensor, fpn_features: Dict[str, torch.Tensor], instances: List[Instances],
         ) -> List[Instances]:
         assert not self.training
         assert instances[0].has("pred_boxes")
-        instances = self._forward_mask(sam, img_features, features, instances, clip_images, clip_texts)
+        instances = self._forward_mask(fpn_features, instances)
         return instances
 
     
