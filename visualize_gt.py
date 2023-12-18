@@ -51,7 +51,6 @@ from detic.evaluation.custom_coco_eval import CustomCOCOEvaluator
 from detic.modeling.utils import reset_cls_test
 from detic.config import add_rsprompter_config
 logger = logging.getLogger("Visulizer")
-import ipdb
 import numpy as np
 import cv2
 from detectron2.utils.visualizer import Visualizer

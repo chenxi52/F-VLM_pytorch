@@ -64,7 +64,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             )
         test_pooler = ROIPooler(
             output_size=cfg.MODEL.ROI_BOX_HEAD.POOLER_RESOLUTION,
-            scales=tuple(1.),
+            scales=[1.,],
             sampling_ratio=cfg.MODEL.ROI_BOX_HEAD.POOLER_SAMPLING_RATIO,
             pooler_type=cfg.MODEL.ROI_BOX_HEAD.POOLER_TYPE
         )
@@ -81,41 +81,44 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         return ret
 
 
-    def _forward_mask(self, sam: nn.Module,  img_features: torch.Tensor,features: Dict[str, torch.Tensor],
-                      instances: List[Instances], clip_images: torch.Tensor
-                      ):
-        """
-        Args:
-            img_features: features output by image_encoder
-            features: Multi-level features
-            instances (list[Instances]): 
-                proposals from rpn. the per-image instances to train/predict masks. 
-                with fg_proposals and bg_proposals
-                have predicted_boxes of _forward_box_head
-                        In training, they can be the proposals.
-                        In inference, they can be the boxes predicted by R-CNN box head.
-        """
-        if self.training:
-            instances, _ = select_foreground_proposals(instances, self.num_classes)
-        boxes = [i.proposal_boxes if self.training else i.pred_boxes for i in instances]
-        if self.mask_pooler is not None:
-            # the box here are fused together, but will be assigned to each level in mask_pooler
-            features = [features[f] for f in self.mask_in_features]
-            features = self.mask_pooler(features, boxes)
-            if features.size(0)==0:
-                results_instances = []
-                for ins in instances:
-                    ins.pred_masks = torch.tensor([], device=ins.pred_classes.device)
-                    results_instances.append(ins)
-                return results_instances
-        else:
-            features = [features[f] for f in self.mask_in_features]
-        del boxes
-        return self.mask_head(features, img_features, instances, sam, clip_images)
+    # def _forward_mask(self, fpn_features: Dict[str, torch.Tensor],
+    #                   instances: List[Instances], clip_features: torch.Tensor
+    #                   ):
+    #     """
+    #     Args:
+    #         img_features: features output by image_encoder
+    #         features: Multi-level features
+    #         instances (list[Instances]): 
+    #             proposals from rpn. the per-image instances to train/predict masks. 
+    #             with fg_proposals and bg_proposals
+    #             have predicted_boxes of _forward_box_head
+    #                     In training, they can be the proposals.
+    #                     In inference, they can be the boxes predicted by R-CNN box head.
+    #     """
+    #     if self.training:
+    #         instances, _ = select_foreground_proposals(instances, self.num_classes)
+    #     boxes = [i.proposal_boxes if self.training else i.pred_boxes for i in instances]
+    #     if self.mask_pooler is not None:
+    #         # the box here are fused together, but will be assigned to each level in mask_pooler
+    #         features = [features[f] for f in self.mask_in_features]
+    #         features = self.mask_pooler(features, boxes)
+    #         if features.size(0)==0:
+    #             results_instances = []
+    #             for ins in instances:
+    #                 ins.pred_masks = torch.tensor([], device=ins.pred_classes.device)
+    #                 results_instances.append(ins)
+    #             return results_instances
+    #     else:
+    #         features = [features[f] for f in self.mask_in_features]
+    #     del boxes
+    #     return self.mask_head(features, instances, clip_features)
 
-    def _forward_box(self,attenpool, clip_feats: torch.Tensor, features: Dict[str, torch.Tensor], proposals: List[Instances]):
+    def _forward_box(self, avgpool, clip_feats: torch.Tensor, 
+                     features: Dict[str, torch.Tensor], 
+                     proposals: List[Instances]):
         """
         add VLM pooling layer
+        clip_feats: [bsz, 2048, 32, 32]
         """
         features = [features[f] for f in self.box_in_features]
         
@@ -139,7 +142,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             # propsal_boxes is relative to the original image size.
             vlm_box_features = self.test_pooler(clip_feats, [x.proposal_boxes for x in proposals])
             # vlm pooler layer: clip attenpool
-            vlm_box_features = attenpool(vlm_box_features)
+            vlm_box_features = avgpool(vlm_box_features)
             pred_instances, _ = self.box_predictor.inference(predictions, proposals, vlm_box_features)
             return pred_instances
         
@@ -147,15 +150,15 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
     def forward( 
             self,
             sam: nn.Module,
-            clip: nn.Module,
-            img_features: torch.Tensor,
-            features: Dict[str, torch.Tensor],
+            attnpool: nn.Module,
+            clip_features: torch.Tensor,
+            fpn_features: Dict[str, torch.Tensor],
             proposals: List[Instances],
             targets: Optional[List[Instances]] = None,
             )-> Tuple[List[Instances], Dict[str, torch.Tensor]]:
         """
-            img_features: output of image_encoder
-            features: multi-level features output by FPN
+            clip_features: output of image_encoder
+            fpn_features: multi-level features output by FPN
             proposals (list[Instances]): length `N` list of `Instances`. The i-th
                 `Instances` contains object proposals for the i-th input image,
                 with fields "proposal_boxes" and "objectness_logits".
@@ -168,30 +171,28 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             # ROI assigner and sampler works.
             proposals = self.label_and_sample_proposals(proposals, targets)
         del targets
-        x = [item[1] for item in list(features.items())]
+        x = [item[1] for item in list(fpn_features.items())]
         bs, _, h, w = x[-1].shape #
         mask_pe = torch.zeros((bs, h, w), device=x[0].device, dtype=torch.bool)
         img_feat_pe = self.generator_pe(mask_pe)
-
+        # add pos to fpn features
         for i in range(len(x)):
             x[i] = x[i] + torch.nn.functional.interpolate(img_feat_pe, size=x[i].shape[-2:], mode='bilinear', align_corners=False)
-        x = {list(features.keys())[i]: x[i] for i in range(len(features))}
-        
+        x = {list(fpn_features.keys())[i]: x[i] for i in range(len(fpn_features))}
         if self.training:
-            losses = self._forward_box(x, proposals)
+            losses = self._forward_box(attnpool, clip_features, x, proposals)
             # Usually the original proposals used by the box head are used by the mask, keypoint
             # heads. But when `self.train_on_pred_boxes is True`, proposals will contain boxes
             # predicted by the box head. proposal_boxes are replaced by boxes predicted by box_head
-            # if self.mask_on:
-            #     losses.update(self._forward_mask(sam, img_features, x, proposals, clip_images, clip_texts))
-
+            if self.mask_on:
+                losses.update(self._forward_mask(x, proposals))
             return proposals, losses
         else:
-            pred_instances = self._forward_box(x, proposals)
+            pred_instances = self._forward_box(attnpool, clip_features, x, proposals)
             # During inference cascaded prediction is used: the mask and keypoints heads are only
             # applied to the top scoring box detections.
             if self.mask_on:
-                pred_instances = self.forward_with_given_boxes(sam, img_features, x, pred_instances)
+                pred_instances = self.forward_with_given_boxes(sam, clip_features, x, pred_instances)
             return pred_instances, {}
     
     def forward_with_given_boxes(

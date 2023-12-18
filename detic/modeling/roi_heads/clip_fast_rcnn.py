@@ -41,6 +41,8 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
             freq_weight = load_class_freq(cat_freq_path, fed_loss_freq_weight)
             self.register_buffer('freq_weight', freq_weight)
         self.ignore_zero_cats = ignore_zero_cats
+        self.use_fed_loss = use_fed_loss
+        self.fed_loss_num_cat = fed_loss_num_cat
 
     def forward(self,x):
         if x.dim()>2:
@@ -56,36 +58,33 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         change cross_entropy weight of novel class to 0
         """
         scores, proposal_deltas = predictions
-
-        # parse classification outputs
         gt_classes = (
             cat([p.gt_classes for p in proposals], dim=0) if len(proposals) else torch.empty(0)
         )
         _log_classification_stats(scores, gt_classes)
 
-        # parse box regression outputs
         if len(proposals):
             proposal_boxes = cat([p.proposal_boxes.tensor for p in proposals], dim=0)  # Nx4
             assert not proposal_boxes.requires_grad, "Proposals should not require gradients!"
-            # If "gt_boxes" does not exist, the proposals must be all negative and
-            # should not be included in regression loss computation.
-            # Here we just use proposal_boxes as an arbitrary placeholder because its
-            # value won't be used in self.box_reg_loss().
             gt_boxes = cat(
                 [(p.gt_boxes if p.has("gt_boxes") else p.proposal_boxes).tensor for p in proposals],
                 dim=0,
             )
         else:
             proposal_boxes = gt_boxes = torch.empty((0, 4), device=proposal_deltas.device)
-
+        w = (self.freq_weight.view(-1) > 1e-4).float()
+        w = torch.cat([w, w.new_ones(1)])
         if self.use_sigmoid_ce:
             if self.ignore_zero_cats:
                 assert NotImplementedError
-            loss_cls = self.sigmoid_cross_entropy_loss(scores, gt_classes)
+            else:
+                loss_cls = self.sigmoid_cross_entropy_loss(scores, gt_classes)
         else:
             if self.ignore_zero_cats:
-            loss_cls = cross_entropy(scores, gt_classes, reduction="mean")
-
+                loss_cls = cross_entropy(scores, gt_classes, reduction="mean", weight=w)
+            else:
+                loss_cls = cross_entropy(scores, gt_classes, reduction="mean")
+            
         losses = {
             "loss_cls": loss_cls,
             "loss_box_reg": self.box_reg_loss(

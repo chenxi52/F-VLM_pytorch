@@ -101,7 +101,7 @@ class ClipFPN(FPN):
 
     def forward(self, x):
         """
-        extrat top_bottom features without grad
+        extract top_bottom features without grad
         """
         with torch.no_grad():
             bottom_up_features = self.bottom_up.forward_featuremap(x)
@@ -113,8 +113,6 @@ class ClipFPN(FPN):
         for idx, (lateral_conv, output_conv) in enumerate(
             zip(self.lateral_convs, self.output_convs)
         ):
-            # Slicing of ModuleList is not supported https://github.com/pytorch/pytorch/issues/47336
-            # Therefore we loop over all modules but skip the first one
             if idx > 0:
                 features = self.in_features[-idx - 1]
                 features = bottom_up_features[features]
@@ -132,4 +130,4 @@ class ClipFPN(FPN):
                 top_block_in_feature = results[self._out_features.index(self.top_block.in_feature)]
             results.extend(self.top_block(top_block_in_feature))
         assert len(self._out_features) == len(results)
-        return {f: res for f, res in zip(self._out_features, results)}
+        return {f: res for f, res in zip(self._out_features, results)}, bottom_up_features[self.in_features[-1]]

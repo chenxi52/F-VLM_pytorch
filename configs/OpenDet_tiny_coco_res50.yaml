@@ -27,7 +27,7 @@ MODEL:
   #   WITH_SINCOS: True
   #   MASK_LOSS_TYPE: "ce_dice" 
   #   PER_QUERY_POINT: 4
-  MASK_ON: False
+  MASK_ON: True
 DATASETS:
   TRAIN: ("coco_zeroshot_train_oriorder",)
   TEST: ("coco_generalized_zeroshot_val",)
@@ -41,11 +41,12 @@ SOLVER:
   OPTIMIZER: 'SGD'
   WEIGHT_DECAY: 0.01
   LR_SCHEDULER_NAME: "WarmupMultiStepLR"
-  WARMPUP_FACTOR: 0.16
+  WARMUP_FACTOR: 0.16
   WARMUP_METHOD: "constant"
   WARMUP_ITERS: 1000
   STEPS: (10125, 10688, 10869)
   GAMMA: 0.1
+  MOMENTUM: 0.9
 INPUT:
   CLIP_TRAIN_SIZE: 1024
   CUSTOM_AUG: ResizeLongLSJ

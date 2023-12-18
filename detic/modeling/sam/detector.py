@@ -133,11 +133,12 @@ class ClipOpenDetector(GeneralizedRCNN):
             return self.inference(batched_inputs, do_postprocess=self.do_postprocess)
         images = [self._move_to_current_device(x["image"]) for x in batched_inputs]
         clip_images = self.resize_norm_long_padding(images, self.clip_train_size) # ImageList
-        sam_images = self.preprocess_image(images)
+        # sam_images = self.preprocess_image(images)
         gt_instances = [x["instances"].to(self.device) for x in batched_inputs] #instance have img_Size with longest-size = 1024
         
-        sam_image_feats = self.extract_feat(sam_images) 
-        fpn_features = self.backbone(clip_images.tensor)
+        # sam_image_feats = self.extract_feat(sam_images) 
+        # clip_feats is ['res5']
+        fpn_features, clip_feats = self.backbone(clip_images.tensor)
         proposals, proposal_losses = self.proposal_generator(
             clip_images, fpn_features, gt_instances)
         
@@ -147,8 +148,11 @@ class ClipOpenDetector(GeneralizedRCNN):
                 self.visualize_training(batched_inputs, proposals)
         del images
         # f-vlm clip image features后面再加
-        _, detector_losses = self.roi_heads(self.sam, img_features=sam_image_feats, 
-                                            features=fpn_features, proposals=proposals, 
+        _, detector_losses = self.roi_heads(sam=self.sam, 
+                                            attnpool=self.clip.visual.attnpool, 
+                                            clip_features=clip_feats, 
+                                            fpn_features=fpn_features, 
+                                            proposals=proposals, 
                                             targets=gt_instances)
         
         losses = {}
