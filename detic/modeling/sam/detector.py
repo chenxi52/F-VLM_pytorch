@@ -180,14 +180,15 @@ class ClipOpenDetector(GeneralizedRCNN):
     
     def resize_norm_long_padding(self, images):
         # padding to 1024
-        # resized_images = [(x.to(torch.float)/255. - self.clip_pixel_mean) / self.clip_pixel_std for x in images]
+        resized_images = [(x.to(torch.float)/255. - self.clip_pixel_mean) / self.clip_pixel_std for x in images]
         # backbone换为 fpn 了
-        images = ImageList.from_tensors(
-            images,
+        # ImageList.from_tensors: padding to 1024
+        resized_images = ImageList.from_tensors(
+            resized_images,
             self.backbone.bottom_up.size_divisibility,
             padding_constraints=self.backbone.bottom_up.padding_constraints,
         )
-        return images
+        return resized_images
     
     def preprocess_image(self, images: List[Dict[str, torch.Tensor]]):
         """
