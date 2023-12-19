@@ -1,5 +1,6 @@
 _BASE_: "Base_ov_mine.yaml"
 MODEL:
+  META_ARCHITECTURE: "ClipOpenDetector" 
   BACKBONE:
     TYPE: "vit_t"
     CLIP_TYPE: "RN50"

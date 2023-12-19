@@ -121,6 +121,7 @@ class ClipOpenDetector(GeneralizedRCNN):
             assert not torch.jit.is_scripting(), \
                 "Scripting is not supported for postprocess."
             # return self.postprocess(pred_instances=results, batched_inputs=batched_inputs, mask_threshold=self.mask_thr_binary)
+            import ipdb;ipdb.set_trace()
             return GeneralizedRCNN._postprocess(results, batched_inputs, clip_images.image_sizes)
         else:
             return results

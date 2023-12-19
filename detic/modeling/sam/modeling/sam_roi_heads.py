@@ -131,7 +131,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         else:
             # propsal_boxes is relative to the original image size.
             # roi align will assign level
-
+            ## padding 问题。
             pred_instances, _ = self.box_predictor.inference(predictions, proposals, clip_feats, avgpool)
             return pred_instances
         

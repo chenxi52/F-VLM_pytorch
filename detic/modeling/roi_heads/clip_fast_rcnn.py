@@ -153,9 +153,6 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
             scores,
             vlm_scores,
             image_shapes,
-            self.test_score_thresh,
-            self.test_nms_thresh,
-            self.test_topk_per_image,
         )
     
     def ov_fast_rcnn_inference(
@@ -164,16 +161,13 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
             scores: List[torch.Tensor],
             vlm_scores: List[torch.Tensor],
             image_shapes: List[Tuple[int, int]],
-            score_thresh: float,
-            nms_thresh: float,
-            topk_per_image: int,
         ):
         """
         add vlm_scores to fast_rcnn_inference
         """
         result_per_image = [
             self.ov_fast_rcnn_inference_single_image(
-                boxes_per_image, scores_per_image, vlm_scores_per_image, image_shape, score_thresh, nms_thresh, topk_per_image
+                boxes_per_image, scores_per_image, vlm_scores_per_image, image_shape
             )
             for scores_per_image, vlm_scores_per_image, boxes_per_image, image_shape in zip(scores, vlm_scores, boxes, image_shapes)
         ]
@@ -185,9 +179,6 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
             scores,
             vlm_scores,
             image_shape: Tuple[int, int],
-            score_thresh: float,
-            nms_thresh: float,
-            topk_per_image: int,
         ):
         """
         add vlm_scores to fast_rcnn_inference_single_image
@@ -213,7 +204,7 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         boxes = boxes.tensor.view(-1, num_bbox_reg_classes, 4)  # R x C x 4
         # 1. Filter results based on detection scores. It can make NMS more efficient
         #    by filtering out low-confidence detections.
-        filter_mask = scores > score_thresh  # R x K
+        filter_mask = scores > self.test_score_thresh  # R x K
         # R' x 2. First column contains indices of the R predictions;
         # Second column contains indices of classes.
         filter_inds = filter_mask.nonzero()
@@ -224,9 +215,9 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         scores = scores[filter_mask]
 
         # 2. Apply NMS for each class independently.
-        keep = batched_nms(boxes, scores, filter_inds[:, 1], nms_thresh)
-        if topk_per_image >= 0:
-            keep = keep[:topk_per_image]
+        keep = batched_nms(boxes, scores, filter_inds[:, 1], self.test_nms_thresh)
+        if self.test_topk_per_image >= 0:
+            keep = keep[:self.test_topk_per_image]
         boxes, scores, filter_inds = boxes[keep], scores[keep], filter_inds[keep]
 
         result = Instances(image_shape)
