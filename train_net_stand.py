@@ -7,7 +7,7 @@ import torch
 from torch.nn.parallel import DistributedDataParallel
 import datetime
 import detectron2.utils.comm as comm
-from detectron2.checkpoint import PeriodicCheckpointer
+from detectron2.checkpoint import PeriodicCheckpointer,DetectionCheckpointer
 from detectron2.config import get_cfg
 from detectron2.data import MetadataCatalog, build_detection_test_loader 
 from detectron2.data.build import build_detection_train_loader
@@ -88,14 +88,12 @@ def do_train(cfg, model, resume=False):
         optimizer = build_optimizer(cfg, model)
 
     scheduler = build_lr_scheduler(cfg, optimizer)
-
-    checkpointer = samCheckpointer(
+    checkpointer = DetectionCheckpointer(
         model, cfg.OUTPUT_DIR, optimizer=optimizer, scheduler=scheduler, 
     )
     start_iter = (
         checkpointer.resume_or_load(cfg.MODEL.WEIGHTS, resume=resume).get("iteration", -1) + 1
     )
-
     max_iter = cfg.SOLVER.MAX_ITER
 
     periodic_checkpointer = PeriodicCheckpointer(
@@ -207,7 +205,7 @@ def main(args):
 
     model = build_model(cfg)
     if args.eval_only:
-        samCheckpointer(model, save_dir=cfg.OUTPUT_DIR).resume_or_load(
+        DetectionCheckpointer(model, save_dir=cfg.OUTPUT_DIR).resume_or_load(
             cfg.MODEL.WEIGHTS, resume=args.resume
         )
         return do_test(cfg, model)

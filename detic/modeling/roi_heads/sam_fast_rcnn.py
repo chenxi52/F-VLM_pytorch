@@ -4,16 +4,14 @@ import torch
 from typing import List, Tuple
 
 from detectron2.config import configurable
-from detectron2.layers import ShapeSpec, cat, cross_entropy, nonzero_tuple
+from detectron2.layers import ShapeSpec, cat, nonzero_tuple
 from detectron2.structures import Boxes, Instances
 from fvcore.nn import giou_loss, smooth_l1_loss
 from detectron2.modeling.roi_heads.fast_rcnn import FastRCNNOutputLayers
-from detectron2.utils.events import get_event_storage
-from detectron2.modeling.box_regression import Box2BoxTransform, _dense_box_regression_loss
 
 __all__ = ["SamRCNNOutputLayers"]
 logger = logging.getLogger(__name__)
-
+# for ori ehad loss
 class SamRCNNOutputLayers(FastRCNNOutputLayers):
     """
     Two linear layers for predicting Fast R-CNN outputs:

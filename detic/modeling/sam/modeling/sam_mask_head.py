@@ -17,8 +17,10 @@ from detic.modeling.utils import load_class_freq, get_fed_loss_inds
 import fvcore.nn.weight_init as weight_init
 from detectron2.modeling.roi_heads.mask_head import mask_rcnn_loss
 from torch.cuda.amp import autocast
+import pickle
+from detectron2.modeling.poolers import ROIPooler
+from detectron2.layers import cross_entropy
 
-# add classification with clip text
 @ROI_MASK_HEAD_REGISTRY.register()
 class samMaskHead(BaseMaskRCNNHead):
     @configurable
@@ -31,6 +33,8 @@ class samMaskHead(BaseMaskRCNNHead):
             ignore_zero_cats: bool = False,
             cat_freq_path: str = '',
             fed_loss_freq_weight: float = 0.0,
+            text_feats: torch.Tensor = None,
+            test_pooler: ROIPooler = None,
             **kwargs
             ) -> None:
         super().__init__(vis_period=vis_period)
@@ -61,7 +65,7 @@ class samMaskHead(BaseMaskRCNNHead):
             nn.Linear(256, 256*sincos*per_query_point)
         )
         self.point_emb = point_emb
-
+        
         if clip_type == 'ViT-B/16':
             self.text_dim = 512
             self.emb_dim = 768
@@ -74,12 +78,12 @@ class samMaskHead(BaseMaskRCNNHead):
             self.text_dim = 1024
             self.emb_dim = 4096
             self.down_dim = self.emb_dim
-        
         self.contextformer = build_contextformer(
             mask_dim=256,
-            d_model=self.text_dim, clip_txt_dim=self.text_dim, normalize_before=False
+            d_model=self.text_dim, 
+            clip_txt_dim=self.text_dim, 
+            normalize_before=False,
         )
-
         def init_weights(m):
             if type(m) == nn.Linear:
                 weight_init.c2_xavier_fill(m)
@@ -90,6 +94,7 @@ class samMaskHead(BaseMaskRCNNHead):
         if ignore_zero_cats:
             freq_weight = load_class_freq(cat_freq_path, fed_loss_freq_weight)
             self.register_buffer('freq_weight', freq_weight)
+        
 
     @classmethod
     def from_config(cls, cfg, input_shape):
@@ -97,6 +102,14 @@ class samMaskHead(BaseMaskRCNNHead):
             num_classes = 1
         else:
             num_classes = cfg.MODEL.ROI_HEADS.NUM_CLASSES
+        with open(cfg.MODEL.CLIP_TEXT_FEATS_PATH,'rb') as f:
+            text_feats = pickle.load(f)[:-1,:]
+        test_pooler = ROIPooler(
+            output_size=cfg.MODEL.ROI_BOX_HEAD.POOLER_RESOLUTION,
+            scales=[1./32,],
+            sampling_ratio=cfg.MODEL.ROI_BOX_HEAD.POOLER_SAMPLING_RATIO,
+            pooler_type=cfg.MODEL.ROI_BOX_HEAD.POOLER_TYPE
+        )
         return {'class_agnostic': cfg.MODEL.ROI_MASK_HEAD.CLS_AGNOSTIC_MASK,
                 'per_query_point': cfg.MODEL.ROI_MASK_HEAD.PER_QUERY_POINT,
                 'with_sincos': cfg.MODEL.ROI_MASK_HEAD.WITH_SINCOS,
@@ -117,26 +130,26 @@ class samMaskHead(BaseMaskRCNNHead):
                 'use_fed_loss': cfg.MODEL.ROI_BOX_HEAD.USE_FED_LOSS,
                 'fed_loss_num_cat': cfg.MODEL.NUM_SAMPLE_CATS,
                 'mask_thr_binary': cfg.TEST.MASK_THR_BINARY,
-                'mask_loss_weight':cfg.MODEL.ROI_MASK_HEAD.MASK_LOSS_WEIGHT
+                'mask_loss_weight':cfg.MODEL.ROI_MASK_HEAD.MASK_LOSS_WEIGHT,
+                'text_feats': text_feats, 
+                'test_pooler': test_pooler,
+                'base_alpha': cfg.MODEL.ROI_BOX_HEAD.BASE_ALPHA,
+                'novel_beta': cfg.MODEL.ROI_BOX_HEAD.NOVEL_BETA,
                 }
     
     def forward(
             self,
             roi_features: torch.Tensor,
-            img_features: torch.Tensor,
             instances: List[Instances],
             sam: nn.Module,
-            clip_images: torch.Tensor,
-            clip_texts: torch.Tensor, 
+            sam_features: torch.Tensor,
+            clip_features: torch.Tensor,
+            boxes: Boxes,
         ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         firstly, inference, and then calculate losses
         Args:
             roi_feature: features after maskroi, multi-level---> roi box
-            features: features from image encoder
-            clip: clip model
-            clip_images: vit-B/16: 512
-            clip_texts: cit-B/16: 512
         Returns:
             A dict of losses in training. The predicted "instances" in inference(List[Dict['instances': Instances]]).
         """
@@ -146,30 +159,31 @@ class samMaskHead(BaseMaskRCNNHead):
         if self.with_sincos: 
             point_emd = torch.sin(point_emd[..., ::2] + point_emd[..., 1::2])
         nomask_dense_embeddings = sam.prompt_encoder.no_mask_embed.weight.reshape(1, -1, 1, 1).expand(
-            point_emd.shape[0], -1, *img_features.shape[-2:]
+            point_emd.shape[0], -1, *sam_features.shape[-2:]
         )
         img_flag_ids = torch.tensor([len(i) for i in instances], device=roi_features.device, dtype=torch.long)
-        padding = torch.zeros((len(img_features)-len(img_flag_ids),), device=img_flag_ids.device, dtype=img_flag_ids.dtype)
-        # padding: what if no_mask exist in the 
+        padding = torch.zeros((len(sam_features)-len(img_flag_ids),), device=img_flag_ids.device, dtype=img_flag_ids.dtype)
         img_flag_ids = torch.cat([img_flag_ids, padding])
         
-        img_embeddings = torch.repeat_interleave(img_features, img_flag_ids, dim=0)
-        clip_img_embeddings = torch.repeat_interleave(clip_images, img_flag_ids, dim=0)
+        sam_features = torch.repeat_interleave(sam_features, img_flag_ids, dim=0)
+        clip_features = torch.repeat_interleave(clip_features, img_flag_ids, dim=0)
         img_pe = sam.prompt_encoder.get_dense_pe()
-        img_pe = repeat(img_pe, 'b c h w -> (b n) c h w', n=img_embeddings.shape[0])
+        img_pe = repeat(img_pe, 'b c h w -> (b n) c h w', n=sam_features.shape[0])
+        
         # select foreGround proposals first will save computation here.
-
         with autocast():
             low_res_masks, mask_tokens = sam.mask_decoder.forward_batch(
-                image_embeddings=img_embeddings,
+                image_embeddings=sam_features,
                 image_pe=img_pe,
                 sparse_prompt_embeddings=point_emd,
                 dense_prompt_embeddings=nomask_dense_embeddings,
                 multimask_output=False,
             )
-            logits_image,_ = self.contextformer(mask_tokens, clip_img_embeddings, clip_texts)#mask_tokens: (batch_size, 1, self.emb_dim),clip: [bz,self.emb_dim, 32,32]
+            logits_image,_ = self.contextformer(mask_tokens, clip_features, self.text_feats)
+            #mask_tokens: (batch_size, 1, self.emb_dim),clip: [bz,self.emb_dim, 32,32]
         low_res_masks = torch.nn.functional.interpolate(low_res_masks, size=(self.train_size, self.train_size), mode='bilinear', align_corners=False)
         if self.training:
+            del boxes
             gt_classes = (
                 cat([p.gt_classes for p in instances], dim=0)
                 )
@@ -179,11 +193,24 @@ class samMaskHead(BaseMaskRCNNHead):
             assert len(logits_image.shape) == 2, print('logits_image.shape: ', logits_image.shape)
             target_classes_onehot.scatter_(1, gt_classes.unsqueeze(-1), 1)
             # what if the classification not include background. The classification will not be interupted?
+            if self.ignore_zero_cats:
+                w = (self.freq_weight.view(-1) > 1e-4).float()
+                w = torch.cat([w, w.new_ones(1)])
+                loss_cls = cross_entropy(logits_image, gt_classes, reduction="mean", weight=w)
+            else:
+                loss_cls = cross_entropy(logits_image, gt_classes, reduction="mean")
+            
             loss ={"loss_mask": self.custom_mask_rcnn_loss(low_res_masks, instances, self.vis_period) * self.mask_loss_weight,
-                   "loss_cls": self.sigmoid_focal_loss(logits_image, target_classes_onehot, gt_classes)}
+                   "loss_cls": loss_cls
+                   }
             return loss
         else:
-            new_instances = self.custom_mask_rcnn_inference(low_res_masks, instances, logits_image[:,:-1], self.score_thresh, self.top_per_instance, self.test_nms_thresh)
+            # low_res_masks, logits_image(scores, class), vlm_scores, 
+            new_instances = self.custom_mask_rcnn_inference(low_res_masks, 
+                                                            instances, 
+                                                            logits_image, 
+                                                            boxes,
+                                                            clip_features)
             return new_instances
         
     @torch.jit.unused
@@ -214,13 +241,6 @@ class samMaskHead(BaseMaskRCNNHead):
             w = torch.cat([w, w.new_ones(1)])
             weight = weight * w
         return (loss*weight).mean(1).sum() / B
-    
-    def get_logits(self, region_features, text_features, logit_scale):
-        # 计算image_features @ text_features.T相似度矩阵
-        region_features = region_features / (region_features.norm(dim=-1, keepdim=True) + 1e-7)
-        logits_per_image = logit_scale * region_features @ (text_features.unsqueeze(0).transpose(1, 2))
-        logits_per_text = logit_scale * (text_features.unsqueeze(0)) @ region_features.transpose(1, 2)
-        return logits_per_image, logits_per_text
     
     @torch.jit.unused
     def custom_mask_rcnn_loss(self, pred_mask_logits: torch.Tensor, instances: List[Instances], vis_period: int = 0):
@@ -311,13 +331,16 @@ class samMaskHead(BaseMaskRCNNHead):
             assert False, 'mask loss type not supported'
         return mask_loss
 
-    def custom_mask_rcnn_inference(self, pred_mask_logits: torch.Tensor, pred_instances: List[Instances], logits_image: torch.Tensor,
-                                score_thresh: float, top_per_instance: int = 100, nms_thresh: float = 0.5):
+    def custom_mask_rcnn_inference(self, 
+                                pred_mask_logits: torch.Tensor, 
+                                pred_instances: List[Instances], 
+                                logits_image: torch.Tensor,
+                                boxes: Boxes = None,
+                                clip_features: torch.Tensor = None,
+                                attenpool: nn.AdaptiveAvgPool2d = None,
+                                ):
         """
-        Convert pred_mask_logits to estimated foreground probability masks while also
-        extracting only the masks for the predicted classes in pred_instances. For each
-        predicted box, the mask of the same class is attached to the instance by adding a
-        new "pred_masks" field to pred_instances.
+        boxes to crop vlm features and get vlm_scores
         """
         cls_agnostic_mask = pred_mask_logits.size(1) == 1
 
@@ -334,31 +357,46 @@ class samMaskHead(BaseMaskRCNNHead):
             )
             indices = move_device_like(torch.arange(num_masks, device=device), class_pred)
             mask_probs_pred = pred_mask_logits[indices, class_pred][:, None].sigmoid()
-        # mask_probs_pred.shape: (B, 1, Hmask, Wmask)
 
         num_boxes_per_image = [len(i) for i in pred_instances]
         mask_probs_pred = mask_probs_pred.split(num_boxes_per_image, dim=0)
-
+        logits_image = F.softmax(logits_image, dim=1)
         logits_image = logits_image.split(num_boxes_per_image, dim=0)
-        return self.inference_single_image(mask_probs_pred, logits_image, pred_instances, score_thresh, top_per_instance, nms_thresh )
 
+        vlm_box_features = self.test_pooler([clip_features], boxes)
+        # vlm pooler layer: clip attenpool
+        vlm_box_features = attenpool(vlm_box_features)
+        vlm_box_features = vlm_box_features / vlm_box_features.norm(dim=1,keepdim=True)
+        logits_scale = 1/0.01
+        vlm_scores = logits_scale * vlm_box_features @ (self.text_feats.t().to(vlm_box_features.device))
+        vlm_scores = torch.nn.functional.softmax(vlm_scores, dim=1)
+        vlm_scores = vlm_scores.split(num_boxes_per_image, dim=0)
 
-    def inference_single_image(self, mask_probs_pred, logits_image, pred_instances, score_thresh, top_per_instance, nms_thresh):
-        # batch nms for single instance, class-wisely
+        return self.inference_single_image(mask_probs_pred, 
+                                           logits_image=logits_image, 
+                                           pred_instances=pred_instances,
+                                           vlm_socres=vlm_scores)
+
+    # classification score consider vlm text score.
+    def inference_single_image(self, mask_probs_pred, logits_image, pred_instances, vlm_scores):
         instance_list = []
-        for prob, logits, instances in zip(mask_probs_pred, logits_image, pred_instances):
+        for prob, logits, instances, vlm_score in zip(mask_probs_pred, logits_image, pred_instances, vlm_scores):
             new_instance = Instances(instances.image_size).to(logits.device)
-            scores = logits.sigmoid()
             boxes = instances.pred_boxes.tensor
             objectness = instances.objectness
             if self.test_score_type == 'ob_mul_cls':
-                scores = scores * objectness[:, None]
+                scores = logits * objectness[:, None]
             elif self.test_score_type == 'ob_geo_cls':
-                scores = scores**(1-self.test_geometric_fact) * objectness[:, None]**self.test_geometric_fact
+                scores = logits**(1-self.test_geometric_fact) * objectness[:, None]**self.test_geometric_fact
             elif self.test_score_type == 'cls':
-                pass
+                # with vlm scores
+                w = (self.freq_weight.view(-1) > 1e-4).float()
+                base_score = ((logits * w)**(1-self.base_alpha)) * ((vlm_score*w)**(self.base_alpha))
+                novel_score = ((logits * (1-w))**(1-self.novel_beta)) * ((vlm_score*(1-w))**(self.novel_beta))
+                scores = base_score + novel_score
+
             masks = prob
-            filter_mask = scores>score_thresh
+            filter_mask = scores>self.score_thresh
             num_bbox_reg_classes = boxes.shape[1] // 4
             filter_inds = filter_mask.nonzero()
             boxes = boxes.view(-1, num_bbox_reg_classes, 4)
@@ -367,9 +405,9 @@ class samMaskHead(BaseMaskRCNNHead):
             else:
                 boxes = boxes[filter_mask]
             scores = scores[filter_mask]
-            keep = batched_nms(boxes, scores, filter_inds[:, 1], nms_thresh)
-            if top_per_instance >= 0:
-                keep = keep[:top_per_instance]
+            keep = batched_nms(boxes, scores, filter_inds[:, 1], self.nms_thresh)
+            if self.top_per_instance >= 0:
+                keep = keep[:self.top_per_instance]
             boxes, scores, filter_inds = boxes[keep], scores[keep], filter_inds[keep]
 
             new_instance.pred_boxes = Boxes(boxes)  # (1, Hmask, Wmask)

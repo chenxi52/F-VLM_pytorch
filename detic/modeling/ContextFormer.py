@@ -1,6 +1,6 @@
 import copy
 from typing import Optional, List
-
+import math
 import torch
 import torch.nn.functional as F
 from torch import nn, Tensor
@@ -184,7 +184,6 @@ class build_contextformer(nn.Module):
 
     def get_qs(self, q, cls):
         # concat[cls*txt,txt]
-        C, dim = q.shape
         bs, _ = cls.shape
         q = q.expand(bs, -1, -1)
 
@@ -205,7 +204,7 @@ class build_contextformer(nn.Module):
         pe = self.pe(visual_tokens.shape[-2]).unsqueeze(0)
         pe = torch.repeat_interleave(pe, visual_tokens.shape[0], dim=0)
         mask_img = self.decoder2(mask_text, visual_tokens, pos=pe)
-        return self.get_logits(mask_img.squeeze(), clip_txt)
+        return self.get_logits(mask_img.squeeze())
 
     def get_logits(self, image, text):
         image = image/(image.norm(dim=-1, keepdim=True) + 1e-7)
@@ -215,7 +214,8 @@ class build_contextformer(nn.Module):
         mask_cls_img = logit_scale * image @ text.t()
         mask_cls_txt = mask_cls_img.t()
         return mask_cls_img, mask_cls_txt
-import math
+    
+
 class PositionalEncoding(nn.Module):
     def __init__(self, D, max_len=5000):
         super(PositionalEncoding, self).__init__()

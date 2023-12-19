@@ -1,11 +1,8 @@
 _BASE_: "Base_ov_mine.yaml"
 MODEL:
-  META_ARCHITECTURE: "ClipOpenDetector" 
   BACKBONE:
-    TYPE: "vit_t"
     CLIP_TYPE: "RN50"
   CLIP_TEXT_FEATS_PATH: "datasets/coco/coco_cls.pkl"
-  WEIGHTS: "mobile_sam.pt"
   RPN:
     HEAD_NAME: "StandardRPNHead"
     PRE_NMS_TOPK_TRAIN: 2000  # Per FPN level
@@ -25,8 +22,6 @@ MODEL:
     NOVEL_BETA: 0.45
   ROI_MASK_HEAD:
     NAME: "MaskRCNNConvUpsampleHead"
-    NUM_CONV: 4
-    POOLER_RESOLUTION: 14
   MASK_ON: True
 DATASETS:
   TRAIN: ("coco_zeroshot_train_oriorder",)

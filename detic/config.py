@@ -135,6 +135,7 @@ def add_detic_config(cfg):
 
 def add_rsprompter_config(cfg):
     _C = cfg
+    _C.MODEL.SAM_WEIGHTS = ''
     _C.MODEL.BACKBONE.TYPE = 'vit_h'
     _C.MODEL.BACKBONE.CLIP_TYPE = 'RN50'
     _C.MODEL.BACKBONE.ADD_UNFROZEN = 'xxx'
@@ -161,8 +162,11 @@ def add_rsprompter_config(cfg):
     _C.MODEL.ROI_MASK_HEAD.MASK_LOSS_TYPE = 'ce'
     _C.MODEL.ROI_MASK_HEAD.MASK_LOSS_WEIGHT = 1.0
     _C.MODEL.ROI_MASK_HEAD.PER_QUERY_POINT = 4
-    _C.MODEL.SAM_FROZEN = False
-
+    _C.MODEL.SAM_FROZEN = True
+    _C.MODEL.SAM_ON = False
+    _C.MODEL.SAM_PIXEL_MEAN = [0.,0.,0.]
+    _C.MODEL.SAM_PIXEL_STD = [1.,1.,1.]
+    
     _C.MODEL.CONFIGS = CN()
     _C.MODEL.CONFIGS.ONLY_DECODER = False
 
@@ -196,4 +200,3 @@ def add_rsprompter_config(cfg):
     _C.DATALOADER.PERSISTENT_WORKERS = False
 
     _C.WANDB = False
-    

@@ -1,10 +1,14 @@
-_BASE_: "Fvlm_tiny_coco.yaml"
+_BASE_: "Base_ov_mine.yaml"
 MODEL:
   BACKBONE:
     TYPE: "vit_t"
     CLIP_TYPE: "RN50"
   CLIP_TEXT_FEATS_PATH: "datasets/coco/coco_cls.pkl"
-  WEIGHTS: "mobile_sam.pt"
+  SAM_WEIGHTS: "mobile_sam.pt"
+  PROPOSAL_GENERATOR:
+    NAME: "SAMRPN"
+  SAM_PIXEL_MEAN: [123.675, 116.280, 103.530]
+  SAM_PIXEL_STD: [58.395, 57.12, 57.375]
   RPN:
     HEAD_NAME: "StandardRPNHead"
     PRE_NMS_TOPK_TRAIN: 2000  # Per FPN level
@@ -18,13 +22,16 @@ MODEL:
     BBOX_REG_WEIGHTS: (10.0, 10.0, 5.0, 5.0)
     IGNORE_ZERO_CATS: True 
     CAT_FREQ_PATH: 'datasets/coco/zero-shot/instances_train2017_seen_2_oriorder_cat_info.json'
-    BASE_ALPHA: 0.35
-    NOVEL_BETA: 0.65
+    BASE_ALPHA: 0.2
+    NOVEL_BETA: 0.45
+    TRAIN_ON_PRED_BOXES: True #!!!!!
   ROI_MASK_HEAD:
-    NAME: "MaskRCNNConvUpsampleHead"
-    NUM_CONV: 4
-    POOLER_RESOLUTION: 14
+    NAME: "samMaskHead"
+    MASK_LOSS_TYPE: "ce_dice" 
+    WITH_SINCOS: True
+    PER_QUERY_POINT: 4
   MASK_ON: True
+  SAM_ON: True # !!!!
 DATASETS:
   TRAIN: ("coco_zeroshot_train_oriorder",)
   TEST: ("coco_generalized_zeroshot_val",)
@@ -46,11 +53,11 @@ SOLVER:
   MOMENTUM: 0.9
 INPUT:
   CLIP_TRAIN_SIZE: 1024
-  CUSTOM_AUG: ResizeLongLSJ
+  CUSTOM_AUG: ResizeLongLSJ2 # !!!!
+  PROMPT_SIZE: (90, 4)
 TEST:
   DETECTIONS_PER_IMAGE: 300  #test_topk_per_image
   EVAL_PERIOD: 11250 # change
   IMS_PER_BATCH: 1 #every gpu has most 2 images  # change
-  SCORE_TYPE: 'ob_geo_cls'
-  GEOMETRIC_FACT: 0.35
-OUTPUT_DIR: './output/ovcoco'
+  SCORE_TYPE: 'cls'
+OUTPUT_DIR: './output/ClipRpnSamOn'

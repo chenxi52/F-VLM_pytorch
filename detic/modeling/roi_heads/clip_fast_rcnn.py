@@ -3,9 +3,11 @@ import logging
 import torch
 import torch.nn as nn
 from typing import  List, Tuple
+from fvcore.nn import giou_loss, smooth_l1_loss
 
+from detectron2.layers import cat, ciou_loss, diou_loss
 from detectron2.config import configurable
-from detectron2.layers import ShapeSpec, batched_nms, cat, cross_entropy
+from detectron2.layers import ShapeSpec, batched_nms, cat, cross_entropy, nonzero_tuple
 from detectron2.structures import Instances, Boxes
 from detectron2.modeling.roi_heads.fast_rcnn import FastRCNNOutputLayers, _log_classification_stats
 from detic.modeling.utils import load_class_freq
@@ -138,20 +140,52 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         }
         return {k: v * self.loss_weight.get(k, 1.0) for k, v in losses.items()}
 
+    def box_reg_loss(self, proposal_boxes, gt_boxes, pred_deltas, gt_classes):
+        """
+        和之前的 reg_loss不同的是，只计算和对应的 proposal的 delta 作为目标回归对象
+        而不是原来的和所有的 propsal_boxes 的 loss 
+        """
+        box_dim = proposal_boxes.shape[1]  # 4 or 5
+        fg_inds = nonzero_tuple((gt_classes >= 0) & (gt_classes < self.num_classes))[0]
+        if pred_deltas.shape[1] == box_dim:  # cls-agnostic regression
+            fg_pred_deltas = pred_deltas[fg_inds]
+        else:
+            fg_pred_deltas = pred_deltas.view(-1, self.num_classes, box_dim)[
+                fg_inds, gt_classes[fg_inds]
+            ]
+
+        if self.box_reg_loss_type == "smooth_l1":
+            gt_pred_deltas = self.box2box_transform.get_deltas(
+                proposal_boxes[fg_inds],
+                gt_boxes[fg_inds],
+            )
+            # actually it's mean loss finally in the output of return
+            loss_box_reg = smooth_l1_loss(
+                fg_pred_deltas, gt_pred_deltas, self.smooth_l1_beta, reduction='sum'
+            )
+        elif self.box_reg_loss_type == "giou":
+            fg_pred_boxes = self.box2box_transform.apply_deltas(
+                fg_pred_deltas, proposal_boxes[fg_inds]
+            )
+            loss_box_reg = giou_loss(fg_pred_boxes, gt_boxes[fg_inds], reduction="sum")
+        else:
+            raise ValueError(f"Invalid bbox reg loss type '{self.box_reg_loss_type}'")
+        return loss_box_reg / max(gt_classes.numel(), 1.0)
+
+
     def inference(self, predictions: Tuple[torch.Tensor, torch.Tensor], 
                   proposals: List[Instances], clip_feats: torch.Tensor,
-                  avgpool: nn.AdaptiveAvgPool2d):
+                  attenpool: nn.AdaptiveAvgPool2d):
         """
         align vlm_box_features with text_feats
         """
-
         boxes = self.predict_boxes(predictions, proposals)
         scores = self.predict_probs(predictions, proposals)
         image_shapes = [x.image_size for x in proposals]
 
         vlm_box_features = self.test_pooler([clip_feats], [Boxes(box) for box in boxes])
         # vlm pooler layer: clip attenpool
-        vlm_box_features = avgpool(vlm_box_features)
+        vlm_box_features = attenpool(vlm_box_features)
         vlm_box_features = vlm_box_features / vlm_box_features.norm(dim=1,keepdim=True)
         logits_scale = 1/0.01
         vlm_scores = logits_scale * vlm_box_features @ (self.text_feats.t().to(vlm_box_features.device))

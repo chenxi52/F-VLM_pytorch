@@ -5,7 +5,7 @@ from detectron2.modeling.backbone.fpn import LastLevelMaxPool, FPN
 from typing import Dict
 
 @BACKBONE_REGISTRY.register()
-def build_clip_fpn_backbone(cfg, clip_model, input_shape=None):
+def build_clip_fpn_backbone(cfg, input_shape=None):
     """
     Build a backbone from `cfg.MODEL.BACKBONE.NAME`.
 
@@ -14,7 +14,7 @@ def build_clip_fpn_backbone(cfg, clip_model, input_shape=None):
     """
     # backbone type
     backbone = ClipFPN(
-        bottom_up=clip_model,
+        input_shapes=input_shape,
         in_features=cfg.MODEL.FPN.IN_FEATURES,
         out_channels=cfg.MODEL.FPN.OUT_CHANNELS,
         norm=cfg.MODEL.FPN.NORM,
@@ -32,7 +32,8 @@ class ClipFPN(FPN):
     _fuse_type: torch.jit.Final[str]
     def __init__(
         self,
-        bottom_up,
+        # bottom_up,
+        input_shapes,
         in_features,
         out_channels,
         norm="",
@@ -49,7 +50,7 @@ class ClipFPN(FPN):
         super(FPN, self).__init__()
         assert in_features, in_features
         # Feature map strides and channels from the bottom up network (e.g. ResNet)
-        input_shapes = bottom_up.output_shape
+        # input_shapes = bottom_up.output_shape
         strides = [input_shapes[f].stride for f in in_features]
         in_channels_per_feature = [input_shapes[f].channels for f in in_features]
 
@@ -88,7 +89,6 @@ class ClipFPN(FPN):
         self.output_convs = output_convs[::-1]
         self.top_block = top_block
         self.in_features = tuple(in_features)
-        self.bottom_up = bottom_up
         # Return feature names are "p<stage>", like ["p2", "p3", ..., "p6"]
         self._out_feature_strides = {"p{}".format(int(math.log2(s))): s for s in strides}
         # top block output feature maps.
@@ -103,14 +103,15 @@ class ClipFPN(FPN):
         self._fuse_type = fuse_type
         self.fp16 = fp16
 
-    def forward(self, x):
+    def forward(self, bottom_up_features):
         """
+        bottom_up_features: inter_features from clip
         extract top_bottom features without grad
         """
-        with torch.no_grad():
-            bottom_up_features = self.bottom_up.forward_featuremap(x)
-        if self.fp16:
-            bottom_up_features = {k: v.half() for k, v in bottom_up_features.items()}   
+        # with torch.no_grad():
+        #     bottom_up_features = self.bottom_up.forward_featuremap(x)
+        # if self.fp16:
+        #     bottom_up_features = {k: v.half() for k, v in bottom_up_features.items()}   
         results = []
         prev_features = self.lateral_convs[0](bottom_up_features[self.in_features[-1]])
         results.append(self.output_convs[0](prev_features))
@@ -136,4 +137,4 @@ class ClipFPN(FPN):
                 top_block_in_feature = results[self._out_features.index(self.top_block.in_feature)]
             results.extend(self.top_block(top_block_in_feature))
         assert len(self._out_features) == len(results)
-        return {f: res for f, res in zip(self._out_features, results)}, bottom_up_features[self.in_features[-1]]
+        return {f: res for f, res in zip(self._out_features, results)}

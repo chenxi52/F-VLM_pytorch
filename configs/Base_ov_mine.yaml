@@ -2,24 +2,21 @@ MODEL:
   META_ARCHITECTURE: "ClipOpenDetector" 
   BACKBONE:
     NAME: "build_clip_fpn_backbone" #SAM vit_h
-    TYPE: "vit_t"
     CLIP_TYPE: "ViT-B/16"
     ADD_UNFROZEN: 'xxx' # unfrozen extra part of model, the name is relative to sam and clip
-  WEIGHTS: "mobile_sam.pt"
+  WEIGHTS: ''
   FPN:
     OUT_CHANNELS: 256
     IN_CHANNELS: [256]
     ANCHOR_STRIDE: [4, 8, 16, 32, 64]
     NORM: 'LN'
     IN_FEATURES: ["res2", "res3", "res4", "res5"] 
-  PIXEL_MEAN: [123.675, 116.280, 103.530]
-  PIXEL_STD: [58.395, 57.12, 57.375]
+  PIXEL_MEAN: [0.48145466, 0.4578275, 0.40821073]
+  PIXEL_STD: [0.26862954, 0.26130258, 0.27577711]
   ANCHOR_GENERATOR:
     NAME: "DefaultAnchorGenerator"
     SIZES: [[32],[64],[128],[256],[512]] 
     ASPECT_RATIOS: [[0.5, 1.0, 2.0]]  # Three aspect ratios (same for all in feature maps)
-  PROPOSAL_GENERATOR:
-    NAME: "SAMRPN"
   RPN:
     HEAD_NAME: "StandardRPNHead"
     IN_FEATURES: ["p2", "p3", "p4", "p5", "p6"] 
@@ -67,16 +64,13 @@ MODEL:
     IGNORE_ZERO_CATS: True
     CAT_FREQ_PATH: 'datasets/coco/zero-shot/instances_train2017_seen_2_oriorder_cat_info.json'
   ROI_MASK_HEAD:
-    NAME: "samMaskHead"
+    NAME: "MaskRCNNConvUpsampleHead"
     NUM_CONV: 4
     CLS_AGNOSTIC_MASK: True
-    WITH_SINCOS: True
-    MASK_LOSS_TYPE: "ce_dice" 
     MASK_LOSS_WEIGHT: 1.0
     POOLER_RESOLUTION: 14
     POOLER_SAMPLING_RATIO: 0
     POOLER_TYPE: "ROIAlignV2"
-    PER_QUERY_POINT: 4
   MASK_ON: True
 DATASETS:
   TRAIN: ("coco_zeroshot_train_oriorder",)
@@ -104,11 +98,10 @@ INPUT:
   TRAIN_SIZE: 1024
   TEST_SIZE: 1024 
   TEST_INPUT_TYPE: ResizeLongestSize
-  PROMPT_SIZE: (90, 4)
   CUSTOM_AUG: ResizeLongestSize
   FORMAT: "RGB"
   MASK_FORMAT: "bitmask"
-  CLIP_TRAIN_SIZE: 224
+  CLIP_TRAIN_SIZE: 1024
 TEST:
   DETECTIONS_PER_IMAGE: 300  #test_topk_per_image
   MASK_THR_BINARY: 0.5  
@@ -119,3 +112,4 @@ VERSION: 2
 FP16: True
 OUTPUT_DIR: './output/ovcoco'
 WANDB: False
+VIS_PERIOD: 0
