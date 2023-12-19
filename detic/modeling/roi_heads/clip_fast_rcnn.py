@@ -61,7 +61,9 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         self.register_buffer('base_ones', base_ones)
         unused_index = get_contigous_ids('unused') # [0-79]
         self.register_buffer('unused_index', torch.tensor(unused_index))
-
+        novel_ones = 1 - base_ones
+        novel_ones[unused_index] = 0
+        self.register_buffer('novel_ones', novel_ones)
 
     @classmethod
     def from_config(cls, cfg, input_shape):
@@ -90,7 +92,7 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
     def forward(self,x):
         if x.dim()>2:
             x = torch.flatten(x, start_dim=1) 
-        x_norm = x/x.norm(dim=1,keepdim=True)
+        x_norm = x/x.norm(dim=1, keepdim=True)
         logits_scale = self.logit_scale.exp()
         with autocast():
             scores = logits_scale * x_norm @ (self.text_feats.t().to(x.device))
@@ -127,11 +129,13 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         else:
             if self.ignore_zero_cats:
                 w = self.base_ones
-                w = torch.cat([w, w.new_ones(1)*self.background_weight])
-                loss_cls = cross_entropy(scores, gt_classes, reduction="mean", weight=w)
+                w = torch.cat([w, w.new_ones(1)])
+                loss_cls = cross_entropy(scores, gt_classes, reduction="none", weight=w)
+                weights = torch.where(gt_classes==(scores.shape[-1]-1), torch.tensor(self.background_weight).to(gt_classes.device), torch.tensor(1.0).to(gt_classes.device))
+                loss_cls = loss_cls * weights
+                loss_cls = loss_cls.mean()
             else:
                 loss_cls = cross_entropy(scores, gt_classes, reduction="mean")
-            
         losses = {
             "loss_cls": loss_cls,
             "loss_box_reg": self.box_reg_loss(
@@ -239,10 +243,11 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
             vlm_scores = vlm_scores[valid_mask]
         scores = scores[:, :-1]
         vlm_scores = vlm_scores[:, :-1]
-        # 0 会自动过滤掉
+        # 0 会自动过滤掉; 0: unseen box or unused box
         base_scores = ((scores * self.base_ones)**(1-self.base_alpha)) * ((vlm_scores*self.base_ones)**(self.base_alpha))
-        novel_scores = ((scores * (1-self.base_ones))**(1-self.novel_beta)) * ((vlm_scores*(1-self.base_ones))**(self.novel_beta))
+        novel_scores = ((scores * self.novel_ones)**(1-self.novel_beta)) * ((vlm_scores*self.novel_ones)**(self.novel_beta))
         scores = base_scores + novel_scores
+        assert scores[:, self.unused_index].max() < 1e-5, 'unused classes should not be evaluated'
 
         num_bbox_reg_classes = boxes.shape[1] // 4
         boxes = Boxes(boxes.reshape(-1, 4))
