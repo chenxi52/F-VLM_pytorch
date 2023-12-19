@@ -13,6 +13,7 @@ import numpy as np
 import pickle
 from detectron2.modeling.poolers import ROIPooler
 from torch.cuda.amp import autocast
+from detic.data.datasets.coco_zeroshot import get_contigous_ids
 __all__ = ["SamRCNNOutputLayers"]
 logger = logging.getLogger(__name__)
 
@@ -36,10 +37,10 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         base_alpha: float,
         novel_beta: float,
         test_pooler: ROIPooler,
+        background_weight: float,
         **kwargs
     ):
         super().__init__(input_shape, **kwargs)
-        self.text_feats = text_feats
         self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
         self.cls_score = None
         if ignore_zero_cats:
@@ -51,12 +52,22 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         self.base_alpha = base_alpha
         self.novel_beta = novel_beta
         self.test_pooler = test_pooler
+        self.background_weight = background_weight
+        self.register_buffer('text_feats', text_feats) 
+        # base_ones: 0 or 1 [0,79]
+        base_ones = (freq_weight.view(-1) > 1e-4).float()
+        self.register_buffer('base_ones', base_ones)
+        unused_index = get_contigous_ids('unused') # [0-79]
+        self.register_buffer('unused_index', torch.tensor(unused_index))
+
 
     @classmethod
     def from_config(cls, cfg, input_shape):
         ret = super().from_config(cfg, input_shape)
         with open(cfg.MODEL.CLIP_TEXT_FEATS_PATH,'rb') as f:
-            ret['text_feats'] = pickle.load(f)
+            text_feats = pickle.load(f)
+        # seen_unseen + background
+        ret['text_feats'] = text_feats
         ret['ignore_zero_cats'] = cfg.MODEL.ROI_BOX_HEAD.IGNORE_ZERO_CATS
         ret['cat_freq_path'] = cfg.MODEL.ROI_BOX_HEAD.CAT_FREQ_PATH
         ret['use_fed_loss'] = cfg.MODEL.ROI_BOX_HEAD.USE_FED_LOSS
@@ -64,6 +75,7 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         ret['fed_loss_freq_weight'] = cfg.MODEL.ROI_BOX_HEAD.FED_LOSS_FREQ_WEIGHT
         ret['base_alpha'] = cfg.MODEL.ROI_BOX_HEAD.BASE_ALPHA
         ret['novel_beta'] = cfg.MODEL.ROI_BOX_HEAD.NOVEL_BETA
+        ret['background_weight'] = cfg.MODEL.ROI_BOX_HEAD.BACKGROUND_WEIGHT
         test_pooler = ROIPooler(
             output_size=cfg.MODEL.ROI_BOX_HEAD.POOLER_RESOLUTION,
             scales=[1./32,],
@@ -80,7 +92,8 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         logits_scale = self.logit_scale.exp()
         with autocast():
             scores = logits_scale * x_norm @ (self.text_feats.t().to(x.device))
-       
+            if not self.training:
+                scores[:, self.unused_index] = float('-inf')
         proposal_deltas = self.bbox_pred(x)
         return  scores, proposal_deltas
     
@@ -111,8 +124,8 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
                 loss_cls = self.sigmoid_cross_entropy_loss(scores, gt_classes)
         else:
             if self.ignore_zero_cats:
-                w = (self.freq_weight.view(-1) > 1e-4).float()
-                w = torch.cat([w, w.new_ones(1)])
+                w = self.base_ones
+                w = torch.cat([w, w.new_ones(1)*self.background_weight])
                 loss_cls = cross_entropy(scores, gt_classes, reduction="mean", weight=w)
             else:
                 loss_cls = cross_entropy(scores, gt_classes, reduction="mean")
@@ -125,14 +138,13 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         }
         return {k: v * self.loss_weight.get(k, 1.0) for k, v in losses.items()}
 
-    
-    
     def inference(self, predictions: Tuple[torch.Tensor, torch.Tensor], 
                   proposals: List[Instances], clip_feats: torch.Tensor,
                   avgpool: nn.AdaptiveAvgPool2d):
         """
         align vlm_box_features with text_feats
         """
+
         boxes = self.predict_boxes(predictions, proposals)
         scores = self.predict_probs(predictions, proposals)
         image_shapes = [x.image_size for x in proposals]
@@ -144,6 +156,7 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         logits_scale = 1/0.01
         vlm_scores = logits_scale * vlm_box_features @ (self.text_feats.t().to(vlm_box_features.device))
         num_inst_per_image = [len(p) for p in proposals]
+        vlm_scores[:, self.unused_index] = float('-inf')
         vlm_scores = torch.nn.functional.softmax(vlm_scores, dim=1)
         vlm_scores = vlm_scores.split(num_inst_per_image, dim=0)
         # scores are differnent for base and novel class, and background score comes from the detector
@@ -192,10 +205,9 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
             vlm_scores = vlm_scores[valid_mask]
         scores = scores[:, :-1]
         vlm_scores = vlm_scores[:, :-1]
-        w = (self.freq_weight.view(-1) > 1e-4).float()
-
-        base_scores = ((scores * w)**(1-self.base_alpha)) * ((vlm_scores*w)**(self.base_alpha))
-        novel_scores = ((scores * (1-w))**(1-self.novel_beta)) * ((vlm_scores*(1-w))**(self.novel_beta))
+        # 0 会自动过滤掉
+        base_scores = ((scores * self.base_ones)**(1-self.base_alpha)) * ((vlm_scores*self.base_ones)**(self.base_alpha))
+        novel_scores = ((scores * (1-self.base_ones))**(1-self.novel_beta)) * ((vlm_scores*(1-self.base_ones))**(self.novel_beta))
         scores = base_scores + novel_scores
 
         num_bbox_reg_classes = boxes.shape[1] // 4

@@ -121,7 +121,6 @@ class ClipOpenDetector(GeneralizedRCNN):
             assert not torch.jit.is_scripting(), \
                 "Scripting is not supported for postprocess."
             # return self.postprocess(pred_instances=results, batched_inputs=batched_inputs, mask_threshold=self.mask_thr_binary)
-            import ipdb;ipdb.set_trace()
             return GeneralizedRCNN._postprocess(results, batched_inputs, clip_images.image_sizes)
         else:
             return results
@@ -179,12 +178,9 @@ class ClipOpenDetector(GeneralizedRCNN):
         return tuple(transformed_size.tolist())
     
     def resize_norm_long_padding(self, images):
-        # padding to 1024
-        resized_images = [(x.to(torch.float)/255. - self.clip_pixel_mean) / self.clip_pixel_std for x in images]
-        # backbone换为 fpn 了
         # ImageList.from_tensors: padding to 1024
         resized_images = ImageList.from_tensors(
-            resized_images,
+            images,
             self.backbone.bottom_up.size_divisibility,
             padding_constraints=self.backbone.bottom_up.padding_constraints,
         )
@@ -194,7 +190,6 @@ class ClipOpenDetector(GeneralizedRCNN):
         """
         Normalize, pad and batch the input images.
         """
-        images = [(x - self.pixel_mean) / self.pixel_std for x in images]
         images = ImageList.from_tensors(
             images,
             self.backbone.bottom_up.size_divisibility,

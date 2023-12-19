@@ -1,15 +1,14 @@
-from detectron2.modeling.proposal_generator.rpn import StandardRPNHead, RPN, PROPOSAL_GENERATOR_REGISTRY
+from detectron2.modeling.proposal_generator.rpn import RPN, PROPOSAL_GENERATOR_REGISTRY
 import torch.nn as nn
 from detectron2.config import configurable
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Tuple
 import torch
 from detectron2.structures import Boxes, ImageList, Instances, pairwise_iou
 from detectron2.utils.events import get_event_storage
-from detectron2.modeling.box_regression import _dense_box_regression_loss, Box2BoxTransform
-from detectron2.layers import Conv2d, ShapeSpec, cat
+from detectron2.modeling.box_regression import _dense_box_regression_loss
+from detectron2.layers import cat
 import torch.nn.functional as F
 from detectron2.utils.memory import retry_if_cuda_oom
-from detectron2.modeling.matcher import Matcher
 # rpn changing objectness loss, use centerness loss
 
 @PROPOSAL_GENERATOR_REGISTRY.register()

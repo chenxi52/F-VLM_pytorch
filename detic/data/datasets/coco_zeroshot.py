@@ -3,7 +3,8 @@ import os
 
 from detectron2.data.datasets.register_coco import register_coco_instances
 from detectron2.data.datasets.builtin_meta import _get_builtin_metadata
-
+from detectron2.data import MetadataCatalog
+# 48 base classes
 categories_seen = [
     {'id': 1, 'name': 'person'},
     {'id': 2, 'name': 'bicycle'},
@@ -54,7 +55,7 @@ categories_seen = [
     {'id': 86, 'name': 'vase'},
     {'id': 90, 'name': 'toothbrush'},
 ]
-
+#17 classes
 categories_unseen = [
     {'id': 5, 'name': 'airplane'},
     {'id': 6, 'name': 'bus'},
@@ -91,13 +92,13 @@ def _get_metadata(cat):
         "thing_dataset_id_to_contiguous_id": thing_dataset_id_to_contiguous_id,
         "thing_classes": thing_classes}
 
+
 _PREDEFINED_SPLITS_COCO = {
     "coco_zeroshot_train": ("coco/train2017", "coco/zero-shot/instances_train2017_seen_2.json", 'seen'),
     "coco_zeroshot_val": ("coco/val2017", "coco/zero-shot/instances_val2017_unseen_2.json", 'unseen'),
     "coco_not_zeroshot_val": ("coco/val2017", "coco/zero-shot/instances_val2017_seen_2.json", 'seen'),
     "coco_generalized_zeroshot_val": ("coco/val2017", "coco/zero-shot/instances_val2017_all_2_oriorder.json", 'all'),
     "coco_zeroshot_train_oriorder": ("coco/train2017", "coco/zero-shot/instances_train2017_seen_2_oriorder.json", 'all'),
-    
 }
 
 for key, (image_root, json_file, cat) in _PREDEFINED_SPLITS_COCO.items():
@@ -107,6 +108,24 @@ for key, (image_root, json_file, cat) in _PREDEFINED_SPLITS_COCO.items():
         os.path.join("datasets", json_file) if "://" not in json_file else json_file,
         os.path.join("datasets", image_root),
     )
+
+def get_contigous_ids(cat):
+    # map class id to contiguous id
+    if cat == 'all':
+        return list(range(80))
+    elif cat == 'seen':
+        id_to_name = {x['id']: x['name'] for x in categories_seen}
+    elif cat == 'unseen':
+        id_to_name = {x['id']: x['name'] for x in categories_unseen}
+    elif cat == 'seen_unseen' or cat == 'unused':
+        id_to_name = {x['id']: x['name'] for x in categories_seen + categories_unseen}
+    id_to_name = {k: id_to_name[k] for k in sorted(id_to_name)}
+    thing_dataset_id_to_contiguous_id = _get_metadata('all')["thing_dataset_id_to_contiguous_id"]
+    contiguous_ids = [thing_dataset_id_to_contiguous_id[x] for x in id_to_name.keys()]
+    if cat == 'unused':
+        contiguous_ids = list(set(range(80)) - set(contiguous_ids))
+    return contiguous_ids
+
 
 # _CUSTOM_SPLITS_COCO = {
 #     "cc3m_coco_train_tags": ("cc3m/training/", "cc3m/coco_train_image_info_tags.json"),

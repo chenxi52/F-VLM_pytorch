@@ -66,7 +66,7 @@ def build_custom_augmentation(cfg, is_train, scale=None, size=None, \
                             T.ResizeScale(min_scale=1., max_scale=1., target_height=size, target_width=size),
                             DivideBy255(),
                             Normalize(mean=([0.48145466, 0.4578275, 0.40821073]), std=([0.26862954, 0.26130258, 0.27577711])),
-                            T.FixedSizeCrop(crop_size=(size, size), pad_value=0, seg_pad_value=0),
+                            T.FixedSizeCrop(crop_size=(size, size), pad=False, pad_value=0, seg_pad_value=0),
                             ]
 
     elif cfg.INPUT.CUSTOM_AUG == 'ResizeLongLSJ2':
