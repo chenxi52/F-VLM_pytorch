@@ -20,7 +20,7 @@ from torch.cuda.amp import autocast
 import pickle
 from detectron2.modeling.poolers import ROIPooler
 from detectron2.layers import cross_entropy
-
+from detic.data.datasets.coco_zeroshot import get_contigous_ids
 @ROI_MASK_HEAD_REGISTRY.register()
 class samMaskHead(BaseMaskRCNNHead):
     @configurable
@@ -94,6 +94,13 @@ class samMaskHead(BaseMaskRCNNHead):
         if ignore_zero_cats:
             freq_weight = load_class_freq(cat_freq_path, fed_loss_freq_weight)
             self.register_buffer('freq_weight', freq_weight)
+            base_ones = (freq_weight.view(-1) > 1e-4).long()
+            self.register_buffer('base_ones', base_ones)
+            unused_index = get_contigous_ids('unused') # [0-79]
+            self.register_buffer('unused_index', torch.tensor(unused_index))
+            novel_ones = 1 - base_ones
+            novel_ones[unused_index] = 0
+            self.register_buffer('novel_ones', novel_ones)
         del self.text_feats
         self.register_buffer('text_feats', text_feats)
 
@@ -191,11 +198,9 @@ class samMaskHead(BaseMaskRCNNHead):
                 cat([p.gt_classes for p in instances], dim=0)
                 )
             try:
-
                 assert len(logits_image.shape) == 2, print('the fore proposal is zero in this batch', logits_image.shape)
                 if self.ignore_zero_cats:
-                    mask = (self.freq_weight.view(-1) > 1e-4).float()
-                    mask = torch.cat([mask, mask.new_ones(1)])
+                    mask = torch.cat([self.base_ones, self.base_ones.new_ones(1, dtype=torch.long)], dim=0)
                     logits_masked = logits_image.clone()
                     logits_masked[:, mask] = float('-inf')
                     loss_cls = cross_entropy(logits_masked, gt_classes, reduction="mean")

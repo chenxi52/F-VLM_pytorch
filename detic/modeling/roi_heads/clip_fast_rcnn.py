@@ -48,6 +48,13 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         if ignore_zero_cats:
             freq_weight = load_class_freq(cat_freq_path, fed_loss_freq_weight)
             self.register_buffer('freq_weight', freq_weight)
+            base_ones = (freq_weight.view(-1) > 1e-4).long()
+            self.register_buffer('base_ones', base_ones)
+            unused_index = get_contigous_ids('unused') # [0-79]
+            self.register_buffer('unused_index', torch.tensor(unused_index))
+            novel_ones = 1 - base_ones
+            novel_ones[unused_index] = 0
+            self.register_buffer('novel_ones', novel_ones)
         self.ignore_zero_cats = ignore_zero_cats
         self.use_fed_loss = use_fed_loss
         self.fed_loss_num_cat = fed_loss_num_cat
@@ -56,14 +63,6 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         self.test_pooler = test_pooler
         self.background_weight = background_weight
         self.register_buffer('text_feats', text_feats) 
-        # base_ones: 0 or 1 [0,79]
-        base_ones = (freq_weight.view(-1) > 1e-4).float()
-        self.register_buffer('base_ones', base_ones)
-        unused_index = get_contigous_ids('unused') # [0-79]
-        self.register_buffer('unused_index', torch.tensor(unused_index))
-        novel_ones = 1 - base_ones
-        novel_ones[unused_index] = 0
-        self.register_buffer('novel_ones', novel_ones)
 
     @classmethod
     def from_config(cls, cfg, input_shape):
@@ -128,8 +127,7 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
                 loss_cls = self.sigmoid_cross_entropy_loss(scores, gt_classes)
         else:
             if self.ignore_zero_cats:
-                mask = (self.freq_weight.view(-1) > 1e-4).float()
-                mask = torch.cat([mask, mask.new_ones(1)])
+                mask = torch.cat([self.base_ones, self.base_ones.new_ones(1, dtype=torch.long)], dim=0)
                 scores_masked = scores.clone()
                 scores_masked[:, mask] = float('-inf')
                 loss_cls = cross_entropy(scores_masked, gt_classes, reduction="none")
