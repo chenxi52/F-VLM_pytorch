@@ -193,14 +193,9 @@ class samMaskHead(BaseMaskRCNNHead):
         low_res_masks = torch.nn.functional.interpolate(low_res_masks, size=(self.train_size, self.train_size), mode='bilinear', align_corners=False)
         if self.training:
             del boxes
-            gt_classes = (
-                cat([p.gt_classes for p in instances], dim=0)
-                )
-            try:
-                assert len(logits_image.shape) == 2, print('the fore proposal is zero in this batch', logits_image.shape)
-                loss_cls = cross_entropy(logits_image, gt_classes, reduction="mean")
-            except:
-                loss_cls= logits_image.sum() * 0.
+            gt_classes = (cat([p.gt_classes for p in instances], dim=0) )
+            assert len(logits_image.shape) == 2, print('the fore proposal is zero in this batch', logits_image.shape)
+            loss_cls = cross_entropy(logits_image, gt_classes, reduction="mean")
 
             # what if the classification not include background. The classification will not be interupted?
             loss ={"loss_mask": self.custom_mask_rcnn_loss(low_res_masks, instances, self.vis_period) * self.mask_loss_weight,
@@ -216,34 +211,34 @@ class samMaskHead(BaseMaskRCNNHead):
                                                             clip_final_feats)
             return new_instances
         
-    @torch.jit.unused
-    def sigmoid_focal_loss(self, inputs, targets, gt_classes, alpha: float = 0.25, gamma: float = 2):
-        """Compute the sigmoid focal loss."""
-        _log_classification_stats(inputs, gt_classes, 'clip_fast_rcnn')
-        prob = inputs.sigmoid()
-        ce_loss = F.binary_cross_entropy_with_logits(inputs, targets, reduction="none")
-        p_t = prob * targets + (1 - prob) * (1 - targets)
-        loss = ce_loss * ((1 - p_t) ** gamma)
-        B = inputs.shape[0]
-        C = inputs.shape[1] - 1
-        weight = 1
-        if alpha >= 0:
-            loss = (alpha * targets + (1 - alpha) * (1 - targets)) * loss
-        # if use fed_loss, the background is not sampled ?
-        if self.use_fed_loss and (self.freq_weight is not None): # fedloss
-            appeared = get_fed_loss_inds(
-                gt_classes, 
-                num_sample_cats=self.fed_loss_num_cat,
-                C=C,
-                weight=self.freq_weight)
-            appeared_mask = appeared.new_zeros(C + 1)
-            appeared_mask[appeared] = 1 # C + 1
-            weight = appeared_mask.float() # 
-        if self.ignore_zero_cats and (self.freq_weight is not None):
-            w = (self.freq_weight.view(-1) > 1e-4).float()
-            w = torch.cat([w, w.new_ones(1)])
-            weight = weight * w
-        return (loss*weight).mean(1).sum() / B
+    # @torch.jit.unused
+    # def sigmoid_focal_loss(self, inputs, targets, gt_classes, alpha: float = 0.25, gamma: float = 2):
+    #     """Compute the sigmoid focal loss."""
+    #     _log_classification_stats(inputs, gt_classes, 'clip_fast_rcnn')
+    #     prob = inputs.sigmoid()
+    #     ce_loss = F.binary_cross_entropy_with_logits(inputs, targets, reduction="none")
+    #     p_t = prob * targets + (1 - prob) * (1 - targets)
+    #     loss = ce_loss * ((1 - p_t) ** gamma)
+    #     B = inputs.shape[0]
+    #     C = inputs.shape[1] - 1
+    #     weight = 1
+    #     if alpha >= 0:
+    #         loss = (alpha * targets + (1 - alpha) * (1 - targets)) * loss
+    #     # if use fed_loss, the background is not sampled ?
+    #     if self.use_fed_loss and (self.freq_weight is not None): # fedloss
+    #         appeared = get_fed_loss_inds(
+    #             gt_classes, 
+    #             num_sample_cats=self.fed_loss_num_cat,
+    #             C=C,
+    #             weight=self.freq_weight)
+    #         appeared_mask = appeared.new_zeros(C + 1)
+    #         appeared_mask[appeared] = 1 # C + 1
+    #         weight = appeared_mask.float() # 
+    #     if self.ignore_zero_cats and (self.freq_weight is not None):
+    #         w = (self.freq_weight.view(-1) > 1e-4).float()
+    #         w = torch.cat([w, w.new_ones(1)])
+    #         weight = weight * w
+    #     return (loss*weight).mean(1).sum() / B
     
     @torch.jit.unused
     def custom_mask_rcnn_loss(self, pred_mask_logits: torch.Tensor, instances: List[Instances], vis_period: int = 0):
@@ -295,7 +290,6 @@ class samMaskHead(BaseMaskRCNNHead):
             indices = torch.arange(total_num_masks)
             gt_classes = cat(gt_classes, dim=0)
             pred_mask_logits = pred_mask_logits[indices, gt_classes]
-
         if gt_masks.dtype == torch.bool:
             gt_masks_bool = gt_masks
         else:
