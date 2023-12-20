@@ -191,11 +191,14 @@ class samMaskHead(BaseMaskRCNNHead):
                 cat([p.gt_classes for p in instances], dim=0)
                 )
             try:
+
                 assert len(logits_image.shape) == 2, print('the fore proposal is zero in this batch', logits_image.shape)
                 if self.ignore_zero_cats:
-                    w = (self.freq_weight.view(-1) > 1e-4).float()
-                    w = torch.cat([w, w.new_ones(1)])
-                    loss_cls = cross_entropy(logits_image, gt_classes, reduction="mean", weight=w)
+                    mask = (self.freq_weight.view(-1) > 1e-4).float()
+                    mask = torch.cat([mask, mask.new_ones(1)])
+                    logits_masked = logits_image.clone()
+                    logits_masked[:, mask] = float('-inf')
+                    loss_cls = cross_entropy(logits_masked, gt_classes, reduction="mean")
                 else:
                     loss_cls = cross_entropy(logits_image, gt_classes, reduction="mean")
             except:

@@ -128,9 +128,11 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
                 loss_cls = self.sigmoid_cross_entropy_loss(scores, gt_classes)
         else:
             if self.ignore_zero_cats:
-                w = self.base_ones
-                w = torch.cat([w, w.new_ones(1)])
-                loss_cls = cross_entropy(scores, gt_classes, reduction="none", weight=w)
+                mask = (self.freq_weight.view(-1) > 1e-4).float()
+                mask = torch.cat([mask, mask.new_ones(1)])
+                scores_masked = scores.clone()
+                scores_masked[:, mask] = float('-inf')
+                loss_cls = cross_entropy(scores_masked, gt_classes, reduction="none")
                 weights = torch.where(gt_classes==(scores.shape[-1]-1), torch.tensor(self.background_weight).to(gt_classes.device), torch.tensor(1.0).to(gt_classes.device))
                 loss_cls = loss_cls * weights
                 loss_cls = loss_cls.mean()
