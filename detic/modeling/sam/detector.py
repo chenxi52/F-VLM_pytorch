@@ -20,7 +20,8 @@ from detic.prompt_engineering import get_prompt_templates
 from detic import constants
 from torch.cuda.amp import autocast
 import detectron2.utils.comm as comm
-
+import pickle
+import sys
 @META_ARCH_REGISTRY.register()
 class ClipOpenDetector(GeneralizedRCNN):
     @configurable
@@ -32,7 +33,6 @@ class ClipOpenDetector(GeneralizedRCNN):
         do_postprocess=True,
         clip=None,
         backbone_name=None,
-        class_name=constants.COCO_UNSEEN_CLS,
         add_unfrozen='xxx',
         fpn_in_features=[],
         clip_train_size=1024,
@@ -46,7 +46,6 @@ class ClipOpenDetector(GeneralizedRCNN):
         super().__init__(**kwargs)
         self.register_buffer("sam_pixel_mean", torch.tensor(sam_pixel_mean).view(-1,1,1), False)
         self.register_buffer("sam_pixel_std", torch.tensor(sam_pixel_std).view(-1,1,1), False)
-        self.class_name = class_name
         assert self.proposal_generator is not None
         if sam_on:
             self.sam = sam_model_registry[sam_type](checkpoint=sam_weights)
@@ -60,10 +59,11 @@ class ClipOpenDetector(GeneralizedRCNN):
         self.backbone_name = backbone_name
         self.fpn_in_features = fpn_in_features
         #####可以从这里保存 text features 、
-        # self.text_feats =  self.get_custom_text_feat(self.class_name)
+        # self.text_feats =  self.get_custom_text_feat(constants.COCO_SEEN_CLS)
         # if comm.is_main_process():
-        #     with open('datasets/coco_cls.pkl', 'wb') as f:
+        #     with open('datasets/coco/coco_cls_seen.pkl', 'wb') as f:
         #         pickle.dump(self.text_feats, f)
+        #     sys.exit()
         ###########
         # set params in sam and clip to no_grad
         for name, params in self.clip.named_parameters():
@@ -73,8 +73,6 @@ class ClipOpenDetector(GeneralizedRCNN):
     @classmethod
     def from_config(cls, cfg):
         # roi_heads include box_heads, mask_heads
-        if 'coco' in cfg.DATASETS.TRAIN[0]:
-            class_name = constants.COCO_INSTANCE_CLASSES
         clip_model,  _ = clip.load(cfg.MODEL.BACKBONE.CLIP_TYPE)
         # FPN backbone
         backbone = build_backbone(cfg, clip_model.visual.output_shape)
@@ -93,7 +91,6 @@ class ClipOpenDetector(GeneralizedRCNN):
             "sam_type": cfg.MODEL.BACKBONE.TYPE,
             "do_postprocess": cfg.TEST.DO_POSTPROCESS,
             "backbone_name":cfg.MODEL.BACKBONE.NAME,
-            "class_name":class_name,
             "add_unfrozen":cfg.MODEL.BACKBONE.ADD_UNFROZEN,
             "clip_train_size":cfg.INPUT.CLIP_TRAIN_SIZE,
             "mask_thr_binary":cfg.TEST.MASK_THR_BINARY,

@@ -199,13 +199,7 @@ class samMaskHead(BaseMaskRCNNHead):
                 )
             try:
                 assert len(logits_image.shape) == 2, print('the fore proposal is zero in this batch', logits_image.shape)
-                if self.ignore_zero_cats:
-                    mask = torch.cat([self.base_ones, self.base_ones.new_ones(1, dtype=torch.long)], dim=0)
-                    logits_masked = logits_image.clone()
-                    logits_masked[:, mask] = float('-inf')
-                    loss_cls = cross_entropy(logits_masked, gt_classes, reduction="mean")
-                else:
-                    loss_cls = cross_entropy(logits_image, gt_classes, reduction="mean")
+                loss_cls = cross_entropy(logits_image, gt_classes, reduction="mean")
             except:
                 loss_cls= logits_image.sum() * 0.
 

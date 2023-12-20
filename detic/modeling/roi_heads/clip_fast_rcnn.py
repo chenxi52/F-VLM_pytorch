@@ -15,7 +15,7 @@ import numpy as np
 import pickle
 from detectron2.modeling.poolers import ROIPooler
 from torch.cuda.amp import autocast
-from detic.data.datasets.coco_zeroshot import get_contigous_ids
+from detic.data.datasets.coco_zeroshot import get_contigous_ids, _get_metadata
 __all__ = ["SamRCNNOutputLayers"]
 logger = logging.getLogger(__name__)
 
@@ -69,7 +69,6 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         ret = super().from_config(cfg, input_shape)
         with open(cfg.MODEL.CLIP_TEXT_FEATS_PATH,'rb') as f:
             text_feats = pickle.load(f)
-        # seen_unseen + background
         ret['text_feats'] = text_feats
         ret['ignore_zero_cats'] = cfg.MODEL.ROI_BOX_HEAD.IGNORE_ZERO_CATS
         ret['cat_freq_path'] = cfg.MODEL.ROI_BOX_HEAD.CAT_FREQ_PATH
@@ -126,16 +125,8 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
             else:
                 loss_cls = self.sigmoid_cross_entropy_loss(scores, gt_classes)
         else:
-            if self.ignore_zero_cats:
-                mask = torch.cat([self.base_ones, self.base_ones.new_ones(1, dtype=torch.long)], dim=0)
-                scores_masked = scores.clone()
-                scores_masked[:, mask] = float('-inf')
-                loss_cls = cross_entropy(scores_masked, gt_classes, reduction="none")
-                weights = torch.where(gt_classes==(scores.shape[-1]-1), torch.tensor(self.background_weight).to(gt_classes.device), torch.tensor(1.0).to(gt_classes.device))
-                loss_cls = loss_cls * weights
-                loss_cls = loss_cls.mean()
-            else:
-                loss_cls = cross_entropy(scores, gt_classes, reduction="mean")
+            loss_cls = cross_entropy(scores, gt_classes, reduction="mean")
+            
         losses = {
             "loss_cls": loss_cls,
             "loss_box_reg": self.box_reg_loss(
@@ -146,7 +137,7 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
 
     def box_reg_loss(self, proposal_boxes, gt_boxes, pred_deltas, gt_classes):
         """
-        和之前的 reg_loss不同的是，只计算和对应的 proposal的 delta 作为目标回归对象
+        和之前的 reg_loss不同的是,只计算和对应的 proposal的 delta 作为目标回归对象
         而不是原来的和所有的 propsal_boxes 的 loss 
         """
         box_dim = proposal_boxes.shape[1]  # 4 or 5
