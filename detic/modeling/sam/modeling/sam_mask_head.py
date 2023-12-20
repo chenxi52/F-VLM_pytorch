@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from detectron2.utils.events import get_event_storage
 from detectron2.layers import cat, batched_nms
 from detectron2.layers.wrappers import move_device_like
-from detic.modeling.ContextFormer import build_contextformer
+from detic.modeling.ContextFormer import build_contextformer, build_yhs_contextFormer
 from detectron2.modeling.roi_heads.fast_rcnn import _log_classification_stats
 from detectron2.layers import nonzero_tuple
 from fvcore.nn import sigmoid_focal_loss_jit
@@ -78,11 +78,11 @@ class samMaskHead(BaseMaskRCNNHead):
             self.text_dim = 1024
             self.emb_dim = 4096
             self.down_dim = self.emb_dim
-        self.contextformer = build_contextformer(
+        self.contextformer = build_yhs_contextFormer(
             mask_dim=256,
             d_model=self.text_dim, 
-            clip_txt_dim=self.text_dim, 
             normalize_before=False,
+            vis_dim=self.emb_dim,
         )
         def init_weights(m):
             if type(m) == nn.Linear:
@@ -103,7 +103,7 @@ class samMaskHead(BaseMaskRCNNHead):
         else:
             num_classes = cfg.MODEL.ROI_HEADS.NUM_CLASSES
         with open(cfg.MODEL.CLIP_TEXT_FEATS_PATH,'rb') as f:
-            text_feats = pickle.load(f)[:-1,:]
+            text_feats = pickle.load(f)
         test_pooler = ROIPooler(
             output_size=cfg.MODEL.ROI_BOX_HEAD.POOLER_RESOLUTION,
             scales=[1./32,],
@@ -143,7 +143,7 @@ class samMaskHead(BaseMaskRCNNHead):
             instances: List[Instances],
             sam: nn.Module,
             sam_features: torch.Tensor,
-            clip_features: torch.Tensor,
+            clip_final_feats: torch.Tensor,
             boxes: Boxes,
         ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -166,7 +166,7 @@ class samMaskHead(BaseMaskRCNNHead):
         img_flag_ids = torch.cat([img_flag_ids, padding])
         
         sam_features = torch.repeat_interleave(sam_features, img_flag_ids, dim=0)
-        clip_features = torch.repeat_interleave(clip_features, img_flag_ids, dim=0)
+        clip_final_feats = torch.repeat_interleave(clip_final_feats, img_flag_ids, dim=0)
         img_pe = sam.prompt_encoder.get_dense_pe()
         img_pe = repeat(img_pe, 'b c h w -> (b n) c h w', n=sam_features.shape[0])
         
@@ -179,8 +179,11 @@ class samMaskHead(BaseMaskRCNNHead):
                 dense_prompt_embeddings=nomask_dense_embeddings,
                 multimask_output=False,
             )
-            logits_image,_ = self.contextformer(mask_tokens, clip_features, self.text_feats)
+            logits_image = self.contextformer(mask_tokens, clip_final_feats, self.text_feats)
             #mask_tokens: (batch_size, 1, self.emb_dim),clip: [bz,self.emb_dim, 32,32]
+            if len(logits_image.shape) > 2: #[bzs, n_tokens, dim]
+                logits_image = logits_image.squeeze()
+            
         low_res_masks = torch.nn.functional.interpolate(low_res_masks, size=(self.train_size, self.train_size), mode='bilinear', align_corners=False)
         if self.training:
             del boxes
@@ -188,8 +191,7 @@ class samMaskHead(BaseMaskRCNNHead):
                 cat([p.gt_classes for p in instances], dim=0)
                 )
             target_classes_onehot = torch.zeros(logits_image.shape, dtype=logits_image.dtype, device=logits_image.device)
-            if len(logits_image.shape) < 2:
-                logits_image = logits_image.unsqueeze(0)
+            
             assert len(logits_image.shape) == 2, print('logits_image.shape: ', logits_image.shape)
             target_classes_onehot.scatter_(1, gt_classes.unsqueeze(-1), 1)
             # what if the classification not include background. The classification will not be interupted?
@@ -210,7 +212,7 @@ class samMaskHead(BaseMaskRCNNHead):
                                                             instances, 
                                                             logits_image, 
                                                             boxes,
-                                                            clip_features)
+                                                            clip_final_feats)
             return new_instances
         
     @torch.jit.unused

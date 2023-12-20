@@ -80,11 +80,10 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
     def _init_mask_head(cls, cfg, input_shape):
         ret = super()._init_mask_head(cfg, input_shape) 
         if cfg.MODEL.SAM_ON:
-            #g
             ret["mask_pooler"] = (
                 ROIPooler(
                     output_size=cfg.MODEL.ROI_MASK_HEAD.POOLER_RESOLUTION,
-                    scales=1/16.,
+                    scales=[1./16,],
                     sampling_ratio=cfg.MODEL.ROI_MASK_HEAD.POOLER_SAMPLING_RATIO,
                     pooler_type=cfg.MODEL.ROI_MASK_HEAD.POOLER_TYPE,
                 )
@@ -96,7 +95,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
     def forward_sam_mask(
             self, 
             instances: List[Instances], 
-            clip_features: torch.Tensor,
+            clip_final_feats: torch.Tensor,
             sam: nn.Module,
             sam_features: torch.Tensor
             ):
@@ -116,7 +115,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         if self.mask_pooler is not None:
             # sam_features 大小和 clip_features不一样
             # mask pool 修改
-            features = self.mask_pooler(sam_features, boxes)
+            features = self.mask_pooler([sam_features], boxes)
             if features.size(0)==0:
                 results_instances = []
                 for ins in instances:
@@ -124,8 +123,9 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
                     results_instances.append(ins)
                 return results_instances
         else:
+            assert NotImplementedError
             features = [features[f] for f in self.mask_in_features]
-        return self.mask_head(features, instances, sam, sam_features, clip_features, boxes)
+        return self.mask_head(features, instances, sam, sam_features, clip_final_feats, boxes)
 
     def _forward_box(self, attenpool, clip_final_feats: torch.Tensor, 
                      features: Dict[str, torch.Tensor], 

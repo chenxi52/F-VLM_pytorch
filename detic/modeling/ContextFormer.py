@@ -176,10 +176,6 @@ class build_contextformer(nn.Module):
         self.q_proj = nn.Linear(mask_dim, d_model) # for mask_token
         self.kv_proj = nn.Linear(2*clip_txt_dim, d_model) # for k,v
         self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
-        self.use_ln = use_ln
-        if use_ln:
-            self.ln_mask = nn.LayerNorm(d_model)
-        self.dropout = nn.Dropout()
         self.pe = PositionalEncoding(d_model)
 
     def get_qs(self, q, cls):
@@ -192,6 +188,7 @@ class build_contextformer(nn.Module):
         return q_
 
     def forward(self, mask_token, clip_vis, clip_txt):
+        # for clip res50, cls_token not exits
         cls_token, visual_tokens = clip_vis[:,0], clip_vis[:,1:]
         cls_token = self.get_qs(clip_txt, cls_token)
         kv = self.kv_proj(cls_token)
@@ -204,7 +201,7 @@ class build_contextformer(nn.Module):
         pe = self.pe(visual_tokens.shape[-2]).unsqueeze(0)
         pe = torch.repeat_interleave(pe, visual_tokens.shape[0], dim=0)
         mask_img = self.decoder2(mask_text, visual_tokens, pos=pe)
-        return self.get_logits(mask_img.squeeze())
+        return self.get_logits(mask_img.squeeze(), clip_txt)
 
     def get_logits(self, image, text):
         image = image/(image.norm(dim=-1, keepdim=True) + 1e-7)
@@ -215,6 +212,47 @@ class build_contextformer(nn.Module):
         mask_cls_txt = mask_cls_img.t()
         return mask_cls_img, mask_cls_txt
     
+class build_yhs_contextFormer(nn.Module):
+    def __init__(self,
+        mask_dim=1024,
+        d_model=256,
+        vis_dim=2048,
+        nhead=8,
+        num_decoder_layers=3,
+        normalize_before=True,
+        dim_feedforward=2048,
+        dropout=0.1,
+        activation="relu",
+        return_intermediate_dec=False) -> None:
+        """
+        use_ln: whether use ln to visual tokens and masktokens(layernorm)
+        """
+        super().__init__()
+        # defalut: set d_model = clip_txt_dim
+        attenLayer1= TransformerDecoderLayer(d_model, nhead, dim_feedforward, dropout, activation, normalize_before)
+
+        decoder_norm1 = nn.LayerNorm(d_model)
+        self.decoder1 = TransformerDecoder(attenLayer1, num_decoder_layers, decoder_norm1,
+                                            return_intermediate=return_intermediate_dec)
+        self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
+        self.linear = nn.Linear(mask_dim, d_model)
+        self.vis_linear = nn.Linear(vis_dim, d_model)
+
+    def forward(self, mask_token, clip_vis, clip_txt):
+        # for clip res50, cls_token not exits
+        clip_vis = clip_vis.flatten(start_dim=2)
+        clip_vis = clip_vis.permute(0,2,1)
+        clip_vis = self.vis_linear(clip_vis)
+        mask_token = self.linear(mask_token)
+        semantic_token = self.decoder1(mask_token, clip_vis)
+        return self.get_logits(semantic_token, clip_txt)
+
+    def get_logits(self, image, text):
+        image = image/(image.norm(dim=-1, keepdim=True) + 1e-7)
+
+        logit_scale = self.logit_scale.exp()
+        mask_cls_img = logit_scale * image @ (text.t())
+        return mask_cls_img
 
 class PositionalEncoding(nn.Module):
     def __init__(self, D, max_len=5000):
