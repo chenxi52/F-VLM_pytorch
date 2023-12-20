@@ -1,65 +1,53 @@
 _BASE_: "Base_ov_mine.yaml"
 MODEL:
   BACKBONE:
-    TYPE: "vit_t"
     CLIP_TYPE: "RN50"
-  CLIP_TEXT_FEATS_PATH: "datasets/coco/coco_cls_seen.pkl"
-  SAM_WEIGHTS: "mobile_sam.pt"
-  PROPOSAL_GENERATOR:
-    NAME: "SAMRPN"
-  SAM_PIXEL_MEAN: [123.675, 116.280, 103.530]
-  SAM_PIXEL_STD: [58.395, 57.12, 57.375]
+  CLIP_TEXT_FEATS_PATH: "datasets/coco/coco_cls.pkl"
   RPN:
     HEAD_NAME: "StandardRPNHead"
     PRE_NMS_TOPK_TRAIN: 2000  # Per FPN level
     PRE_NMS_TOPK_TEST: 1000  # Per FPN level
     POST_NMS_TOPK_TRAIN: 1000
-    POST_NMS_TOPK_TEST: 300
-    BATCH_SIZE_PER_IMAGE: 256
+    POST_NMS_TOPK_TEST: 1000
   ROI_HEADS:
     NMS_THRESH_TEST: 0.4
-    BATCH_SIZE_PER_IMAGE: 128
-    NUM_CLASSES: 48 # num of seen classes
+    BATCH_SIZE_PER_IMAGE: 512 
+    SCORE_THRESH_TEST: 0.02
+    NUM_CLASSES: 80 # num of seen classes
   ROI_BOX_HEAD:
     BBOX_REG_WEIGHTS: (10.0, 10.0, 5.0, 5.0)
+    BACKGROUND_WEIGHT: 0.2
     IGNORE_ZERO_CATS: True 
     CAT_FREQ_PATH: 'datasets/coco/zero-shot/instances_train2017_seen_2_oriorder_cat_info.json'
     BASE_ALPHA: 0.2
     NOVEL_BETA: 0.45
-    TRAIN_ON_PRED_BOXES: True #!!!!!
   ROI_MASK_HEAD:
-    NAME: "samMaskHead"
-    MASK_LOSS_TYPE: "ce_dice" 
-    WITH_SINCOS: True
-    PER_QUERY_POINT: 4
+    NAME: "MaskRCNNConvUpsampleHead"
   MASK_ON: True
-  SAM_ON: True # !!!!
 DATASETS:
-  TRAIN: ("coco_zeroshot_train_oriorder",)
+  TRAIN: ("coco_zeroshot_train",)
   TEST: ("coco_generalized_zeroshot_val",)
 DATALOADER:
-  NUM_WORKERS: 16 # num_workers == batchsize_per_gpu
+  NUM_WORKERS: 4 # num_workers == batchsize_per_gpu
 SOLVER:
-  IMS_PER_BATCH: 32  # change  # max 8 imgs per batch
-  BASE_LR: 0.04  # change0.000025
-  MAX_ITER: 22500
+  IMS_PER_BATCH: 64  # change  # max 8 imgs per batch
+  BASE_LR: 0.02  # change0.000025
+  MAX_ITER: 11250
   CHECKPOINT_PERIOD: 5000  #  change
   OPTIMIZER: 'SGD'
   WEIGHT_DECAY: 0.01
   LR_SCHEDULER_NAME: "WarmupMultiStepLR"
   WARMUP_FACTOR: 0.16
   WARMUP_METHOD: "constant"
-  WARMUP_ITERS: 2000
-  STEPS: (20250, 21375, 21738)
+  WARMUP_ITERS: 1000
+  STEPS: (10125, 10688, 10869)
   GAMMA: 0.1
   MOMENTUM: 0.9
 INPUT:
   CLIP_TRAIN_SIZE: 1024
-  CUSTOM_AUG: ResizeLongLSJ2 # !!!!
-  PROMPT_SIZE: (90, 4)
+  CUSTOM_AUG: ResizeLongLSJ
 TEST:
   DETECTIONS_PER_IMAGE: 300  #test_topk_per_image
-  EVAL_PERIOD: 90000 # change
+  EVAL_PERIOD: 11250 # change
   IMS_PER_BATCH: 1 #every gpu has most 2 images  # change
-  SCORE_TYPE: 'cls'
-OUTPUT_DIR: './output/ClipRpnSamOn'
+OUTPUT_DIR: './output/ovcoco'

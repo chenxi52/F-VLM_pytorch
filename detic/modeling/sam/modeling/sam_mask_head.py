@@ -92,14 +92,13 @@ class samMaskHead(BaseMaskRCNNHead):
         self.point_emb.apply(init_weights)
         self.contextformer.apply(init_weights)
         if ignore_zero_cats:
-            freq_weight = load_class_freq(cat_freq_path, fed_loss_freq_weight)
-            self.register_buffer('freq_weight', freq_weight)
-            base_ones = (freq_weight.view(-1) > 1e-4).long()
+            base_ones = torch.zeros(len(get_contigous_ids('all')))
+            base_ones[get_contigous_ids('seen')] = 1
             self.register_buffer('base_ones', base_ones)
             unused_index = get_contigous_ids('unused') # [0-79]
             self.register_buffer('unused_index', torch.tensor(unused_index))
-            novel_ones = 1 - base_ones
-            novel_ones[unused_index] = 0
+            novel_ones = torch.zeros(len(get_contigous_ids('all')))
+            novel_ones[get_contigous_ids('unseen')] = 1
             self.register_buffer('novel_ones', novel_ones)
         del self.text_feats
         self.register_buffer('text_feats', text_feats)

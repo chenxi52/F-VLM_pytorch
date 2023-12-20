@@ -76,6 +76,8 @@ categories_unseen = [
     {'id': 87, 'name': 'scissors'},
 ]
 
+categories_ov = categories_seen + categories_unseen
+
 def _get_metadata(cat):
     if cat == 'all':
         return _get_builtin_metadata('coco')
@@ -84,9 +86,10 @@ def _get_metadata(cat):
     else:
         assert cat == 'unseen'
         id_to_name = {x['id']: x['name'] for x in categories_unseen}
-
+    
     thing_dataset_id_to_contiguous_id = {
         x: i for i, x in enumerate(sorted(id_to_name))}
+    # 只是 all 的话就是
     thing_classes = [id_to_name[k] for k in sorted(id_to_name)]
     return {
         "thing_dataset_id_to_contiguous_id": thing_dataset_id_to_contiguous_id,
@@ -110,7 +113,7 @@ for key, (image_root, json_file, cat) in _PREDEFINED_SPLITS_COCO.items():
     )
 
 def get_contigous_ids(cat):
-    # map class id to contiguous id
+    # 直接输出 相对于 80 类别的continuous id, 
     if cat == 'all':
         return list(range(80))
     elif cat == 'seen':
@@ -118,8 +121,8 @@ def get_contigous_ids(cat):
     elif cat == 'unseen':
         id_to_name = {x['id']: x['name'] for x in categories_unseen}
     elif cat == 'seen_unseen' or cat == 'unused':
-        id_to_name = {x['id']: x['name'] for x in categories_seen + categories_unseen}
-    id_to_name = {k: id_to_name[k] for k in sorted(id_to_name)}
+        id_to_name = categories_seen + categories_unseen
+        id_to_name = {x['id']: x['name'] for x in id_to_name}
     thing_dataset_id_to_contiguous_id = _get_metadata('all')["thing_dataset_id_to_contiguous_id"]
     contiguous_ids = [thing_dataset_id_to_contiguous_id[x] for x in id_to_name.keys()]
     if cat == 'unused':

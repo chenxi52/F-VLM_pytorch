@@ -46,14 +46,14 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
         self.cls_score = None
         if ignore_zero_cats:
-            freq_weight = load_class_freq(cat_freq_path, fed_loss_freq_weight)
-            self.register_buffer('freq_weight', freq_weight)
-            base_ones = (freq_weight.view(-1) > 1e-4).long()
+            # 输出基于总类别数量的 continuous id
+            base_ones = torch.zeros(len(get_contigous_ids('all')))
+            base_ones[get_contigous_ids('seen')] = 1
             self.register_buffer('base_ones', base_ones)
             unused_index = get_contigous_ids('unused') # [0-79]
             self.register_buffer('unused_index', torch.tensor(unused_index))
-            novel_ones = 1 - base_ones
-            novel_ones[unused_index] = 0
+            novel_ones = torch.zeros(len(get_contigous_ids('all')))
+            novel_ones[get_contigous_ids('unseen')] = 1
             self.register_buffer('novel_ones', novel_ones)
         self.ignore_zero_cats = ignore_zero_cats
         self.use_fed_loss = use_fed_loss
@@ -118,14 +118,16 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
             )
         else:
             proposal_boxes = gt_boxes = torch.empty((0, 4), device=proposal_deltas.device)
-        
+        weight = 1.
         if self.use_sigmoid_ce:
             if self.ignore_zero_cats:
                 assert NotImplementedError
             else:
                 loss_cls = self.sigmoid_cross_entropy_loss(scores, gt_classes)
         else:
-            loss_cls = cross_entropy(scores, gt_classes, reduction="mean")
+            if self.ignore_zero_cats:
+                weight = weight * torch.cat([torch.ones(self.num_classes), torch.ones(1)*self.background_weight], dim=0).to(scores.device)
+            loss_cls = cross_entropy(scores, gt_classes, reduction="mean", weight=weight)
             
         losses = {
             "loss_cls": loss_cls,
