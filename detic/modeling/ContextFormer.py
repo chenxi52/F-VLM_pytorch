@@ -248,8 +248,8 @@ class build_yhs_contextFormer(nn.Module):
         return self.get_logits(semantic_token, clip_txt)
 
     def get_logits(self, image, text):
-        image = image/(image.norm(dim=-1, keepdim=True) + 1e-7)
-
+        image = image/(image.norm(dim=-1, keepdim=True))
+        text = text/(text.norm(dim=-1, keepdim=True))
         logit_scale = self.logit_scale.exp()
         mask_cls_img = logit_scale * image @ (text.t())
         return mask_cls_img

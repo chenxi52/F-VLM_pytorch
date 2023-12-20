@@ -125,7 +125,8 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         else:
             assert NotImplementedError
             features = [features[f] for f in self.mask_in_features]
-        return self.mask_head(features, instances, sam, sam_features, clip_final_feats, boxes)
+        return self.mask_head(roi_features=features, instances=instances, sam=sam, sam_features=sam_features, 
+                              clip_final_feats=clip_final_feats, boxes=boxes)
 
     def _forward_box(self, attenpool, clip_final_feats: torch.Tensor, 
                      features: Dict[str, torch.Tensor], 
@@ -198,7 +199,10 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             losses = self._forward_box(attnpool, clip_final_feats, x, proposals)
             if self.mask_on:
                 if sam_features is not None:
-                    losses.update(self.forward_sam_mask(proposals, clip_final_feats, sam, sam_features))
+                    losses.update(self.forward_sam_mask(instances=proposals, 
+                                                        clip_final_feats=clip_final_feats, 
+                                                        sam=sam, 
+                                                        sam_features=sam_features))
                 else: losses.update(self._forward_mask(x, proposals))
             return proposals, losses
         else:

@@ -81,7 +81,7 @@ class samMaskHead(BaseMaskRCNNHead):
         self.contextformer = build_yhs_contextFormer(
             mask_dim=256,
             d_model=self.text_dim, 
-            normalize_before=False,
+            normalize_before=True,
             vis_dim=self.emb_dim,
         )
         def init_weights(m):
@@ -94,7 +94,8 @@ class samMaskHead(BaseMaskRCNNHead):
         if ignore_zero_cats:
             freq_weight = load_class_freq(cat_freq_path, fed_loss_freq_weight)
             self.register_buffer('freq_weight', freq_weight)
-        
+        del self.text_feats
+        self.register_buffer('text_feats', text_feats)
 
     @classmethod
     def from_config(cls, cfg, input_shape):
@@ -144,7 +145,7 @@ class samMaskHead(BaseMaskRCNNHead):
             sam: nn.Module,
             sam_features: torch.Tensor,
             clip_final_feats: torch.Tensor,
-            boxes: Boxes,
+            boxes: List[Boxes],
         ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         firstly, inference, and then calculate losses
@@ -180,7 +181,6 @@ class samMaskHead(BaseMaskRCNNHead):
                 multimask_output=False,
             )
             logits_image = self.contextformer(mask_tokens, clip_final_feats, self.text_feats)
-            #mask_tokens: (batch_size, 1, self.emb_dim),clip: [bz,self.emb_dim, 32,32]
             if len(logits_image.shape) > 2: #[bzs, n_tokens, dim]
                 logits_image = logits_image.squeeze()
             
@@ -190,18 +190,18 @@ class samMaskHead(BaseMaskRCNNHead):
             gt_classes = (
                 cat([p.gt_classes for p in instances], dim=0)
                 )
-            target_classes_onehot = torch.zeros(logits_image.shape, dtype=logits_image.dtype, device=logits_image.device)
-            
-            assert len(logits_image.shape) == 2, print('logits_image.shape: ', logits_image.shape)
-            target_classes_onehot.scatter_(1, gt_classes.unsqueeze(-1), 1)
+            try:
+                assert len(logits_image.shape) == 2, print('the fore proposal is zero in this batch', logits_image.shape)
+                if self.ignore_zero_cats:
+                    w = (self.freq_weight.view(-1) > 1e-4).float()
+                    w = torch.cat([w, w.new_ones(1)])
+                    loss_cls = cross_entropy(logits_image, gt_classes, reduction="mean", weight=w)
+                else:
+                    loss_cls = cross_entropy(logits_image, gt_classes, reduction="mean")
+            except:
+                loss_cls= logits_image.sum() * 0.
+
             # what if the classification not include background. The classification will not be interupted?
-            if self.ignore_zero_cats:
-                w = (self.freq_weight.view(-1) > 1e-4).float()
-                w = torch.cat([w, w.new_ones(1)])
-                loss_cls = cross_entropy(logits_image, gt_classes, reduction="mean", weight=w)
-            else:
-                loss_cls = cross_entropy(logits_image, gt_classes, reduction="mean")
-            
             loss ={"loss_mask": self.custom_mask_rcnn_loss(low_res_masks, instances, self.vis_period) * self.mask_loss_weight,
                    "loss_cls": loss_cls
                    }
@@ -258,20 +258,33 @@ class samMaskHead(BaseMaskRCNNHead):
         fg_inds_list = []
         num_instance_list = []
         for instances_per_image in instances:
-            gt_classes_per_image = instances_per_image.gt_classes.to(dtype=torch.int64)
-            # duplicated when select foreground proposals before, but not a big deal
-            fg_inds = nonzero_tuple((gt_classes_per_image >= 0) & (gt_classes_per_image < self.data_classes))[0]
-            gt_mask_size = instances_per_image.gt_masks.tensor.shape[-2:]
-            gt_classes.append(gt_classes_per_image[fg_inds])
-            # A tensor of shape (N, M, M), N=#instances in the image; M=mask_side_len
-            gt_masks_per_image = instances_per_image.gt_masks.tensor[fg_inds]
-            gt_masks_per_image = F.pad(gt_masks_per_image, (0, self.train_size-gt_mask_size[1], 0, self.train_size-gt_mask_size[0]), value=0)
+            if len(instances_per_image) == 0:
+                continue
+            ######选前景的 propsal
+            # gt_classes_per_image = instances_per_image.gt_classes.to(dtype=torch.int64)
+            # # duplicated when select foreground proposals before, but not a big deal
+            # fg_inds = nonzero_tuple((gt_classes_per_image >= 0) & (gt_classes_per_image < self.data_classes))[0]
+            # gt_mask_size = instances_per_image.gt_masks.tensor.shape[-2:]
+            # gt_classes.append(gt_classes_per_image[fg_inds])
+            # # A tensor of shape (N, M, M), N=#instances in the image; M=mask_side_len
+            # gt_masks_per_image = instances_per_image.gt_masks.tensor[fg_inds]
+            # gt_masks_per_image = F.pad(gt_masks_per_image, (0, self.train_size-gt_mask_size[1], 0, self.train_size-gt_mask_size[0]), value=0)
+            # gt_masks.append(gt_masks_per_image)
+            # fg_inds_list.append(fg_inds)
+            # num_instance_list.append(len(instances_per_image))
+            ###########
+            
+            if not cls_agnostic_mask:
+                gt_classes_per_image = instances_per_image.gt_classes.to(dtype=torch.int64)
+                gt_classes.append(gt_classes_per_image)
+            gt_masks_per_image = instances_per_image.gt_masks.tensor
+            gt_masks_per_image = F.pad(gt_masks_per_image, (0, self.train_size-gt_masks_per_image.shape[-1], 0, self.train_size-gt_masks_per_image.shape[-2]), value=0)
             gt_masks.append(gt_masks_per_image)
-            fg_inds_list.append(fg_inds)
-            num_instance_list.append(len(instances_per_image))
-        pred_mask_per_logits = pred_mask_logits.split(num_instance_list, dim=0)
-        pred_mask_logits_list = [pred_mask_per_logits[i][fg_inds_list[i]] for i in range(len(fg_inds_list))]
-        pred_mask_logits = torch.cat(pred_mask_logits_list, dim=0)
+        ##########选前景的
+        # pred_mask_per_logits = pred_mask_logits.split(num_instance_list, dim=0)
+        # pred_mask_logits_list = [pred_mask_per_logits[i][fg_inds_list[i]] for i in range(len(fg_inds_list))]
+        # pred_mask_logits = torch.cat(pred_mask_logits_list, dim=0)
+        ###########
         if len(gt_masks) == 0:
             return pred_mask_logits.sum() * 0
         gt_masks = cat(gt_masks, dim=0)
