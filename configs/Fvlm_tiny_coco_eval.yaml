@@ -3,6 +3,7 @@ MODEL:
   BACKBONE:
     CLIP_TYPE: "RN50"
   CLIP_TEXT_FEATS_PATH: "datasets/coco/coco_cls.pkl"
+  WEIGHTS: "output/clipRpn/model_final.pth"
   RPN:
     HEAD_NAME: "StandardRPNHead"
     PRE_NMS_TOPK_TRAIN: 2000  # Per FPN level
@@ -49,5 +50,5 @@ INPUT:
 TEST:
   DETECTIONS_PER_IMAGE: 300  #test_topk_per_image
   EVAL_PERIOD: 11250 # change
-  IMS_PER_BATCH: 1 #every gpu has most 2 images  # change
-OUTPUT_DIR: './output/ovcoco'
+  IMS_PER_BATCH: 4 #every gpu has most 2 images  # change
+OUTPUT_DIR: './output/clipRpn'

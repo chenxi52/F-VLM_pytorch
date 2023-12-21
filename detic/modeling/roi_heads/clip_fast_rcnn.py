@@ -88,8 +88,6 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         return ret 
     
     def forward(self,x):
-        if x.dim()>2:
-            x = torch.flatten(x, start_dim=1) 
         x_norm = x/x.norm(dim=1, keepdim=True)
         logits_scale = self.logit_scale.exp()
         with autocast():

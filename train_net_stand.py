@@ -216,7 +216,8 @@ def main(args):
             model, device_ids=[comm.get_local_rank()], broadcast_buffers=False, find_unused_parameters=True
         )
     do_train(cfg, model, resume=args.resume)
-    return do_test(cfg, model)
+    # return do_test(cfg, model)
+    return None
 
 
 if __name__ == "__main__":

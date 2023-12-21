@@ -76,7 +76,6 @@ categories_unseen = [
     {'id': 87, 'name': 'scissors'},
 ]
 
-categories_ov = categories_seen + categories_unseen
 
 def _get_metadata(cat):
     if cat == 'all':
