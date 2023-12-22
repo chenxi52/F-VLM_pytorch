@@ -32,7 +32,6 @@ class samMaskHead(BaseMaskRCNNHead):
             clip_type: str = 'ViT-B/16',
             ignore_zero_cats: bool = False,
             cat_freq_path: str = '',
-            fed_loss_freq_weight: float = 0.0,
             text_feats: torch.Tensor = None,
             test_pooler: ROIPooler = None,
             **kwargs
@@ -133,7 +132,6 @@ class samMaskHead(BaseMaskRCNNHead):
                 'test_geometric_fact': cfg.TEST.GEOMETRIC_FACT,
                 'ignore_zero_cats': cfg.MODEL.ROI_BOX_HEAD.IGNORE_ZERO_CATS,
                 'cat_freq_path': cfg.MODEL.ROI_BOX_HEAD.CAT_FREQ_PATH,
-                'fed_loss_freq_weight': cfg.MODEL.ROI_BOX_HEAD.FED_LOSS_FREQ_WEIGHT,
                 'use_fed_loss': cfg.MODEL.ROI_BOX_HEAD.USE_FED_LOSS,
                 'fed_loss_num_cat': cfg.MODEL.NUM_SAMPLE_CATS,
                 'mask_thr_binary': cfg.TEST.MASK_THR_BINARY,
@@ -142,6 +140,7 @@ class samMaskHead(BaseMaskRCNNHead):
                 'test_pooler': test_pooler,
                 'base_alpha': cfg.MODEL.ROI_BOX_HEAD.BASE_ALPHA,
                 'novel_beta': cfg.MODEL.ROI_BOX_HEAD.NOVEL_BETA,
+                'background_weight': cfg.MODEL.ROI_BOX_HEAD.BACKGROUND_WEIGHT
                 }
     
     def forward(
@@ -152,6 +151,8 @@ class samMaskHead(BaseMaskRCNNHead):
             sam_features: torch.Tensor,
             clip_final_feats: torch.Tensor,
             boxes: List[Boxes],
+            attnpool: nn.Module = None,
+            select_fore_cls: bool = True
         ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         firstly, inference, and then calculate losses
@@ -173,7 +174,7 @@ class samMaskHead(BaseMaskRCNNHead):
         img_flag_ids = torch.cat([img_flag_ids, padding])
         
         sam_features = torch.repeat_interleave(sam_features, img_flag_ids, dim=0)
-        clip_final_feats = torch.repeat_interleave(clip_final_feats, img_flag_ids, dim=0)
+        batch_clip_final_feats = torch.repeat_interleave(clip_final_feats, img_flag_ids, dim=0)
         img_pe = sam.prompt_encoder.get_dense_pe()
         img_pe = repeat(img_pe, 'b c h w -> (b n) c h w', n=sam_features.shape[0])
         
@@ -186,19 +187,25 @@ class samMaskHead(BaseMaskRCNNHead):
                 dense_prompt_embeddings=nomask_dense_embeddings,
                 multimask_output=False,
             )
-            logits_image = self.contextformer(mask_tokens, clip_final_feats, self.text_feats)
+            logits_image = self.contextformer(mask_tokens, batch_clip_final_feats, self.text_feats)
             if len(logits_image.shape) > 2: #[bzs, n_tokens, dim]
                 logits_image = logits_image.squeeze()
-            
         low_res_masks = torch.nn.functional.interpolate(low_res_masks, size=(self.train_size, self.train_size), mode='bilinear', align_corners=False)
         if self.training:
             del boxes
             gt_classes = (cat([p.gt_classes for p in instances], dim=0) )
             assert len(logits_image.shape) == 2, print('the fore proposal is zero in this batch', logits_image.shape)
-            loss_cls = cross_entropy(logits_image, gt_classes, reduction="mean")
+            if not select_fore_cls:
+                weight = torch.cat([torch.ones(logits_image.shape[1]-1), torch.ones([])* self.background_weight], device=logits_image.device)
+            else: 
+                logits_image = logits_image[:, :-1]
+                weight = 1.
+            loss_cls = cross_entropy(logits_image, gt_classes, reduction="mean", weight=weight)
+            # 当选前景 proposals 进入 mask head即 self.fore_mask_cls=True，这里 cls_accuracy=fg_cls_accuracy
+            _log_classification_stats(logits_image, gt_classes , 'fast_rcnn')
 
-            # what if the classification not include background. The classification will not be interupted?
-            loss ={"loss_mask": self.custom_mask_rcnn_loss(low_res_masks, instances, self.vis_period) * self.mask_loss_weight,
+            # if select_fore_cls=True, custom_mask_rcnn_loss should select foreground masks
+            loss ={"loss_mask": self.custom_mask_rcnn_loss(low_res_masks, instances, self.vis_period, select_fore_cls) * self.mask_loss_weight,
                    "loss_cls": loss_cls
                    }
             return loss
@@ -208,7 +215,8 @@ class samMaskHead(BaseMaskRCNNHead):
                                                             instances, 
                                                             logits_image, 
                                                             boxes,
-                                                            clip_final_feats)
+                                                            clip_final_feats,
+                                                            attnpool=attnpool)
             return new_instances
         
     # @torch.jit.unused
@@ -241,7 +249,8 @@ class samMaskHead(BaseMaskRCNNHead):
     #     return (loss*weight).mean(1).sum() / B
     
     @torch.jit.unused
-    def custom_mask_rcnn_loss(self, pred_mask_logits: torch.Tensor, instances: List[Instances], vis_period: int = 0):
+    def custom_mask_rcnn_loss(self, pred_mask_logits: torch.Tensor, instances: List[Instances], vis_period: int = 0,
+                              select_fore_cls: bool = True):
         """
         remove gt_masks.crop_and_resize from original mask_rcnn_loss 
         with foreground selection
@@ -252,34 +261,30 @@ class samMaskHead(BaseMaskRCNNHead):
         gt_classes = []
         gt_masks = []
         fg_inds_list = []
-        num_instance_list = []
         for instances_per_image in instances:
             if len(instances_per_image) == 0:
                 continue
-            ######选前景的 propsal
-            # gt_classes_per_image = instances_per_image.gt_classes.to(dtype=torch.int64)
-            # # duplicated when select foreground proposals before, but not a big deal
-            # fg_inds = nonzero_tuple((gt_classes_per_image >= 0) & (gt_classes_per_image < self.data_classes))[0]
-            # gt_mask_size = instances_per_image.gt_masks.tensor.shape[-2:]
-            # gt_classes.append(gt_classes_per_image[fg_inds])
-            # # A tensor of shape (N, M, M), N=#instances in the image; M=mask_side_len
-            # gt_masks_per_image = instances_per_image.gt_masks.tensor[fg_inds]
-            # gt_masks_per_image = F.pad(gt_masks_per_image, (0, self.train_size-gt_mask_size[1], 0, self.train_size-gt_mask_size[0]), value=0)
-            # gt_masks.append(gt_masks_per_image)
-            # fg_inds_list.append(fg_inds)
-            # num_instance_list.append(len(instances_per_image))
-            ###########
-            
-            if not cls_agnostic_mask:
-                gt_classes_per_image = instances_per_image.gt_classes.to(dtype=torch.int64)
-                gt_classes.append(gt_classes_per_image)
             gt_masks_per_image = instances_per_image.gt_masks.tensor
+            gt_classes_per_image = instances_per_image.gt_classes.to(dtype=torch.int64)
+
+            ######因为之前并没有选出前景的 propsals做分类， 这里应该选出前景的masks
+            if not select_fore_cls: 
+                fg_inds = nonzero_tuple((gt_classes_per_image >= 0) & (gt_classes_per_image < self.data_classes))[0]
+                gt_classes.append(gt_classes_per_image[fg_inds])
+                # A tensor of shape (N, M, M), N=#instances in the image; M=mask_side_len
+                gt_masks_per_image = gt_masks_per_image[fg_inds]
+                fg_inds_list.append(fg_inds)
+            ###########
+            if not cls_agnostic_mask:
+                gt_classes.append(gt_classes_per_image)
+            
             gt_masks_per_image = F.pad(gt_masks_per_image, (0, self.train_size-gt_masks_per_image.shape[-1], 0, self.train_size-gt_masks_per_image.shape[-2]), value=0)
             gt_masks.append(gt_masks_per_image)
-        ##########选前景的
-        # pred_mask_per_logits = pred_mask_logits.split(num_instance_list, dim=0)
-        # pred_mask_logits_list = [pred_mask_per_logits[i][fg_inds_list[i]] for i in range(len(fg_inds_list))]
-        # pred_mask_logits = torch.cat(pred_mask_logits_list, dim=0)
+
+        #########选前景的
+        if not select_fore_cls:
+            pred_mask_per_logits = pred_mask_logits.split([len(x) for x in instances], dim=0)
+            pred_mask_logits = torch.cat([pred_mask_per_logits[i][fg_inds_list[i]] for i in range(len(fg_inds_list))])
         ###########
         if len(gt_masks) == 0:
             return pred_mask_logits.sum() * 0
@@ -298,7 +303,7 @@ class samMaskHead(BaseMaskRCNNHead):
         gt_masks = gt_masks.to(dtype=torch.float32)
 
         # Log the training accuracy (using gt classes and sigmoid(0.0) == 0.5 threshold)
-        mask_incorrect = (pred_mask_logits > 0.0) != gt_masks_bool
+        mask_incorrect = (pred_mask_logits > self.mask_thr_binary) != gt_masks_bool
         mask_accuracy = 1 - (mask_incorrect.sum().item() / max(mask_incorrect.numel(), 1.0))
         num_positive = gt_masks_bool.sum().item()
         false_positive = (mask_incorrect & ~gt_masks_bool).sum().item() / max(
@@ -307,6 +312,7 @@ class samMaskHead(BaseMaskRCNNHead):
         false_negative = (mask_incorrect & gt_masks_bool).sum().item() / max(num_positive, 1.0)
 
         storage = get_event_storage()
+        
         storage.put_scalar("mask_rcnn/accuracy", mask_accuracy)
         storage.put_scalar("mask_rcnn/false_positive", false_positive)
         storage.put_scalar("mask_rcnn/false_negative", false_negative)
@@ -345,9 +351,9 @@ class samMaskHead(BaseMaskRCNNHead):
                                 pred_mask_logits: torch.Tensor, 
                                 pred_instances: List[Instances], 
                                 logits_image: torch.Tensor,
-                                boxes: Boxes = None,
+                                boxes: List[Boxes],
                                 clip_features: torch.Tensor = None,
-                                attenpool: nn.AdaptiveAvgPool2d = None,
+                                attnpool: nn.AdaptiveAvgPool2d = None,
                                 ):
         """
         boxes to crop vlm features and get vlm_scores
@@ -367,65 +373,76 @@ class samMaskHead(BaseMaskRCNNHead):
             )
             indices = move_device_like(torch.arange(num_masks, device=device), class_pred)
             mask_probs_pred = pred_mask_logits[indices, class_pred][:, None].sigmoid()
-
         num_boxes_per_image = [len(i) for i in pred_instances]
-        mask_probs_pred = mask_probs_pred.split(num_boxes_per_image, dim=0)
-        logits_image = F.softmax(logits_image, dim=1)
-        logits_image = logits_image.split(num_boxes_per_image, dim=0)
-
         vlm_box_features = self.test_pooler([clip_features], boxes)
         # vlm pooler layer: clip attenpool
-        vlm_box_features = attenpool(vlm_box_features)
+        vlm_box_features = attnpool(vlm_box_features)
         vlm_box_features = vlm_box_features / vlm_box_features.norm(dim=1,keepdim=True)
         logits_scale = 1/0.01
         vlm_scores = logits_scale * vlm_box_features @ (self.text_feats.t().to(vlm_box_features.device))
-        vlm_scores = torch.nn.functional.softmax(vlm_scores, dim=1)
-        vlm_scores = vlm_scores.split(num_boxes_per_image, dim=0)
 
-        return self.inference_single_image(mask_probs_pred, 
-                                           logits_image=logits_image, 
-                                           pred_instances=pred_instances,
-                                           vlm_socres=vlm_scores)
+        vlm_scores = vlm_scores.split(num_boxes_per_image, dim=0)
+        logits_image = logits_image.split(num_boxes_per_image, dim=0)
+        mask_probs_pred = mask_probs_pred.split(num_boxes_per_image, dim=0)
+        results = [self.inference_single_image(mask_preds_per_img, 
+                                           scores_ori=scores_per_img, 
+                                           instances=instances_per_img,
+                                           vlm_scores_ori=vlm_scores_per_img) 
+                    for vlm_scores_per_img, scores_per_img, mask_preds_per_img, instances_per_img in 
+                         zip(vlm_scores, logits_image, mask_probs_pred, pred_instances)]
+        return results
 
     # classification score consider vlm text score.
-    def inference_single_image(self, mask_probs_pred, logits_image, pred_instances, vlm_scores):
-        instance_list = []
-        for prob, logits, instances, vlm_score in zip(mask_probs_pred, logits_image, pred_instances, vlm_scores):
-            new_instance = Instances(instances.image_size).to(logits.device)
-            boxes = instances.pred_boxes.tensor
-            objectness = instances.objectness
-            if self.test_score_type == 'ob_mul_cls':
-                scores = logits * objectness[:, None]
-            elif self.test_score_type == 'ob_geo_cls':
-                scores = logits**(1-self.test_geometric_fact) * objectness[:, None]**self.test_geometric_fact
-            elif self.test_score_type == 'cls':
-                # with vlm scores
-                w = (self.freq_weight.view(-1) > 1e-4).float()
-                base_score = ((logits * w)**(1-self.base_alpha)) * ((vlm_score*w)**(self.base_alpha))
-                novel_score = ((logits * (1-w))**(1-self.novel_beta)) * ((vlm_score*(1-w))**(self.novel_beta))
-                scores = base_score + novel_score
+    def inference_single_image(self, mask_pred, scores_ori, instances, vlm_scores_ori):
+        vlm_scores = vlm_scores_ori.clone()
+        scores = scores_ori.clone()
+        scores[:, self.unused_index] = float('-inf')
+        vlm_scores[:, self.unused_index] = float('-inf')
+        
+        # 先去掉背景类别再 softmax
+        vlm_scores = F.softmax(vlm_scores, dim=1)
+        scores = F.softmax(scores, dim=1)
+        # scores = scores[:, :-1]
+        # vlm_scores = vlm_scores[:, :-1]
+        
+        new_instance = Instances(instances.image_size).to(scores.device)
+        boxes = instances.pred_boxes.tensor
+        objectness = instances.objectness
+        if self.test_score_type == 'ob_mul_cls':
+            assert NotImplementedError
+            ensembled_socres = scores * objectness[:, None]
+        elif self.test_score_type == 'ob_geo_cls':
+            assert NotImplementedError
+            ensembled_socres = scores**(1-self.test_geometric_fact) * objectness[:, None]**self.test_geometric_fact
+        elif self.test_score_type == 'cls':
+            # with vlm scores
+            base_score = ((scores * self.base_ones)**(1-self.base_alpha)) * ((vlm_scores*self.base_ones)**(self.base_alpha))
+            novel_score = ((scores * self.novel_ones)**(1-self.novel_beta)) * ((vlm_scores * self.novel_ones)**(self.novel_beta))
+            ensembled_socres = base_score + novel_score
+            ensembled_socres = torch.cat([ensembled_socres[:,:-1], scores[:,-1:]], dim=1)
+            ensembled_socres = ensembled_socres / ensembled_socres.sum(dim=1, keepdim=True)
+            ensembled_socres = ensembled_socres[:, :-1]
+            assert ensembled_socres[:, self.unused_index].max() < 1e-5, 'unused classes should not be evaluated'
 
-            masks = prob
-            filter_mask = scores>self.score_thresh
-            num_bbox_reg_classes = boxes.shape[1] // 4
-            filter_inds = filter_mask.nonzero()
-            boxes = boxes.view(-1, num_bbox_reg_classes, 4)
-            if num_bbox_reg_classes == 1:
-                boxes = boxes[filter_inds[:, 0], 0]
-            else:
-                boxes = boxes[filter_mask]
-            scores = scores[filter_mask]
-            keep = batched_nms(boxes, scores, filter_inds[:, 1], self.nms_thresh)
-            if self.top_per_instance >= 0:
-                keep = keep[:self.top_per_instance]
-            boxes, scores, filter_inds = boxes[keep], scores[keep], filter_inds[keep]
+        filter_mask = ensembled_socres > self.score_thresh
+        num_bbox_reg_classes = boxes.shape[1] // 4
+        filter_inds = filter_mask.nonzero()
+        boxes = boxes.view(-1, num_bbox_reg_classes, 4)
+        if num_bbox_reg_classes == 1:
+            boxes = boxes[filter_inds[:, 0], 0]
+        else:
+            boxes = boxes[filter_mask]
+        ensembled_socres = ensembled_socres[filter_mask]
+        keep = batched_nms(boxes, ensembled_socres, filter_inds[:, 1], self.test_nms_thresh)
+        if self.top_per_instance >= 0:
+            keep = keep[:self.top_per_instance]
+        boxes, ensembled_socres, filter_inds = boxes[keep], ensembled_socres[keep], filter_inds[keep]
 
-            new_instance.pred_boxes = Boxes(boxes)  # (1, Hmask, Wmask)
-            new_instance.scores = scores
-            new_instance.pred_classes = filter_inds[:,1]
-            new_instance.pred_masks = masks[filter_inds[:,0]]
-            instance_list.append(new_instance)
-        return instance_list
+        new_instance.pred_boxes = Boxes(boxes)  # (1, Hmask, Wmask)
+        new_instance.scores = ensembled_socres
+        new_instance.pred_classes = filter_inds[:,1]
+        new_instance.pred_masks = mask_pred[filter_inds[:,0]]
+        return new_instance
 
 @torch.jit.unused
 def dice_loss(pred,

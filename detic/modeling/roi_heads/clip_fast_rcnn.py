@@ -35,7 +35,6 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         cat_freq_path: str,
         use_fed_loss: bool,
         fed_loss_num_cat: int,
-        fed_loss_freq_weight: float,
         base_alpha: float,
         novel_beta: float,
         test_pooler: ROIPooler,
@@ -43,17 +42,19 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         **kwargs
     ):
         super().__init__(input_shape, **kwargs)
-        self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
+        self.logit_scale = nn.Parameter(torch.ones([])*np.log(1/0.07))
         self.cls_score = None
         if ignore_zero_cats:
             # 输出基于总类别数量的 continuous id
             base_ones = torch.zeros(len(get_contigous_ids('all')))
             base_ones[get_contigous_ids('seen')] = 1
+            base_ones = torch.cat([base_ones, torch.ones(1)]).to(torch.bool)
             self.register_buffer('base_ones', base_ones)
             unused_index = get_contigous_ids('unused') # [0-79]
             self.register_buffer('unused_index', torch.tensor(unused_index))
             novel_ones = torch.zeros(len(get_contigous_ids('all')))
             novel_ones[get_contigous_ids('unseen')] = 1
+            novel_ones = torch.cat([novel_ones, torch.ones(1)]).to(torch.bool)
             self.register_buffer('novel_ones', novel_ones)
         self.ignore_zero_cats = ignore_zero_cats
         self.use_fed_loss = use_fed_loss
@@ -74,7 +75,6 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         ret['cat_freq_path'] = cfg.MODEL.ROI_BOX_HEAD.CAT_FREQ_PATH
         ret['use_fed_loss'] = cfg.MODEL.ROI_BOX_HEAD.USE_FED_LOSS
         ret['fed_loss_num_cat'] = cfg.MODEL.NUM_SAMPLE_CATS
-        ret['fed_loss_freq_weight'] = cfg.MODEL.ROI_BOX_HEAD.FED_LOSS_FREQ_WEIGHT
         ret['base_alpha'] = cfg.MODEL.ROI_BOX_HEAD.BASE_ALPHA
         ret['novel_beta'] = cfg.MODEL.ROI_BOX_HEAD.NOVEL_BETA
         ret['background_weight'] = cfg.MODEL.ROI_BOX_HEAD.BACKGROUND_WEIGHT
@@ -89,9 +89,8 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
     
     def forward(self,x):
         x_norm = x/x.norm(dim=1, keepdim=True)
-        logits_scale = self.logit_scale.exp()
         with autocast():
-            scores = logits_scale * x_norm @ (self.text_feats.t().to(x.device))
+            scores = self.logit_scale.exp() * x_norm @ (self.text_feats.t().to(x.device))
             if not self.training:
                 scores[:, self.unused_index] = float('-inf')
         proposal_deltas = self.bbox_pred(x)
@@ -177,7 +176,7 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         boxes = self.predict_boxes(predictions, proposals)
         scores = self.predict_probs(predictions, proposals)
         image_shapes = [x.image_size for x in proposals]
-
+        
         vlm_box_features = self.test_pooler([clip_feats], [Boxes(box) for box in boxes])
         # vlm pooler layer: clip attenpool
         vlm_box_features = attenpool(vlm_box_features)
@@ -232,13 +231,17 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
             boxes = boxes[valid_mask]
             scores = scores[valid_mask]
             vlm_scores = vlm_scores[valid_mask]
-        scores = scores[:, :-1]
-        vlm_scores = vlm_scores[:, :-1]
+        
         # 0 会自动过滤掉; 0: unseen box or unused box
         base_scores = ((scores * self.base_ones)**(1-self.base_alpha)) * ((vlm_scores*self.base_ones)**(self.base_alpha))
         novel_scores = ((scores * self.novel_ones)**(1-self.novel_beta)) * ((vlm_scores*self.novel_ones)**(self.novel_beta))
-        scores = base_scores + novel_scores
-        assert scores[:, self.unused_index].max() < 1e-5, 'unused classes should not be evaluated'
+        ensembled_socres = base_scores + novel_scores
+        assert ensembled_socres[:, self.unused_index].max() < 1e-5, 'unused classes should not be evaluated'
+        
+        ensembled_socres = torch.cat([ensembled_socres[:,:-1], scores[:, -1:]], dim=1)
+        ensembled_socres = ensembled_socres / ensembled_socres.sum(dim=1, keepdim=True)
+        ensembled_socres = ensembled_socres[:, :-1]
+        assert ensembled_socres[:, self.unused_index].max() < 1e-5, 'unused classes should not be evaluated'
 
         num_bbox_reg_classes = boxes.shape[1] // 4
         boxes = Boxes(boxes.reshape(-1, 4))
@@ -246,7 +249,7 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         boxes = boxes.tensor.view(-1, num_bbox_reg_classes, 4)  # R x C x 4
         # 1. Filter results based on detection scores. It can make NMS more efficient
         #    by filtering out low-confidence detections.
-        filter_mask = scores > self.test_score_thresh  # R x K
+        filter_mask = ensembled_socres > self.test_score_thresh  # R x K
         # R' x 2. First column contains indices of the R predictions;
         # Second column contains indices of classes.
         filter_inds = filter_mask.nonzero()
@@ -254,16 +257,16 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
             boxes = boxes[filter_inds[:, 0], 0]
         else:
             boxes = boxes[filter_mask]
-        scores = scores[filter_mask]
+        ensembled_socres = ensembled_socres[filter_mask]
 
         # 2. Apply NMS for each class independently.
-        keep = batched_nms(boxes, scores, filter_inds[:, 1], self.test_nms_thresh)
+        keep = batched_nms(boxes, ensembled_socres, filter_inds[:, 1], self.test_nms_thresh)
         if self.test_topk_per_image >= 0:
             keep = keep[:self.test_topk_per_image]
-        boxes, scores, filter_inds = boxes[keep], scores[keep], filter_inds[keep]
+        boxes, ensembled_socres, filter_inds = boxes[keep], ensembled_socres[keep], filter_inds[keep]
 
         result = Instances(image_shape)
         result.pred_boxes = Boxes(boxes)
-        result.scores = scores
+        result.scores = ensembled_socres
         result.pred_classes = filter_inds[:, 1]
         return result, filter_inds[:, 0]

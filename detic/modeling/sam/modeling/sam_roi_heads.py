@@ -26,6 +26,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         mask_on: bool=True,
         input_size: int = 1024,
         sam_on: bool = False,
+        select_fore_cls: bool = False,
         **kwargs
     ):
         """
@@ -39,6 +40,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         self.mask_on = mask_on 
         self.input_size = input_size
         self.sam_on = sam_on
+        self.select_fore_cls = select_fore_cls 
         
     @classmethod
     def from_config(cls, cfg, input_shape):
@@ -61,6 +63,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
                 cfg.MODEL.ROI_HEADS.IOU_LABELS,
                 allow_low_quality_matches=cfg.MODEL.ROI_HEADS.ALLOW_LOW_QUALITY_MATCHES,
             )
+        ret['select_fore_cls'] = cfg.MODEL.ROI_MASK_HEAD.SELECT_FORE_CLS
         return ret
     
     @classmethod
@@ -90,6 +93,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
                 if cfg.MODEL.ROI_MASK_HEAD.POOLER_TYPE
                 else None
             )
+            
         return ret
 
     def forward_sam_mask(
@@ -97,7 +101,8 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             instances: List[Instances], 
             clip_final_feats: torch.Tensor,
             sam: nn.Module,
-            sam_features: torch.Tensor
+            sam_features: torch.Tensor,
+            attnpool: nn.Module,
             ):
         """
         Args:
@@ -109,7 +114,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
                         In training, they can be the proposals.
                         In inference, they can be the boxes predicted by R-CNN box head.
         """
-        if self.training:
+        if self.training and self.select_fore_cls:
             instances, _ = select_foreground_proposals(instances, self.num_classes)
         boxes = [i.proposal_boxes if self.training else i.pred_boxes for i in instances]
         if self.mask_pooler is not None:
@@ -126,7 +131,8 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             assert NotImplementedError
             features = [features[f] for f in self.mask_in_features]
         return self.mask_head(roi_features=features, instances=instances, sam=sam, sam_features=sam_features, 
-                              clip_final_feats=clip_final_feats, boxes=boxes)
+                              clip_final_feats=clip_final_feats, boxes=boxes, attnpool=attnpool,
+                              select_fore_cls=self.select_fore_cls)
 
     def _forward_box(self, attenpool, clip_final_feats: torch.Tensor, 
                      features: Dict[str, torch.Tensor], 
@@ -202,32 +208,24 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
                     losses.update(self.forward_sam_mask(instances=proposals, 
                                                         clip_final_feats=clip_final_feats, 
                                                         sam=sam, 
-                                                        sam_features=sam_features))
+                                                        sam_features=sam_features,
+                                                        attnpool=None))
                 else: losses.update(self._forward_mask(x, proposals))
             return proposals, losses
         else:
             pred_instances = self._forward_box(attnpool, clip_final_feats, x, proposals)
             if self.mask_on:
                 if sam_features is not None:
-                    pred_instances = self.forward_sam_with_given_boxes(clip_final_feats, pred_instances, sam, sam_features)
+                    assert pred_instances[0].has("pred_boxes")
+                    pred_instances = self.forward_sam_mask(pred_instances, 
+                                                           clip_final_feats, 
+                                                           sam, 
+                                                           sam_features, 
+                                                           attnpool=attnpool)
                 else:
                     pred_instances = self.forward_with_given_boxes(x, pred_instances)
             return pred_instances, {}
     
-    def forward_sam_with_given_boxes(
-        self,
-        clip_features: torch.Tensor, 
-        instances: List[Instances],
-        sam: nn.Module, 
-        sam_features: torch.Tensor
-        ) -> List[Instances]:
-        """
-        clip_features: final outputs of clip image_encoder
-        """
-        assert not self.training
-        assert instances[0].has("pred_boxes")
-        instances = self.forward_sam_mask(instances, clip_features, sam, sam_features)
-        return instances
 
     
 class SinePositionalEncoding(nn.Module):

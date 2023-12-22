@@ -142,7 +142,6 @@ def add_rsprompter_config(cfg):
     _C.MODEL.RPN.OBJECTNESS_LOSS_TYPE = 'binary_ce'
     _C.MODEL.NUM_SAMPLE_CATS = 50
 
-    _C.MODEL.CLIP_TEXT_FEATS_PATH = 'san'
 
     _C.MODEL.FPN.INNER_CHANNELS  = 32
     _C.MODEL.FPN.UP_SAMPLE_SCALE = 4
@@ -150,10 +149,9 @@ def add_rsprompter_config(cfg):
     _C.MODEL.FPN.SELECTED_CHANNELS = list(range(8, 32, 2))
     _C.MODEL.FPN.IN_CHANNELS = [768, 768, 768]
 
-    _C.MODEL.ROI_BOX_HEAD.USE_SIGMOID_CE = False
     _C.MODEL.ROI_BOX_HEAD.CAT_FREQ_PATH = 'datasets/metadata/lvis_v1_train_cat_info.json'
     _C.MODEL.ROI_BOX_HEAD.IGNORE_ZERO_CATS = False
-    _C.MODEL.ROI_BOX_HEAD.FED_LOSS_FREQ_WEIGHT = 0.5
+
     _C.MODEL.ROI_BOX_HEAD.BASE_ALPHA = 0.35
     _C.MODEL.ROI_BOX_HEAD.NOVEL_BETA = 0.65
     _C.MODEL.ROI_BOX_HEAD.BACKGROUND_WEIGHT = 0.2
@@ -162,13 +160,13 @@ def add_rsprompter_config(cfg):
     _C.MODEL.ROI_MASK_HEAD.MASK_LOSS_TYPE = 'ce'
     _C.MODEL.ROI_MASK_HEAD.MASK_LOSS_WEIGHT = 1.0
     _C.MODEL.ROI_MASK_HEAD.PER_QUERY_POINT = 4
+    _C.MODEL.ROI_MASK_HEAD.SELECT_FORE_CLS = True
+    
     _C.MODEL.SAM_FROZEN = True
     _C.MODEL.SAM_ON = False
     _C.MODEL.SAM_PIXEL_MEAN = [0.,0.,0.]
     _C.MODEL.SAM_PIXEL_STD = [1.,1.,1.]
     
-    _C.MODEL.CONFIGS = CN()
-    _C.MODEL.CONFIGS.ONLY_DECODER = False
 
     _C.SOLVER.OPTIMIZER = 'SGD'
     _C.SOLVER.USE_CUSTOM_SOLVER = True
@@ -194,6 +192,8 @@ def add_rsprompter_config(cfg):
     _C.TEST.GEOMETRIC_FACT = 0.35
 
     _C.MODEL.ROI_HEADS.ALLOW_LOW_QUALITY_MATCHES = True
+    
+    _C.MODEL.CLIP_TEXT_FEATS_PATH = 'san'
 
     _C.FP16 = False
 

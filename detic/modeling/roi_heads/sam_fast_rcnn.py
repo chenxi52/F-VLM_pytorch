@@ -1,4 +1,3 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
 import logging
 import torch
 from typing import List, Tuple
@@ -140,11 +139,9 @@ def fast_rcnn_inference_single_image(
     Single-image inference. Return bounding-box detection results by thresholding
     on scores and applying non-maximum suppression (NMS).
     """
-    valid_mask = torch.isfinite(boxes).all(dim=1) & torch.isfinite(scores).all(dim=1)
+    valid_mask = torch.isfinite(boxes).all(dim=1)
     if not valid_mask.all():
         boxes = boxes[valid_mask]
-        scores = scores[valid_mask]
-    scores = scores[:, :-1]
     num_bbox_reg_classes = boxes.shape[1] // 4
     boxes = Boxes(boxes.reshape(-1, 4))
     boxes.clip(image_shape)

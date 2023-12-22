@@ -4,9 +4,6 @@ MODEL:
     CLIP_TYPE: "RN50"
   CLIP_TEXT_FEATS_PATH: "datasets/coco/coco_cls_seen.pkl"
   RPN:
-    HEAD_NAME: "StandardRPNHead"
-    PRE_NMS_TOPK_TRAIN: 2000  # Per FPN level
-    PRE_NMS_TOPK_TEST: 1000  # Per FPN level
     POST_NMS_TOPK_TRAIN: 1000
     POST_NMS_TOPK_TEST: 1000
   ROI_HEADS:
@@ -19,8 +16,6 @@ MODEL:
     BACKGROUND_WEIGHT: 0.2
     IGNORE_ZERO_CATS: True 
     CAT_FREQ_PATH: 'datasets/coco/zero-shot/instances_train2017_seen_2_oriorder_cat_info.json'
-    BASE_ALPHA: 0.2
-    NOVEL_BETA: 0.45
   ROI_MASK_HEAD:
     NAME: "MaskRCNNConvUpsampleHead"
   MASK_ON: True
@@ -38,7 +33,7 @@ SOLVER:
   WEIGHT_DECAY: 0.01
   LR_SCHEDULER_NAME: "WarmupMultiStepLR"
   WARMUP_FACTOR: 0.16
-  WARMUP_METHOD: "constant"
+  WARMUP_METHOD: "linear"
   WARMUP_ITERS: 1000
   STEPS: (10125, 10688, 10869)
   GAMMA: 0.1
@@ -50,4 +45,4 @@ TEST:
   DETECTIONS_PER_IMAGE: 300  #test_topk_per_image
   EVAL_PERIOD: 11250 # change
   IMS_PER_BATCH: 1 #every gpu has most 2 images  # change
-OUTPUT_DIR: './output/ovcoco'
+OUTPUT_DIR: 'output/clipRpn'

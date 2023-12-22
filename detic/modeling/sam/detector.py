@@ -159,14 +159,14 @@ class ClipOpenDetector(GeneralizedRCNN):
             fpn_features = self.backbone(clip_features)
 
         if not self.training:
-            return self.inference(batched_inputs, 
-                                  do_postprocess=self.do_postprocess,
-                                  sam_feats=sam_image_feats, 
-                                  clip_images=clip_images,
-                                  clip_final_feats=clip_features['res5'],
-                                  fpn_feats=fpn_features)
+            with autocast():
+                return self.inference(batched_inputs, 
+                                    do_postprocess=self.do_postprocess,
+                                    sam_feats=sam_image_feats, 
+                                    clip_images=clip_images,
+                                    clip_final_feats=clip_features['res5'],
+                                    fpn_feats=fpn_features)
         gt_instances = [x["instances"].to(self.device) for x in batched_inputs] 
-        # clip_feats is ['res5']
         proposals, proposal_losses = self.proposal_generator(
             clip_images, fpn_features, gt_instances)
         

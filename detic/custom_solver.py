@@ -98,7 +98,7 @@ def build_sam_optimizer(cfg: CfgNode, model: torch.nn.Module, logger) -> torch.o
         memo.add(value)
         key_memo.add(key)
         param = {"params": [value], "lr": lr}
-        if optimizer_type != 'ADAMW':
+        if optimizer_type != 'ADAMW': #and 'logit_scale' not in key:
             param['weight_decay'] = weight_decay
         params += [param]
     if comm.is_main_process():
