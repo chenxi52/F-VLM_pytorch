@@ -147,8 +147,8 @@ class ClipOpenDetector(GeneralizedRCNN):
             clip_images = self.to_imageList(images)
         sam_image_feats = None
         if self.sam_on: 
-            clip_images = self.norm_imageList(images, self.pixel_mean, self.pixel_std) # ImageList
-            sam_images = self.norm_imageList(images, self.sam_pixel_mean, self.sam_pixel_std)
+            clip_images = self.norm_imageList(images, self.pixel_mean, self.pixel_std, norm_val=255.) # ImageList
+            sam_images = self.norm_imageList(images, self.sam_pixel_mean, self.sam_pixel_std, norm_val=1.)
             sam_image_feats = self.extract_sam_feat(sam_images.tensor)
         if self.fp16:
             with autocast():
@@ -189,8 +189,8 @@ class ClipOpenDetector(GeneralizedRCNN):
         return losses
             
     
-    def norm_imageList(self, images, mean, std):
-        resized_images = [(x.to(torch.float)/255. - mean) / std for x in images]
+    def norm_imageList(self, images, mean, std, norm_val):
+        resized_images = [(x.to(torch.float)/norm_val - mean) / std for x in images]
         return self.to_imageList(resized_images)
     
     def to_imageList(self, images: List[torch.Tensor]):
@@ -279,6 +279,7 @@ def custom_detector_postprocess(
         results: the pred_masks of (1024,1024), results.image_size: (1024, x) or (x,1024)
         output_height, output_width: the original img sie 
     """
+    
     if isinstance(output_width, torch.Tensor):
         # division is performed when computing scale_x and scale_y.
         output_width_tmp = output_width.float()

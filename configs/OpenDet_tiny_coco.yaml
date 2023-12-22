@@ -29,7 +29,7 @@ MODEL:
     MASK_LOSS_TYPE: "ce_dice" 
     WITH_SINCOS: True
     PER_QUERY_POINT: 4
-    SELECT_FORE_CLS: False # !!!!!
+    SELECT_FORE_CLS: True # !!!!!
   MASK_ON: True
   SAM_ON: True # !!!!
 DATASETS:

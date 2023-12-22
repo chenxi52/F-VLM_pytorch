@@ -41,6 +41,6 @@ INPUT:
   PROMPT_SIZE: (90, 4)
 TEST:
   DETECTIONS_PER_IMAGE: 300  #test_topk_per_image
-  IMS_PER_BATCH: 1 #every gpu has most 2 images  # change
+  IMS_PER_BATCH: 4 #every gpu has most 2 images  # change
   SCORE_TYPE: 'cls'
-OUTPUT_DIR: './output/clipRpn/Samon'
+OUTPUT_DIR: './output/clipRpn/SamOn'

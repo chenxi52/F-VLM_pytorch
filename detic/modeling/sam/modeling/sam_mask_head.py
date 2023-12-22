@@ -31,9 +31,11 @@ class samMaskHead(BaseMaskRCNNHead):
             per_query_point: int = 4,
             clip_type: str = 'ViT-B/16',
             ignore_zero_cats: bool = False,
-            cat_freq_path: str = '',
             text_feats: torch.Tensor = None,
             test_pooler: ROIPooler = None,
+            background_weight: float = 1.0,
+            base_alpha: float = 0.5,
+            novel_beta : float = 0.5,
             **kwargs
             ) -> None:
         super().__init__(vis_period=vis_period)
@@ -91,13 +93,15 @@ class samMaskHead(BaseMaskRCNNHead):
         self.point_emb.apply(init_weights)
         self.contextformer.apply(init_weights)
         if ignore_zero_cats:
-            base_ones = torch.zeros(len(get_contigous_ids('all')))
+            base_ones = torch.zeros(len(get_contigous_ids('all'))) 
             base_ones[get_contigous_ids('seen')] = 1
+            base_ones = torch.cat([base_ones, torch.ones(1)])
             self.register_buffer('base_ones', base_ones)
             unused_index = get_contigous_ids('unused') # [0-79]
             self.register_buffer('unused_index', torch.tensor(unused_index))
             novel_ones = torch.zeros(len(get_contigous_ids('all')))
             novel_ones[get_contigous_ids('unseen')] = 1
+            novel_ones = torch.cat([novel_ones, torch.ones(1)])
             self.register_buffer('novel_ones', novel_ones)
         del self.text_feats
         self.register_buffer('text_feats', text_feats)
@@ -131,7 +135,6 @@ class samMaskHead(BaseMaskRCNNHead):
                 'test_score_type': cfg.TEST.SCORE_TYPE,
                 'test_geometric_fact': cfg.TEST.GEOMETRIC_FACT,
                 'ignore_zero_cats': cfg.MODEL.ROI_BOX_HEAD.IGNORE_ZERO_CATS,
-                'cat_freq_path': cfg.MODEL.ROI_BOX_HEAD.CAT_FREQ_PATH,
                 'use_fed_loss': cfg.MODEL.ROI_BOX_HEAD.USE_FED_LOSS,
                 'fed_loss_num_cat': cfg.MODEL.NUM_SAMPLE_CATS,
                 'mask_thr_binary': cfg.TEST.MASK_THR_BINARY,
@@ -195,11 +198,13 @@ class samMaskHead(BaseMaskRCNNHead):
             del boxes
             gt_classes = (cat([p.gt_classes for p in instances], dim=0) )
             assert len(logits_image.shape) == 2, print('the fore proposal is zero in this batch', logits_image.shape)
-            if not select_fore_cls:
-                weight = torch.cat([torch.ones(logits_image.shape[1]-1), torch.ones([])* self.background_weight], device=logits_image.device)
-            else: 
-                logits_image = logits_image[:, :-1]
-                weight = 1.
+            # if not select_fore_cls:
+            #     weight = torch.cat([torch.ones(logits_image.shape[1]-1), torch.ones([])* self.background_weight], device=logits_image.device)
+            # else: 
+            #     # logits_image = logits_image[:, :-1]
+            #     weight = torch.ones_like(logits_image.shape[1])
+            weight = torch.cat([torch.ones(self.num_classes), torch.ones(1)* self.background_weight], dim=0).to(logits_image.device)
+            
             loss_cls = cross_entropy(logits_image, gt_classes, reduction="mean", weight=weight)
             # 当选前景 proposals 进入 mask head即 self.fore_mask_cls=True，这里 cls_accuracy=fg_cls_accuracy
             _log_classification_stats(logits_image, gt_classes , 'fast_rcnn')
@@ -359,7 +364,6 @@ class samMaskHead(BaseMaskRCNNHead):
         boxes to crop vlm features and get vlm_scores
         """
         cls_agnostic_mask = pred_mask_logits.size(1) == 1
-
         if cls_agnostic_mask:
             mask_probs_pred = pred_mask_logits.sigmoid()
         else:
