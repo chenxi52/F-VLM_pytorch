@@ -32,10 +32,6 @@ class samMaskHead(BaseMaskRCNNHead):
             clip_type: str = 'ViT-B/16',
             ignore_zero_cats: bool = False,
             text_feats: torch.Tensor = None,
-            test_pooler: ROIPooler = None,
-            background_weight: float = 1.0,
-            base_alpha: float = 0.5,
-            novel_beta : float = 0.5,
             **kwargs
             ) -> None:
         super().__init__(vis_period=vis_period)
@@ -164,6 +160,7 @@ class samMaskHead(BaseMaskRCNNHead):
         Returns:
             A dict of losses in training. The predicted "instances" in inference(List[Dict['instances': Instances]]).
         """
+        import ipdb; ipdb.set_trace()
         batch_size = roi_features.shape[0]
         point_emd = self.point_emb(roi_features) #prompt head 
         point_emd = point_emd.view(batch_size, self.per_query_point, -1)
@@ -203,7 +200,7 @@ class samMaskHead(BaseMaskRCNNHead):
             # else: 
             #     # logits_image = logits_image[:, :-1]
             #     weight = torch.ones_like(logits_image.shape[1])
-            weight = torch.cat([torch.ones(self.num_classes), torch.ones(1)* self.background_weight], dim=0).to(logits_image.device)
+            weight = torch.cat([torch.ones(self.data_classes), torch.ones(1)* self.background_weight], dim=0).to(logits_image.device)
             
             loss_cls = cross_entropy(logits_image, gt_classes, reduction="mean", weight=weight)
             # 当选前景 proposals 进入 mask head即 self.fore_mask_cls=True，这里 cls_accuracy=fg_cls_accuracy
