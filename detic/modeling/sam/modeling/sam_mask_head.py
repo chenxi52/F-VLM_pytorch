@@ -144,7 +144,6 @@ class samMaskHead(BaseMaskRCNNHead):
     
     def forward(
             self,
-            roi_features: torch.Tensor,
             instances: List[Instances],
             sam: nn.Module,
             sam_features: torch.Tensor,
@@ -160,15 +159,13 @@ class samMaskHead(BaseMaskRCNNHead):
         Returns:
             A dict of losses in training. The predicted "instances" in inference(List[Dict['instances': Instances]]).
         """
-        batch_size = roi_features.shape[0]
-        point_emd = self.point_emb(roi_features) #prompt head 
-        point_emd = point_emd.view(batch_size, self.per_query_point, -1)
-        if self.with_sincos: 
-            point_emd = torch.sin(point_emd[..., ::2] + point_emd[..., 1::2])
-        nomask_dense_embeddings = sam.prompt_encoder.no_mask_embed.weight.reshape(1, -1, 1, 1).expand(
-            point_emd.shape[0], -1, *sam_features.shape[-2:]
+        boxes = cat([b.tensor for b in boxes], dim=0)
+        sparse_embeddings, dense_embeddings = sam.prompt_encoder(
+            points= None,
+            boxes = boxes,
+            masks = None
         )
-        img_flag_ids = torch.tensor([len(i) for i in instances], device=roi_features.device, dtype=torch.long)
+        img_flag_ids = torch.tensor([len(i) for i in instances], device=clip_final_feats.device, dtype=torch.long)
         padding = torch.zeros((len(sam_features)-len(img_flag_ids),), device=img_flag_ids.device, dtype=img_flag_ids.dtype)
         img_flag_ids = torch.cat([img_flag_ids, padding])
         
@@ -179,11 +176,12 @@ class samMaskHead(BaseMaskRCNNHead):
         
         # select foreGround proposals first will save computation here.
         with autocast():
+            # box和 image features对应关系是，
             low_res_masks, mask_tokens = sam.mask_decoder.forward_batch(
                 image_embeddings=sam_features,
                 image_pe=img_pe,
-                sparse_prompt_embeddings=point_emd,
-                dense_prompt_embeddings=nomask_dense_embeddings,
+                sparse_prompt_embeddings=sparse_embeddings,
+                dense_prompt_embeddings=dense_embeddings,
                 multimask_output=False,
             )
             logits_image = self.contextformer(mask_tokens, batch_clip_final_feats, self.text_feats)

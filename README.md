@@ -7,7 +7,10 @@ Stage2:
 1. 将 rpn 移动到 clip image encoder
     1. fpn 构建到 clip resnet
     2. (先复现f-vlm) box head, mask head都是 mask-rcnn一样的
-    
+2. 不使用 mask roi 而是直接将 box送入 sam prompt encoder --> sam mask decoder
+    2. 目的是，roi 是否可以适应到原来的位置空间，又是否可以和 sam mask 对齐。
+    3. 优化的参数是 rpn box_head context_former
+    4. 由原来的 box roi经过卷积的分类，变为 mask token和原clip image feature交互后的特征 和 text_features对齐。 
 ![Alt text](image.png)
 
 # Open-Vocabulary segmentation
