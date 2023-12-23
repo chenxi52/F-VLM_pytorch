@@ -402,13 +402,10 @@ class samMaskHead(BaseMaskRCNNHead):
         scores = scores_ori.clone()
         scores[:, self.unused_index] = float('-inf')
         vlm_scores[:, self.unused_index] = float('-inf')
-        
         # 先去掉背景类别再 softmax
         vlm_scores = F.softmax(vlm_scores, dim=1)
         scores = F.softmax(scores, dim=1)
-        # scores = scores[:, :-1]
-        # vlm_scores = vlm_scores[:, :-1]
-        
+
         new_instance = Instances(instances.image_size).to(scores.device)
         boxes = instances.pred_boxes.tensor
         objectness = instances.objectness
