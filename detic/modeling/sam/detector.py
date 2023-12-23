@@ -223,7 +223,7 @@ class ClipOpenDetector(GeneralizedRCNN):
                 processed_results.append({"instances": r})
             else: 
                 r.proposal_boxes = r.pred_boxes
-                processed_results.append({"propsals": r})
+                processed_results.append({"proposals": r})
         return processed_results
     
 
