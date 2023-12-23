@@ -222,7 +222,6 @@ class ClipOpenDetector(GeneralizedRCNN):
             if not self.eval_ar:
                 processed_results.append({"instances": r})
             else: 
-                import ipdb;ipdb.set_trace()
                 r.proposal_boxes = r.pred_boxes
                 processed_results.append({"propsals": r})
         return processed_results
