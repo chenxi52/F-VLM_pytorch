@@ -40,7 +40,7 @@ class ClipOpenDetector(GeneralizedRCNN):
         sam_pixel_mean=None,
         sam_pixel_std=None,
         sam_weights=None,
-        eval_ar= False
+        eval_ar= False,
         **kwargs
     ):
         self.fp16=fp16
@@ -222,6 +222,7 @@ class ClipOpenDetector(GeneralizedRCNN):
             if not self.eval_ar:
                 processed_results.append({"instances": r})
             else: 
+                import ipdb;ipdb.set_trace()
                 r.proposal_boxes = r.pred_boxes
                 processed_results.append({"propsals": r})
         return processed_results

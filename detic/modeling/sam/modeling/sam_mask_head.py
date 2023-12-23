@@ -139,7 +139,8 @@ class samMaskHead(BaseMaskRCNNHead):
                 'test_pooler': test_pooler,
                 'base_alpha': cfg.MODEL.ROI_BOX_HEAD.BASE_ALPHA,
                 'novel_beta': cfg.MODEL.ROI_BOX_HEAD.NOVEL_BETA,
-                'background_weight': cfg.MODEL.ROI_BOX_HEAD.BACKGROUND_WEIGHT
+                'background_weight': cfg.MODEL.ROI_BOX_HEAD.BACKGROUND_WEIGHT,
+                'eval_ar': cfg.EVAL_AR
                 }
     
     def forward(
@@ -447,6 +448,8 @@ class samMaskHead(BaseMaskRCNNHead):
         new_instance.scores = ensembled_socres
         new_instance.pred_classes = filter_inds[:,1]
         new_instance.pred_masks = mask_pred[filter_inds[:,0]]
+        if self.eval_ar:
+            new_instance.objectness_logits = objectness[filter_inds[:,0]]
         return new_instance
 
 @torch.jit.unused
