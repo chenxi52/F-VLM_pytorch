@@ -160,7 +160,6 @@ class samMaskHead(BaseMaskRCNNHead):
         Returns:
             A dict of losses in training. The predicted "instances" in inference(List[Dict['instances': Instances]]).
         """
-        import ipdb; ipdb.set_trace()
         batch_size = roi_features.shape[0]
         point_emd = self.point_emb(roi_features) #prompt head 
         point_emd = point_emd.view(batch_size, self.per_query_point, -1)
@@ -257,6 +256,7 @@ class samMaskHead(BaseMaskRCNNHead):
         remove gt_masks.crop_and_resize from original mask_rcnn_loss 
         with foreground selection
         """
+        assert instances[0].has("gt_masks"), "Instance annotations must contain gt_masks!"
         cls_agnostic_mask = pred_mask_logits.size(1) == 1
         total_num_masks = pred_mask_logits.size(0)
 
@@ -266,18 +266,19 @@ class samMaskHead(BaseMaskRCNNHead):
         for instances_per_image in instances:
             if len(instances_per_image) == 0:
                 continue
-            gt_masks_per_image = instances_per_image.gt_masks.tensor
+            
             gt_classes_per_image = instances_per_image.gt_classes.to(dtype=torch.int64)
-
             ######因为之前并没有选出前景的 propsals做分类， 这里应该选出前景的masks
             if not select_fore_cls: 
                 fg_inds = nonzero_tuple((gt_classes_per_image >= 0) & (gt_classes_per_image < self.data_classes))[0]
                 gt_classes.append(gt_classes_per_image[fg_inds])
+                gt_masks_per_image = instances_per_image[fg_inds].gt_masks.tensor
                 # A tensor of shape (N, M, M), N=#instances in the image; M=mask_side_len
                 gt_masks_per_image = gt_masks_per_image[fg_inds]
                 fg_inds_list.append(fg_inds)
             ###########
             if not cls_agnostic_mask:
+                gt_masks_per_image = instances_per_image.gt_masks.tensor
                 gt_classes.append(gt_classes_per_image)
             
             gt_masks_per_image = F.pad(gt_masks_per_image, (0, self.train_size-gt_masks_per_image.shape[-1], 0, self.train_size-gt_masks_per_image.shape[-2]), value=0)
