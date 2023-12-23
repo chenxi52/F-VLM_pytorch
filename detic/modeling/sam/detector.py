@@ -40,6 +40,7 @@ class ClipOpenDetector(GeneralizedRCNN):
         sam_pixel_mean=None,
         sam_pixel_std=None,
         sam_weights=None,
+        eval_ar= False
         **kwargs
     ):
         self.fp16=fp16
@@ -69,6 +70,7 @@ class ClipOpenDetector(GeneralizedRCNN):
         for name, params in self.clip.named_parameters():
             params.requires_grad = False
         self.clip_train_size = clip_train_size
+        self.eval_ar = eval_ar
 
     @classmethod
     def from_config(cls, cfg):
@@ -97,6 +99,7 @@ class ClipOpenDetector(GeneralizedRCNN):
             'fpn_in_features': cfg.MODEL.FPN.IN_FEATURES,
             "sam_on": cfg.MODEL.SAM_ON,
             "sam_weights": cfg.MODEL.SAM_WEIGHTS,
+            "eval_ar": cfg.EVAL_AR
         })
         return ret
     
@@ -216,7 +219,11 @@ class ClipOpenDetector(GeneralizedRCNN):
             height = input_per_image.get("height")
             width = input_per_image.get("width")
             r = custom_detector_postprocess(results_per_image, height, width, mask_threshold=mask_threshold)
-            processed_results.append({"instances": r})
+            if not self.eval_ar:
+                processed_results.append({"instances": r})
+            else: 
+                r.proposal_boxes = r.pred_boxes
+                processed_results.append({"propsals": r})
         return processed_results
     
 
