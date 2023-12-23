@@ -178,12 +178,12 @@ def add_rsprompter_config(cfg):
     _C.INPUT.TEST_SIZE = 1024
     _C.INPUT.SCALE_RANGE = (0.1, 2.)
     # 'default' for fixed short/ long edge, 'square' for max size=INPUT.SIZE
-    _C.INPUT.TEST_INPUT_TYPE = 'default' 
     _C.INPUT.PAD_MASK = True
     _C.INPUT.MASK_PAD_VAL = 0.0
     _C.INPUT.CLIP_TRAIN_SIZE = 1024
     
     _C.FIND_UNUSED_PARAM = True
+    _C.INPUT.TEST_INPUT_TYPE = 'default' 
 
     _C.TEST.MASK_THR_BINARY = 0.5
     _C.TEST.DO_POSTPROCESS = True

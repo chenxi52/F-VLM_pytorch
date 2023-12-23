@@ -212,11 +212,11 @@ class samMaskHead(BaseMaskRCNNHead):
             return loss
         else:
             # low_res_masks, logits_image(scores, class), vlm_scores, 
-            new_instances = self.custom_mask_rcnn_inference(low_res_masks, 
-                                                            instances, 
-                                                            logits_image, 
-                                                            boxes,
-                                                            clip_final_feats,
+            new_instances = self.custom_mask_rcnn_inference(pred_mask_logits = low_res_masks, 
+                                                            pred_instances=instances, 
+                                                            logits_image=logits_image, 
+                                                            boxes=boxes,
+                                                            clip_features=clip_final_feats,
                                                             attnpool=attnpool)
             return new_instances
         
@@ -256,7 +256,6 @@ class samMaskHead(BaseMaskRCNNHead):
         remove gt_masks.crop_and_resize from original mask_rcnn_loss 
         with foreground selection
         """
-        assert instances[0].has("gt_masks"), "Instance annotations must contain gt_masks!"
         cls_agnostic_mask = pred_mask_logits.size(1) == 1
         total_num_masks = pred_mask_logits.size(0)
 
@@ -266,21 +265,22 @@ class samMaskHead(BaseMaskRCNNHead):
         for instances_per_image in instances:
             if len(instances_per_image) == 0:
                 continue
-            
             gt_classes_per_image = instances_per_image.gt_classes.to(dtype=torch.int64)
             ######因为之前并没有选出前景的 propsals做分类， 这里应该选出前景的masks
             if not select_fore_cls: 
                 fg_inds = nonzero_tuple((gt_classes_per_image >= 0) & (gt_classes_per_image < self.data_classes))[0]
-                gt_classes.append(gt_classes_per_image[fg_inds])
+                if len(fg_inds) == 0:
+                    continue
+                if not cls_agnostic_mask:
+                    gt_classes.append(gt_classes_per_image[fg_inds])
                 gt_masks_per_image = instances_per_image[fg_inds].gt_masks.tensor
                 # A tensor of shape (N, M, M), N=#instances in the image; M=mask_side_len
-                gt_masks_per_image = gt_masks_per_image[fg_inds]
                 fg_inds_list.append(fg_inds)
             ###########
-            if not cls_agnostic_mask:
+            else:
                 gt_masks_per_image = instances_per_image.gt_masks.tensor
+            if not cls_agnostic_mask:
                 gt_classes.append(gt_classes_per_image)
-            
             gt_masks_per_image = F.pad(gt_masks_per_image, (0, self.train_size-gt_masks_per_image.shape[-1], 0, self.train_size-gt_masks_per_image.shape[-2]), value=0)
             gt_masks.append(gt_masks_per_image)
 
@@ -295,6 +295,7 @@ class samMaskHead(BaseMaskRCNNHead):
         if cls_agnostic_mask:
             pred_mask_logits = pred_mask_logits[:, 0]
         else:
+            assert len(gt_classes)>0, print('gt_classes is empty when cls_agnostic_mask = False')
             indices = torch.arange(total_num_masks)
             gt_classes = cat(gt_classes, dim=0)
             pred_mask_logits = pred_mask_logits[indices, gt_classes]
@@ -379,7 +380,7 @@ class samMaskHead(BaseMaskRCNNHead):
         vlm_box_features = self.test_pooler([clip_features], boxes)
         # vlm pooler layer: clip attenpool
         vlm_box_features = attnpool(vlm_box_features)
-        vlm_box_features = vlm_box_features / vlm_box_features.norm(dim=1,keepdim=True)
+        vlm_box_features = vlm_box_features / vlm_box_features.norm(dim=1, keepdim=True)
         logits_scale = 1/0.01
         vlm_scores = logits_scale * vlm_box_features @ (self.text_feats.t().to(vlm_box_features.device))
 
@@ -414,8 +415,10 @@ class samMaskHead(BaseMaskRCNNHead):
             assert NotImplementedError
             ensembled_socres = scores * objectness[:, None]
         elif self.test_score_type == 'ob_geo_cls':
-            assert NotImplementedError
             ensembled_socres = scores**(1-self.test_geometric_fact) * objectness[:, None]**self.test_geometric_fact
+            ensembled_socres = ensembled_socres / ensembled_socres.sum(dim=1, keepdim=True)
+            ensembled_socres = ensembled_socres[:, :-1]
+            assert ensembled_socres[:, self.unused_index].max() < 1e-5, 'unused classes should not be evaluated'
         elif self.test_score_type == 'cls':
             # with vlm scores
             base_score = ((scores * self.base_ones)**(1-self.base_alpha)) * ((vlm_scores*self.base_ones)**(self.base_alpha))

@@ -45,8 +45,7 @@ def do_test(cfg, model):
     results = OrderedDict()
     for dataset_name in cfg.DATASETS.TEST:
         #####
-        mapper = None if cfg.INPUT.TEST_INPUT_TYPE == 'default' \
-            else SamDatasetMapper(
+        mapper = SamDatasetMapper(
                 cfg, False, augmentations=build_custom_augmentation(cfg, False))
         data_loader = build_detection_test_loader(cfg, dataset_name, mapper=mapper)
         #####
