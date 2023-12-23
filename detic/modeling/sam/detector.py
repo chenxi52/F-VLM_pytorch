@@ -40,7 +40,7 @@ class ClipOpenDetector(GeneralizedRCNN):
         sam_pixel_mean=None,
         sam_pixel_std=None,
         sam_weights=None,
-        eval_ar= False
+        eval_ar= False,
         **kwargs
     ):
         self.fp16=fp16

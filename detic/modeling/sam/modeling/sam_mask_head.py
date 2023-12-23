@@ -159,10 +159,10 @@ class samMaskHead(BaseMaskRCNNHead):
         Returns:
             A dict of losses in training. The predicted "instances" in inference(List[Dict['instances': Instances]]).
         """
-        boxes = cat([b.tensor for b in boxes], dim=0)
+       
         sparse_embeddings, dense_embeddings = sam.prompt_encoder(
             points= None,
-            boxes = boxes,
+            boxes = cat([b.tensor for b in boxes], dim=0),
             masks = None
         )
         img_flag_ids = torch.tensor([len(i) for i in instances], device=clip_final_feats.device, dtype=torch.long)
@@ -192,13 +192,7 @@ class samMaskHead(BaseMaskRCNNHead):
             del boxes
             gt_classes = (cat([p.gt_classes for p in instances], dim=0) )
             assert len(logits_image.shape) == 2, print('the fore proposal is zero in this batch', logits_image.shape)
-            # if not select_fore_cls:
-            #     weight = torch.cat([torch.ones(logits_image.shape[1]-1), torch.ones([])* self.background_weight], device=logits_image.device)
-            # else: 
-            #     # logits_image = logits_image[:, :-1]
-            #     weight = torch.ones_like(logits_image.shape[1])
             weight = torch.cat([torch.ones(self.data_classes), torch.ones(1)* self.background_weight], dim=0).to(logits_image.device)
-            
             loss_cls = cross_entropy(logits_image, gt_classes, reduction="mean", weight=weight)
             # 当选前景 proposals 进入 mask head即 self.fore_mask_cls=True，这里 cls_accuracy=fg_cls_accuracy
             _log_classification_stats(logits_image, gt_classes , 'fast_rcnn')
@@ -353,7 +347,7 @@ class samMaskHead(BaseMaskRCNNHead):
                                 pred_mask_logits: torch.Tensor, 
                                 pred_instances: List[Instances], 
                                 logits_image: torch.Tensor,
-                                boxes: List[Boxes],
+                                boxes: List[torch.Tensor],
                                 clip_features: torch.Tensor = None,
                                 attnpool: nn.AdaptiveAvgPool2d = None,
                                 ):
@@ -375,6 +369,7 @@ class samMaskHead(BaseMaskRCNNHead):
             indices = move_device_like(torch.arange(num_masks, device=device), class_pred)
             mask_probs_pred = pred_mask_logits[indices, class_pred][:, None].sigmoid()
         num_boxes_per_image = [len(i) for i in pred_instances]
+        
         vlm_box_features = self.test_pooler([clip_features], boxes)
         # vlm pooler layer: clip attenpool
         vlm_box_features = attnpool(vlm_box_features)
