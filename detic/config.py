@@ -200,3 +200,4 @@ def add_rsprompter_config(cfg):
     _C.DATALOADER.PERSISTENT_WORKERS = False
 
     _C.WANDB = False
+    _C.EVAL_AR = False
