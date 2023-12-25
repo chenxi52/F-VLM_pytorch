@@ -140,7 +140,8 @@ class samMaskHead(BaseMaskRCNNHead):
                 'base_alpha': cfg.MODEL.ROI_BOX_HEAD.BASE_ALPHA,
                 'novel_beta': cfg.MODEL.ROI_BOX_HEAD.NOVEL_BETA,
                 'background_weight': cfg.MODEL.ROI_BOX_HEAD.BACKGROUND_WEIGHT,
-                'eval_ar': cfg.EVAL_AR
+                'eval_ar': cfg.EVAL_AR,
+                'box_prompter': cfg.MODEL.ROI_MASK_HEAD.BOX_PROMPTER,
                 }
     
     def forward(
@@ -161,15 +162,23 @@ class samMaskHead(BaseMaskRCNNHead):
         Returns:
             A dict of losses in training. The predicted "instances" in inference(List[Dict['instances': Instances]]).
         """
-        batch_size = roi_features.shape[0]
-        point_emd = self.point_emb(roi_features) #prompt head 
-        point_emd = point_emd.view(batch_size, self.per_query_point, -1)
-        if self.with_sincos: 
-            point_emd = torch.sin(point_emd[..., ::2] + point_emd[..., 1::2])
-        nomask_dense_embeddings = sam.prompt_encoder.no_mask_embed.weight.reshape(1, -1, 1, 1).expand(
-            point_emd.shape[0], -1, *sam_features.shape[-2:]
-        )
-        img_flag_ids = torch.tensor([len(i) for i in instances], device=roi_features.device, dtype=torch.long)
+        if not self.box_prompter:
+            batch_size = roi_features.shape[0]
+            point_emd = self.point_emb(roi_features) #prompt head 
+            point_emd = point_emd.view(batch_size, self.per_query_point, -1)
+            if self.with_sincos: 
+                point_emd = torch.sin(point_emd[..., ::2] + point_emd[..., 1::2])
+            nomask_dense_embeddings = sam.prompt_encoder.no_mask_embed.weight.reshape(1, -1, 1, 1).expand(
+                point_emd.shape[0], -1, *sam_features.shape[-2:]
+            )
+            boxes = [b.tensor for b in boxes]
+        else:
+            sparse_embeddings, dense_embeddings = sam.prompt_encoder(
+                points= None,
+                boxes = cat([b.tensor for b in boxes], dim=0),
+                masks = None
+            )
+        img_flag_ids = torch.tensor([len(i) for i in instances], device=clip_final_feats.device, dtype=torch.long)
         padding = torch.zeros((len(sam_features)-len(img_flag_ids),), device=img_flag_ids.device, dtype=img_flag_ids.dtype)
         img_flag_ids = torch.cat([img_flag_ids, padding])
         
@@ -180,13 +189,22 @@ class samMaskHead(BaseMaskRCNNHead):
         
         # select foreGround proposals first will save computation here.
         with autocast():
-            low_res_masks, mask_tokens = sam.mask_decoder.forward_batch(
-                image_embeddings=sam_features,
-                image_pe=img_pe,
-                sparse_prompt_embeddings=point_emd,
-                dense_prompt_embeddings=nomask_dense_embeddings,
-                multimask_output=False,
-            )
+            # box和 image features对应关系是，
+            if self.box_prompter:
+                low_res_masks, mask_tokens = sam.mask_decoder.forward_batch(
+                    image_embeddings=sam_features,
+                    image_pe=img_pe,
+                    sparse_prompt_embeddings=sparse_embeddings,
+                    dense_prompt_embeddings=dense_embeddings,
+                    multimask_output=False,
+                )
+            else:
+                low_res_masks, mask_tokens = sam.mask_decoder.forward_batch(
+                    image_embeddings=sam_features,
+                    image_pe=img_pe,
+                    sparse_prompt_embeddings=point_emd,
+                    dense_prompt_embeddings=nomask_dense_embeddings,
+                    multimask_output=False,)
             logits_image = self.contextformer(mask_tokens, batch_clip_final_feats, self.text_feats)
             if len(logits_image.shape) > 2: #[bzs, n_tokens, dim]
                 logits_image = logits_image.squeeze()
@@ -195,13 +213,7 @@ class samMaskHead(BaseMaskRCNNHead):
             del boxes
             gt_classes = (cat([p.gt_classes for p in instances], dim=0) )
             assert len(logits_image.shape) == 2, print('the fore proposal is zero in this batch', logits_image.shape)
-            # if not select_fore_cls:
-            #     weight = torch.cat([torch.ones(logits_image.shape[1]-1), torch.ones([])* self.background_weight], device=logits_image.device)
-            # else: 
-            #     # logits_image = logits_image[:, :-1]
-            #     weight = torch.ones_like(logits_image.shape[1])
             weight = torch.cat([torch.ones(self.data_classes), torch.ones(1)* self.background_weight], dim=0).to(logits_image.device)
-            
             loss_cls = cross_entropy(logits_image, gt_classes, reduction="mean", weight=weight)
             # 当选前景 proposals 进入 mask head即 self.fore_mask_cls=True，这里 cls_accuracy=fg_cls_accuracy
             _log_classification_stats(logits_image, gt_classes , 'fast_rcnn')
@@ -356,7 +368,7 @@ class samMaskHead(BaseMaskRCNNHead):
                                 pred_mask_logits: torch.Tensor, 
                                 pred_instances: List[Instances], 
                                 logits_image: torch.Tensor,
-                                boxes: List[Boxes],
+                                boxes: List[torch.Tensor],
                                 clip_features: torch.Tensor = None,
                                 attnpool: nn.AdaptiveAvgPool2d = None,
                                 ):
@@ -378,6 +390,7 @@ class samMaskHead(BaseMaskRCNNHead):
             indices = move_device_like(torch.arange(num_masks, device=device), class_pred)
             mask_probs_pred = pred_mask_logits[indices, class_pred][:, None].sigmoid()
         num_boxes_per_image = [len(i) for i in pred_instances]
+        
         vlm_box_features = self.test_pooler([clip_features], boxes)
         # vlm pooler layer: clip attenpool
         vlm_box_features = attnpool(vlm_box_features)

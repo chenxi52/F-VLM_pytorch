@@ -161,6 +161,7 @@ def add_rsprompter_config(cfg):
     _C.MODEL.ROI_MASK_HEAD.MASK_LOSS_WEIGHT = 1.0
     _C.MODEL.ROI_MASK_HEAD.PER_QUERY_POINT = 4
     _C.MODEL.ROI_MASK_HEAD.SELECT_FORE_CLS = True
+    _C.MODEL.ROI_MASK_HEAD.BOX_PROMTPER = False
     
     _C.MODEL.SAM_FROZEN = True
     _C.MODEL.SAM_ON = False
@@ -201,3 +202,4 @@ def add_rsprompter_config(cfg):
 
     _C.WANDB = False
     _C.EVAL_AR = False
+    

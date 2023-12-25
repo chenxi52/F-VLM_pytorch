@@ -27,6 +27,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         input_size: int = 1024,
         sam_on: bool = False,
         select_fore_cls: bool = False,
+        box_prompter: bool = False,
         **kwargs
     ):
         """
@@ -41,7 +42,8 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         self.input_size = input_size
         self.sam_on = sam_on
         self.select_fore_cls = select_fore_cls 
-        
+        self.box_prompter = box_prompter
+
     @classmethod
     def from_config(cls, cfg, input_shape):
         """
@@ -64,6 +66,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
                 allow_low_quality_matches=cfg.MODEL.ROI_HEADS.ALLOW_LOW_QUALITY_MATCHES,
             )
         ret['select_fore_cls'] = cfg.MODEL.ROI_MASK_HEAD.SELECT_FORE_CLS
+        ret['box_prompter'] = cfg.MODEL.ROI_MASK_HEAD.BOX_PROMPTER
         return ret
     
     @classmethod
@@ -117,21 +120,29 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         if self.training and self.select_fore_cls:
             instances, _ = select_foreground_proposals(instances, self.num_classes)
         boxes = [i.proposal_boxes if self.training else i.pred_boxes for i in instances]
-        if self.mask_pooler is not None:
-            # sam_features 大小和 clip_features不一样
-            # mask pool 修改
-            features = self.mask_pooler([sam_features], boxes)
-            if features.size(0)==0:
-                results_instances = []
-                for ins in instances:
-                    ins.pred_masks = torch.tensor([], device=ins.pred_classes.device)
-                    results_instances.append(ins)
-                return results_instances
+        if not self.box_prompter:
+            if self.mask_pooler is not None:
+                # sam_features 大小和 clip_features不一样
+                # mask pool 修改
+                features = self.mask_pooler([sam_features], boxes)
+                if features.size(0)==0:
+                    results_instances = []
+                    for ins in instances:
+                        ins.pred_masks = torch.tensor([], device=ins.pred_classes.device)
+                        results_instances.append(ins)
+                    return results_instances
+            else:
+                assert NotImplementedError
+                features = [features[f] for f in self.mask_in_features]
         else:
-            assert NotImplementedError
-            features = [features[f] for f in self.mask_in_features]
-        return self.mask_head(roi_features=features, instances=instances, sam=sam, sam_features=sam_features, 
-                              clip_final_feats=clip_final_feats, boxes=boxes, attnpool=attnpool,
+            features = None
+        return self.mask_head(roi_features=features, 
+                              instances=instances,
+                              sam=sam, 
+                              sam_features=sam_features, 
+                              clip_final_feats=clip_final_feats, 
+                              boxes=boxes, 
+                              attnpool=attnpool,
                               select_fore_cls=self.select_fore_cls)
 
     def _forward_box(self, attenpool, clip_final_feats: torch.Tensor, 
