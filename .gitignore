@@ -77,6 +77,5 @@ wandb/
 
 CLIP-main
 mprofile_20231208110905.dat
-*.out
-*.error
+.output/slurm_out/*
 

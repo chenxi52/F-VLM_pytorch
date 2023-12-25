@@ -22,12 +22,12 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
     def __init__(
         self,
         *,
-        positional_encoding = dict(num_feats=128, normalize=True),
         mask_on: bool=True,
         input_size: int = 1024,
         sam_on: bool = False,
         select_fore_cls: bool = False,
         box_prompter: bool = False,
+        generate_pe: Tensor = None,
         **kwargs
     ):
         """
@@ -42,7 +42,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         self.sam_on = sam_on
         self.select_fore_cls = select_fore_cls 
         self.box_prompter = box_prompter
-        self.generate_pe = nn.Parameter(torch.randn(256, 32, 32), requires_grad=True).view(1,256,32,32)
+        self.generate_pe = generate_pe
     
     @classmethod
     def from_config(cls, cfg, input_shape):
@@ -67,6 +67,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             )
         ret['select_fore_cls'] = cfg.MODEL.ROI_MASK_HEAD.SELECT_FORE_CLS
         ret['box_prompter'] = cfg.MODEL.ROI_MASK_HEAD.BOX_PROMPTER
+        ret['generate_pe'] = nn.Parameter(torch.randn(1, 256, 32, 32))
         return ret
     
     @classmethod
@@ -205,12 +206,9 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             proposals = self.label_and_sample_proposals(proposals, targets)
         del targets
         x = [item[1] for item in list(fpn_features.items())]
-        bs, _, h, w = x[-1].shape 
-        # mask_pe = torch.zeros((bs, h, w), device=x[0].device, dtype=torch.bool)
-        img_feat_pe = self.generate_pe
         # add pos to fpn features
         for i in range(len(x)):
-            x[i] = x[i] + torch.nn.functional.interpolate(img_feat_pe, size=x[i].shape[-2:], mode='bilinear', align_corners=False).repeat(bs,1,1,1).to(x[i].device)
+            x[i] = x[i] + torch.nn.functional.interpolate(self.generate_pe, size=x[i].shape[-2:], mode='bilinear', align_corners=False).to(x[i].device)
         x = {list(fpn_features.keys())[i]: x[i] for i in range(len(fpn_features))}
         if self.training:
             losses = self._forward_box(attnpool, clip_final_feats, x, proposals)
