@@ -37,13 +37,13 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             input_size: input size for sam image_encoder
         """
         super().__init__(**kwargs)
-        self.generator_pe = SinePositionalEncoding(**positional_encoding)
         self.mask_on = mask_on 
         self.input_size = input_size
         self.sam_on = sam_on
         self.select_fore_cls = select_fore_cls 
         self.box_prompter = box_prompter
-
+        self.generate_pe = nn.Parameter(torch.randn(256, 32, 32), requires_grad=True).view(1,256,32,32)
+    
     @classmethod
     def from_config(cls, cfg, input_shape):
         """
@@ -206,11 +206,11 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         del targets
         x = [item[1] for item in list(fpn_features.items())]
         bs, _, h, w = x[-1].shape 
-        mask_pe = torch.zeros((bs, h, w), device=x[0].device, dtype=torch.bool)
-        img_feat_pe = self.generator_pe(mask_pe)
+        # mask_pe = torch.zeros((bs, h, w), device=x[0].device, dtype=torch.bool)
+        img_feat_pe = self.generate_pe
         # add pos to fpn features
         for i in range(len(x)):
-            x[i] = x[i] + torch.nn.functional.interpolate(img_feat_pe, size=x[i].shape[-2:], mode='bilinear', align_corners=False)
+            x[i] = x[i] + torch.nn.functional.interpolate(img_feat_pe, size=x[i].shape[-2:], mode='bilinear', align_corners=False).repeat(bs,1,1,1).to(x[i].device)
         x = {list(fpn_features.keys())[i]: x[i] for i in range(len(fpn_features))}
         if self.training:
             losses = self._forward_box(attnpool, clip_final_feats, x, proposals)
