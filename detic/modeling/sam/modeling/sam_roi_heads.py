@@ -147,14 +147,12 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
                               select_fore_cls=self.select_fore_cls)
 
     def _forward_box(self, attenpool, clip_final_feats: torch.Tensor, 
-                     features: Dict[str, torch.Tensor], 
+                     features: List[torch.Tensor], 
                      proposals: List[Instances]):
         """
         add VLM pooling layer
         clip_feats: [bsz, 2048, 32, 32]
         """
-        features = [features[f] for f in self.box_in_features]
-        
         box_features = self.box_pooler(features, [x.proposal_boxes for x in proposals])
         box_features = self.box_head(box_features) # here, box
         predictions = self.box_predictor(box_features)
@@ -193,11 +191,6 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         """
             clip_features: output of image_encoder
             fpn_features: multi-level features output by FPN
-            proposals (list[Instances]): length `N` list of `Instances`. The i-th
-                `Instances` contains object proposals for the i-th input image,
-                with fields "proposal_boxes" and "objectness_logits".
-            targets (list[Instances], optional): length `N` list of `Instances`. The i-th
-                `Instances` contains the ground-truth per-instance annotations
         Return: pred_instances
         """
         if self.training:
@@ -205,11 +198,10 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             # ROI assigner and sampler works.
             proposals = self.label_and_sample_proposals(proposals, targets)
         del targets
-        x = [item[1] for item in list(fpn_features.items())]
+        x = [fpn_features[f] for f in self.box_in_features]
         # add pos to fpn features
         for i in range(len(x)):
             x[i] = x[i] + torch.nn.functional.interpolate(self.generate_pe, size=x[i].shape[-2:], mode='bilinear', align_corners=False).to(x[i].device)
-        x = {list(fpn_features.keys())[i]: x[i] for i in range(len(fpn_features))}
         if self.training:
             losses = self._forward_box(attnpool, clip_final_feats, x, proposals)
             if self.mask_on:

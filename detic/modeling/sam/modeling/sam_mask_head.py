@@ -217,7 +217,6 @@ class samMaskHead(BaseMaskRCNNHead):
             loss_cls = cross_entropy(logits_image, gt_classes, reduction="mean", weight=weight)
             # 当选前景 proposals 进入 mask head即 self.fore_mask_cls=True，这里 cls_accuracy=fg_cls_accuracy
             _log_classification_stats(logits_image, gt_classes , 'fast_rcnn')
-
             # if select_fore_cls=True, custom_mask_rcnn_loss should select foreground masks
             loss ={"loss_mask": self.custom_mask_rcnn_loss(low_res_masks, instances, self.vis_period, select_fore_cls) * self.mask_loss_weight,
                    "loss_cls": loss_cls
@@ -263,8 +262,10 @@ class samMaskHead(BaseMaskRCNNHead):
     #     return (loss*weight).mean(1).sum() / B
     
     @torch.jit.unused
-    def custom_mask_rcnn_loss(self, pred_mask_logits: torch.Tensor, instances: List[Instances], vis_period: int = 0,
-                              select_fore_cls: bool = True):
+    def custom_mask_rcnn_loss(self, pred_mask_logits: torch.Tensor, 
+                              instances: List[Instances], 
+                              vis_period: int = 0,
+                              select_fore_cls: bool = False):
         """
         remove gt_masks.crop_and_resize from original mask_rcnn_loss 
         with foreground selection
@@ -296,9 +297,13 @@ class samMaskHead(BaseMaskRCNNHead):
                 gt_classes.append(gt_classes_per_image)
             gt_masks_per_image = F.pad(gt_masks_per_image, (0, self.train_size-gt_masks_per_image.shape[-1], 0, self.train_size-gt_masks_per_image.shape[-2]), value=0)
             gt_masks.append(gt_masks_per_image)
-
         #########选前景的
+
         if not select_fore_cls:
+            try:
+                assert all(len(fg_inds)>0 for fg_inds in fg_inds_list), print('fg_inds_list is empty')
+            except AssertionError:
+                import ipdb; ipdb.set_trace()
             pred_mask_per_logits = pred_mask_logits.split([len(x) for x in instances], dim=0)
             pred_mask_logits = torch.cat([pred_mask_per_logits[i][fg_inds_list[i]] for i in range(len(fg_inds_list))])
         ###########
