@@ -8,4 +8,4 @@
 #SBATCH --output=.output/slurm_out/job.%J.out
 
 srun python train_net_stand.py --config-file configs/OpenDet_tiny_coco.yaml --num-gpus 8 \
-    OUTPUT_DIR output/clipRpn/SamOn/fpn_lean_pe
+    OUTPUT_DIR output/clipRpn/SamOn/fpn_lean_pe/ab_points PER_QUERY_POINT 6
