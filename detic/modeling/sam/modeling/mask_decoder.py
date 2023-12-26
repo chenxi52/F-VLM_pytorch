@@ -129,7 +129,7 @@ class MaskDecoder(nn.Module):
         b, c, h, w = src.shape
 
         # Run the transformer
-        hs, src = self.transformer(src, pos_src, tokens)
+        hs, src = self.transformer(image_embeddings=src, image_pe=pos_src, point_embedding=tokens)
         iou_token_out = hs[:, 0, :]
         mask_tokens_out = hs[:, 1 : (1 + self.num_mask_tokens), :]
 
@@ -211,7 +211,7 @@ class MaskDecoder(nn.Module):
         b, c, h, w = src.shape
 
         # Run the transformer
-        hs, src = self.transformer(src, pos_src, tokens)
+        hs, src = self.transformer(image_embedding=src, image_pe=pos_src,point_embedding= tokens)
         iou_token_out = hs[:, 0, :]
         mask_tokens_out = hs[:, 1 : (1 + self.num_mask_tokens), :]
 

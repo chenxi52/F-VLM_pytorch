@@ -174,7 +174,7 @@ class samMaskHead(BaseMaskRCNNHead):
             point_emd = self.point_emb(roi_features) #prompt head 
             point_emd = point_emd.view(batch_size, self.per_query_point, -1)
             if self.with_sincos: 
-                point_emd = torch.sin(point_emd[..., ::2] + point_emd[..., 1::2])
+                point_emd = torch.sin(point_emd[..., ::2]) + point_emd[..., 1::2]
             nomask_dense_embeddings = sam.prompt_encoder.no_mask_embed.weight.reshape(1, -1, 1, 1).expand(
                 point_emd.shape[0], -1, *sam_features.shape[-2:]
             )
