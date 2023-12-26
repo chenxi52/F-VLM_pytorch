@@ -129,7 +129,7 @@ class TransformerDecoder(nn.Module):
                 query_pos: Optional[Tensor] = None):
         output = tgt
         intermediate = []
-
+    
         for layer in self.layers:
             output = layer(output, memory, tgt_mask=tgt_mask,
                            memory_mask=memory_mask,
@@ -232,6 +232,7 @@ class build_yhs_contextFormer(nn.Module):
         """
         super().__init__()
         # defalut: set d_model = clip_txt_dim
+        self.d_model = d_model
         attenLayer1= TransformerDecoderLayer(d_model, nhead, dim_feedforward, dropout, activation, normalize_before)
         decoder_norm1 = nn.LayerNorm(d_model)
         self.decoder1 = TransformerDecoder(attenLayer1, num_decoder_layers, decoder_norm1,
@@ -246,7 +247,7 @@ class build_yhs_contextFormer(nn.Module):
         clip_vis = clip_vis.permute(0,2,1)
         clip_vis = self.vis_linear(clip_vis)
         mask_token = self.linear(mask_token)
-        semantic_token = self.decoder1(mask_token, clip_vis, pos, query_pos)
+        semantic_token = self.decoder1(tgt=mask_token, memory=clip_vis, pos=pos, query_pos=query_pos)
         return self.get_logits(semantic_token, clip_txt)
 
     def get_logits(self, image, text):

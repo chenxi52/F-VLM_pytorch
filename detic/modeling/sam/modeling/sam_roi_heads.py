@@ -208,7 +208,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         del targets
         x = [fpn_features[f] for f in self.box_in_features]
         bs,_,h,w = x[-1].shape
-        import ipdb; ipdb.set_trace()
+       
         if self.fpn_pe_name == 'learn':
             pe = self.fpn_pe
         elif self.fpn_pe_name == 'fixed':
