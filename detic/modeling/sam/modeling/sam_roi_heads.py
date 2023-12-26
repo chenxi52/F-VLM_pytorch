@@ -28,6 +28,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         select_fore_cls: bool = False,
         box_prompter: bool = False,
         generate_pe: Tensor = None,
+        fpn_pe: str = 'fixedSin',
         **kwargs
     ):
         """
@@ -43,7 +44,14 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         self.select_fore_cls = select_fore_cls 
         self.box_prompter = box_prompter
         self.generate_pe = generate_pe
-    
+        self.fpn_pe_name = fpn_pe
+        if self.fpn_pe_name=='learn':
+            self.fpn_pe = nn.Parameter(torch.randn(1, 256, 32, 32))
+        elif self.fpn_pe_name == 'fixedSin':
+            self.fpn_pe = SinePositionalEncoding(num_feats=128, normalize=True)
+        elif self.fpn_pe_name == 'clipPe':
+            self.fpn_pe = None
+            # get when forward
     @classmethod
     def from_config(cls, cfg, input_shape):
         """
@@ -67,7 +75,8 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             )
         ret['select_fore_cls'] = cfg.MODEL.ROI_MASK_HEAD.SELECT_FORE_CLS
         ret['box_prompter'] = cfg.MODEL.ROI_MASK_HEAD.BOX_PROMPTER
-        ret['generate_pe'] = nn.Parameter(torch.randn(1, 256, 32, 32))
+        ret['fpn_pe'] = cfg.MODEL.ROI_HEAD.FPN_PE # default=False
+        
         return ret
     
     @classmethod
@@ -199,9 +208,17 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             proposals = self.label_and_sample_proposals(proposals, targets)
         del targets
         x = [fpn_features[f] for f in self.box_in_features]
+        bs,_,h,w = x[-1].shape
+        
+        if self.fpn_pe_name == 'clipPe':
+            pe = attnpool.positional_embedding[1:]
+        elif self.fpn_pe_name == 'learn':
+            pe = self.fpn_pe
+        elif self.fpn_pe_name == 'fixedSin':
+            pe = self.fpn_pe(x[-1].new_zeros((bs, h, w), dtype=torch.bool))
         # add pos to fpn features
         for i in range(len(x)):
-            x[i] = x[i] + torch.nn.functional.interpolate(self.generate_pe, size=x[i].shape[-2:], mode='bilinear', align_corners=False).to(x[i].device)
+            x[i] = x[i] + torch.nn.functional.interpolate(pe, size=x[i].shape[-2:], mode='bilinear', align_corners=False).to(x[i].device)
         if self.training:
             losses = self._forward_box(attnpool, clip_final_feats, x, proposals)
             if self.mask_on:

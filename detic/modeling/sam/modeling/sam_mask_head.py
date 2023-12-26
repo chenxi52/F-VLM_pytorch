@@ -171,7 +171,6 @@ class samMaskHead(BaseMaskRCNNHead):
             nomask_dense_embeddings = sam.prompt_encoder.no_mask_embed.weight.reshape(1, -1, 1, 1).expand(
                 point_emd.shape[0], -1, *sam_features.shape[-2:]
             )
-            boxes = [b.tensor for b in boxes]
         else:
             sparse_embeddings, dense_embeddings = sam.prompt_encoder(
                 points= None,
@@ -373,7 +372,7 @@ class samMaskHead(BaseMaskRCNNHead):
                                 pred_mask_logits: torch.Tensor, 
                                 pred_instances: List[Instances], 
                                 logits_image: torch.Tensor,
-                                boxes: List[torch.Tensor],
+                                boxes: List[Boxes],
                                 clip_features: torch.Tensor = None,
                                 attnpool: nn.AdaptiveAvgPool2d = None,
                                 ):
