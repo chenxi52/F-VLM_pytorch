@@ -149,6 +149,9 @@ def add_rsprompter_config(cfg):
     _C.MODEL.FPN.SELECTED_CHANNELS = list(range(8, 32, 2))
     _C.MODEL.FPN.IN_CHANNELS = [768, 768, 768]
 
+
+    _C.MODEL.ROI_HEADS.FPN_PE='fixed'
+
     _C.MODEL.ROI_BOX_HEAD.CAT_FREQ_PATH = 'datasets/metadata/lvis_v1_train_cat_info.json'
     _C.MODEL.ROI_BOX_HEAD.IGNORE_ZERO_CATS = False
 
