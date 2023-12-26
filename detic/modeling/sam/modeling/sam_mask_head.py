@@ -283,12 +283,10 @@ class samMaskHead(BaseMaskRCNNHead):
         with foreground selection
         """
         cls_agnostic_mask = pred_mask_logits.size(1) == 1
-        total_num_masks = pred_mask_logits.size(0)
-
-        gt_classes = []
         gt_masks = []
-        fg_inds_list = []
-        for instances_per_image in instances:
+        pred_mask_list = []
+        pred_mask_per_logits = pred_mask_logits.split([len(x) for x in instances], dim=0)
+        for instances_per_image, pred_logits_per_image in zip(instances, pred_mask_per_logits):
             if len(instances_per_image) == 0:
                 continue
             gt_classes_per_image = instances_per_image.gt_classes.to(dtype=torch.int64)
@@ -297,38 +295,26 @@ class samMaskHead(BaseMaskRCNNHead):
                 fg_inds = nonzero_tuple((gt_classes_per_image >= 0) & (gt_classes_per_image < self.data_classes))[0]
                 if len(fg_inds) == 0:
                     continue
-                if not cls_agnostic_mask:
-                    gt_classes.append(gt_classes_per_image[fg_inds])
                 gt_masks_per_image = instances_per_image[fg_inds].gt_masks.tensor
+                pred_mask_list.append(pred_logits_per_image[fg_inds])
                 # A tensor of shape (N, M, M), N=#instances in the image; M=mask_side_len
-                fg_inds_list.append(fg_inds)
-            ###########
             else:
                 gt_masks_per_image = instances_per_image.gt_masks.tensor
-            if not cls_agnostic_mask:
-                gt_classes.append(gt_classes_per_image)
             gt_masks_per_image = F.pad(gt_masks_per_image, (0, self.train_size-gt_masks_per_image.shape[-1], 0, self.train_size-gt_masks_per_image.shape[-2]), value=0)
             gt_masks.append(gt_masks_per_image)
-        #########选前景的
-
-        if not select_fore_cls:
-            try:
-                assert all(len(fg_inds)>0 for fg_inds in fg_inds_list), print('fg_inds_list is empty')
-            except AssertionError:
-                import ipdb; ipdb.set_trace()
-            pred_mask_per_logits = pred_mask_logits.split([len(x) for x in instances], dim=0)
-            pred_mask_logits = torch.cat([pred_mask_per_logits[i][fg_inds_list[i]] for i in range(len(fg_inds_list))])
         ###########
+        gt_masks = cat(gt_masks, dim=0)
+        pred_mask_logits = cat(pred_mask_list, dim=0)
         if len(gt_masks) == 0:
             return pred_mask_logits.sum() * 0
-        gt_masks = cat(gt_masks, dim=0)
         if cls_agnostic_mask:
             pred_mask_logits = pred_mask_logits[:, 0]
         else:
-            assert len(gt_classes)>0, print('gt_classes is empty when cls_agnostic_mask = False')
-            indices = torch.arange(total_num_masks)
-            gt_classes = cat(gt_classes, dim=0)
-            pred_mask_logits = pred_mask_logits[indices, gt_classes]
+            assert NotImplementedError
+            # assert len(gt_classes)>0, print('gt_classes is empty when cls_agnostic_mask = False')
+            # indices = torch.arange(total_num_masks)
+            # gt_classes = cat(gt_classes, dim=0)
+            # pred_mask_logits = pred_mask_logits[indices, gt_classes]
         if gt_masks.dtype == torch.bool:
             gt_masks_bool = gt_masks
         else:

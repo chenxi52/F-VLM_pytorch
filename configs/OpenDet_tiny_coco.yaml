@@ -16,7 +16,7 @@ MODEL:
   ROI_HEADS:
     FPN_PE: "fixed" # !!!!!
     NMS_THRESH_TEST: 0.4
-    BATCH_SIZE_PER_IMAGE: 64  #!!!!!!
+    BATCH_SIZE_PER_IMAGE: 32  #!!!!!!
     NUM_CLASSES: 48 # num of seen classes
   ROI_BOX_HEAD:
     IGNORE_ZERO_CATS: True 
@@ -40,17 +40,17 @@ DATASETS:
 DATALOADER:
   NUM_WORKERS: 16 # num_workers == batchsize_per_gpu
 SOLVER:
-  IMS_PER_BATCH: 16  # change  # max 8 imgs per batch
+  IMS_PER_BATCH: 32  # change  # max 8 imgs per batch
   BASE_LR: 0.001  # change0.000025
-  MAX_ITER: 45000
-  CHECKPOINT_PERIOD: 10000  #  change
+  MAX_ITER: 22500
+  CHECKPOINT_PERIOD: 900000  #  change
   OPTIMIZER: 'SGD'
   WEIGHT_DECAY: 0.01
   LR_SCHEDULER_NAME: "WarmupMultiStepLR"
   WARMUP_FACTOR: 0.16
   WARMUP_METHOD: "linear"
-  WARMUP_ITERS: 4000
-  STEPS: (40500, 42750, 43476)
+  WARMUP_ITERS: 2000
+  STEPS: (20250, 21375, 21738)
   GAMMA: 0.1
   MOMENTUM: 0.9
 INPUT:
