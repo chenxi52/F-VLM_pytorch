@@ -165,6 +165,7 @@ def add_rsprompter_config(cfg):
     _C.MODEL.ROI_MASK_HEAD.PER_QUERY_POINT = 4
     _C.MODEL.ROI_MASK_HEAD.SELECT_FORE_CLS = True
     _C.MODEL.ROI_MASK_HEAD.BOX_PROMPTER = False
+    _C.MODEL.ROI_MASK_HEAD.ADD_PE_CONTEXT = False
     
     _C.MODEL.SAM_FROZEN = True
     _C.MODEL.SAM_ON = False

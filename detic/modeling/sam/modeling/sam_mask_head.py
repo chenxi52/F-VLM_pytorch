@@ -101,8 +101,10 @@ class samMaskHead(BaseMaskRCNNHead):
             self.register_buffer('novel_ones', novel_ones)
         del self.text_feats
         self.register_buffer('text_feats', text_feats)
-        self.contextformer_pe = nn.Parameter(torch.randn(1, 32*32, self.text_dim), requires_grad=True)
-
+        if self.add_pe_context:
+            self.contextformer_pe = nn.Parameter(torch.randn(1, 32*32, self.text_dim), requires_grad=True)
+        else:
+            self.contextformer_pe = [None,None]
     @classmethod
     def from_config(cls, cfg, input_shape):
         if cfg.MODEL.ROI_MASK_HEAD.CLS_AGNOSTIC_MASK:
@@ -143,6 +145,7 @@ class samMaskHead(BaseMaskRCNNHead):
                 'background_weight': cfg.MODEL.ROI_BOX_HEAD.BACKGROUND_WEIGHT,
                 'eval_ar': cfg.EVAL_AR,
                 'box_prompter': cfg.MODEL.ROI_MASK_HEAD.BOX_PROMPTER,
+                'add_pe_context': cfg.MODEL.ROI_MASK_HEAD.ADD_PE_CONTEXT
                 }
     
     def forward(
@@ -205,12 +208,12 @@ class samMaskHead(BaseMaskRCNNHead):
                     sparse_prompt_embeddings=point_emd,
                     dense_prompt_embeddings=nomask_dense_embeddings,
                     multimask_output=False,)
-            
             logits_image = self.contextformer(mask_tokens, 
-                                              batch_clip_final_feats, 
-                                              self.text_feats, 
-                                              pos=self.contextformer_pe[1:], 
-                                              query_pos=self.contextformer_pe[:1])
+                                            batch_clip_final_feats, 
+                                            self.text_feats, 
+                                            pos=self.contextformer_pe[1:], 
+                                            query_pos=self.contextformer_pe[:1])
+                
             if len(logits_image.shape) > 2: #[bzs, n_tokens, dim]
                 logits_image = logits_image.squeeze()
         low_res_masks = torch.nn.functional.interpolate(low_res_masks, size=(self.train_size, self.train_size), mode='bilinear', align_corners=False)
