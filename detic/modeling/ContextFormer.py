@@ -51,6 +51,9 @@ class TransformerDecoderLayer(nn.Module):
                      memory_key_padding_mask: Optional[Tensor] = None,
                      pos: Optional[Tensor] = None,
                      query_pos: Optional[Tensor] = None):
+        """
+        tgt: [bsz, tgt_len, dim]
+        """
         q = k = self.with_pos_embed(tgt, query_pos)
         tgt2 = self.self_attn(q, k, value=tgt, attn_mask=tgt_mask,
                               key_padding_mask=tgt_key_padding_mask)[0]
@@ -230,7 +233,6 @@ class build_yhs_contextFormer(nn.Module):
         super().__init__()
         # defalut: set d_model = clip_txt_dim
         attenLayer1= TransformerDecoderLayer(d_model, nhead, dim_feedforward, dropout, activation, normalize_before)
-
         decoder_norm1 = nn.LayerNorm(d_model)
         self.decoder1 = TransformerDecoder(attenLayer1, num_decoder_layers, decoder_norm1,
                                             return_intermediate=return_intermediate_dec)
@@ -238,13 +240,13 @@ class build_yhs_contextFormer(nn.Module):
         self.linear = nn.Linear(mask_dim, d_model)
         self.vis_linear = nn.Linear(vis_dim, d_model)
 
-    def forward(self, mask_token, clip_vis, clip_txt):
+    def forward(self, mask_token, clip_vis, clip_txt, pos, query_pos):
         # for clip res50, cls_token not exits
         clip_vis = clip_vis.flatten(start_dim=2)
         clip_vis = clip_vis.permute(0,2,1)
         clip_vis = self.vis_linear(clip_vis)
         mask_token = self.linear(mask_token)
-        semantic_token = self.decoder1(mask_token, clip_vis)
+        semantic_token = self.decoder1(mask_token, clip_vis, pos, query_pos)
         return self.get_logits(semantic_token, clip_txt)
 
     def get_logits(self, image, text):

@@ -14,6 +14,7 @@ MODEL:
     POST_NMS_TOPK_TEST: 300
     BATCH_SIZE_PER_IMAGE: 256
   ROI_HEADS:
+    FPN_PE: "fixed" # !!!!!
     NMS_THRESH_TEST: 0.4
     BATCH_SIZE_PER_IMAGE: 32  #!!!!!!
     NUM_CLASSES: 48 # num of seen classes
