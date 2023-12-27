@@ -39,7 +39,6 @@ DATALOADER:
 INPUT:
   CLIP_TRAIN_SIZE: 1024
   CUSTOM_AUG: ResizeLongLSJ2 # !!!!
-  PROMPT_SIZE: (90, 4)
 TEST:
   DETECTIONS_PER_IMAGE: 300  #test_topk_per_image
   IMS_PER_BATCH: 4 #every gpu has most 2 images  # change

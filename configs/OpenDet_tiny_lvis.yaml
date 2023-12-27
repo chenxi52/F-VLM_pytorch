@@ -3,7 +3,7 @@ MODEL:
   BACKBONE:
     TYPE: "vit_t"
     CLIP_TYPE: "RN50"
-  CLIP_TEXT_FEATS_PATH: "datasets/coco/coco_cls_seen.pkl" #********
+  CLIP_TEXT_FEATS_PATH: "datasets/lvis/lvis_cls.pkl" #********
   SAM_WEIGHTS: "mobile_sam.pt"
   PROPOSAL_GENERATOR:
     NAME: "SAMRPN"
@@ -13,48 +13,52 @@ MODEL:
     HEAD_NAME: "StandardRPNHead"
     POST_NMS_TOPK_TEST: 300
     BATCH_SIZE_PER_IMAGE: 256 # the sampling num 
-    NMS_THRESH: 0.7
   ROI_HEADS:
+    FPN_PE: "fixed" # !!!!!
     SCORE_THRESH_TEST: 0.02
-    NUM_CLASSES: 80
+    NUM_CLASSES: 1203
     NMS_THRESH_TEST: 0.5
     BATCH_SIZE_PER_IMAGE: 32 #the sampling num 
   ROI_BOX_HEAD:
+    BACKGROUND_WEIGHT: 0.9
     TRAIN_ON_PRED_BOXES: False
-    USE_FED_LOSS: True
-    BASE_ALPHA: 0.2
-    NOVEL_BETA: 0.45
+    USE_FED_LOSS: False
+    BASE_ALPHA: 0.35
+    NOVEL_BETA: 0.65
+    CAT_FREQ_PATH: 'datasets/lvis/lvis_v1_train_norare_cat_info.json'
   ROI_MASK_HEAD:
     NAME: "samMaskHead"
     WITH_SINCOS: True
     MASK_LOSS_TYPE: "ce_dice" 
     PER_QUERY_POINT: 4 # 采样点
+    SELECT_FORE_CLS: False # !!!!
+    BOX_PROMPTER: False # !!!!! 
+    ADD_PE_CONTEXT: True # !!!!!
   MASK_ON: True
   NUM_SAMPLE_CATS: 50
   SAM_ON: True
 DATASETS:
-  TRAIN: ("lvis",)
-  TEST: ("lvis",)
+  TRAIN: ("lvis_v1_train_norare",)
+  TEST: ("lvis_v1_val",)
 DATALOADER:
   NUM_WORKERS: 16 # num_workers == batchsize_per_gpu
 SOLVER:
-  IMS_PER_BATCH: 16  # change  # max 8 imgs per batch
-  BASE_LR: 0.001  # change0.000025
-  MAX_ITER: 22500
+  IMS_PER_BATCH: 256  # change  # max 8 imgs per batch
+  BASE_LR: 0.0036  # change0.000025
+  MAX_ITER: 46100
   CHECKPOINT_PERIOD: 900000  #  change
   OPTIMIZER: 'SGD'
-  WEIGHT_DECAY: 0.01
+  WEIGHT_DECAY: 0.0001
   LR_SCHEDULER_NAME: "WarmupMultiStepLR"
   WARMUP_FACTOR: 0.16
-  WARMUP_METHOD: "linear"
+  WARMUP_METHOD: "linear" 
   WARMUP_ITERS: 2000
   STEPS: (20250, 21375, 21738)
   GAMMA: 0.1
   MOMENTUM: 0.9
 INPUT:
   CLIP_TRAIN_SIZE: 1024
-  PROMPT_SIZE: (90, 4)
-  CUSTOM_AUG: ResizeLongLSJ2
+  CUSTOM_AUG: ResizeLongLSJ2  #!!!!
 TEST:
   DETECTIONS_PER_IMAGE: 300  #test_topk_per_image
   EVAL_PERIOD: 90000 # change

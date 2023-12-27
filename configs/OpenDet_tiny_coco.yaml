@@ -3,7 +3,7 @@ MODEL:
   BACKBONE:
     TYPE: "vit_t"
     CLIP_TYPE: "RN50"
-  CLIP_TEXT_FEATS_PATH: "datasets/coco/coco_cls_seen.pkl"
+  CLIP_TEXT_FEATS_PATH: "datasets/coco/coco_cls.pkl"
   SAM_WEIGHTS: "mobile_sam.pt"
   PROPOSAL_GENERATOR:
     NAME: "SAMRPN"
@@ -17,13 +17,13 @@ MODEL:
     FPN_PE: "fixed" # !!!!!
     NMS_THRESH_TEST: 0.4
     BATCH_SIZE_PER_IMAGE: 32  #!!!!!!
-    NUM_CLASSES: 48 # num of seen classes
+    NUM_CLASSES: 80 # num of seen classes
   ROI_BOX_HEAD:
+    BACKGROUND_WEIGHT: 0.2
     IGNORE_ZERO_CATS: True 
     CAT_FREQ_PATH: 'datasets/coco/zero-shot/instances_train2017_seen_2_oriorder_cat_info.json'
     BASE_ALPHA: 0.2
     NOVEL_BETA: 0.45
-    TRAIN_ON_PRED_BOXES: False #!!!!! 
   ROI_MASK_HEAD:
     NAME: "samMaskHead"
     MASK_LOSS_TYPE: "ce_dice" 
@@ -31,7 +31,7 @@ MODEL:
     PER_QUERY_POINT: 4
     SELECT_FORE_CLS: False # !!!!! consider the background class is important
     BOX_PROMPTER: False # !!!!! 
-    ADD_PE_CONTEXT: False # !!!!!
+    ADD_PE_CONTEXT: True # !!!!!
   MASK_ON: True
   SAM_ON: True # !!!!
 DATASETS:
@@ -56,7 +56,6 @@ SOLVER:
 INPUT:
   CLIP_TRAIN_SIZE: 1024
   CUSTOM_AUG: ResizeLongLSJ2 # !!!!
-  PROMPT_SIZE: (90, 4)
 TEST:
   DETECTIONS_PER_IMAGE: 300  #test_topk_per_image
   EVAL_PERIOD: 90000 # change

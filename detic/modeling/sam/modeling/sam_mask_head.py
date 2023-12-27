@@ -34,6 +34,8 @@ class samMaskHead(BaseMaskRCNNHead):
             text_feats: torch.Tensor = None,
             train_size: int = 224,
             add_pe_context: bool = False,
+            cat_freq_path: str = None,
+            fed_loss_freq_weight: float = 1.0,
             **kwargs
             ) -> None:
         super().__init__(vis_period=vis_period)
@@ -107,6 +109,11 @@ class samMaskHead(BaseMaskRCNNHead):
             self.contextformer_pe = nn.Parameter(torch.randn(1, (train_size//32)**2+1, self.contextformer.d_model), requires_grad=True)
         else:
             self.contextformer_pe = None
+        if self.use_fed_loss or self.ignore_zero_cats:
+            freq_weight = load_class_freq(cat_freq_path, fed_loss_freq_weight)
+            self.register_buffer('freq_weight', freq_weight)
+        else:
+            self.freq_weight = None
 
     @classmethod
     def from_config(cls, cfg, input_shape):
@@ -136,9 +143,6 @@ class samMaskHead(BaseMaskRCNNHead):
                 'data_classes': cfg.MODEL.ROI_HEADS.NUM_CLASSES,
                 'test_score_type': cfg.TEST.SCORE_TYPE,
                 'test_geometric_fact': cfg.TEST.GEOMETRIC_FACT,
-                'ignore_zero_cats': cfg.MODEL.ROI_BOX_HEAD.IGNORE_ZERO_CATS,
-                'use_fed_loss': cfg.MODEL.ROI_BOX_HEAD.USE_FED_LOSS,
-                'fed_loss_num_cat': cfg.MODEL.NUM_SAMPLE_CATS,
                 'mask_thr_binary': cfg.TEST.MASK_THR_BINARY,
                 'mask_loss_weight':cfg.MODEL.ROI_MASK_HEAD.MASK_LOSS_WEIGHT,
                 'text_feats': text_feats, 
@@ -149,6 +153,12 @@ class samMaskHead(BaseMaskRCNNHead):
                 'eval_ar': cfg.EVAL_AR,
                 'box_prompter': cfg.MODEL.ROI_MASK_HEAD.BOX_PROMPTER,
                 'add_pe_context': cfg.MODEL.ROI_MASK_HEAD.ADD_PE_CONTEXT,
+
+                'cat_freq_path': cfg.MODEL.ROI_BOX_HEAD.CAT_FREQ_PATH,
+                'ignore_zero_cats': cfg.MODEL.ROI_BOX_HEAD.IGNORE_ZERO_CATS,
+                'use_fed_loss': cfg.MODEL.ROI_BOX_HEAD.USE_FED_LOSS,
+                'fed_loss_num_cat': cfg.MODEL.NUM_SAMPLE_CATS,
+                'fed_loss_freq_weight': cfg.MODEL.ROI_BOX_HEAD.FED_LOSS_FREQ_WEIGHT,
                 }
     
     def forward(
@@ -225,13 +235,11 @@ class samMaskHead(BaseMaskRCNNHead):
             del boxes
             gt_classes = (cat([p.gt_classes for p in instances], dim=0) )
             assert len(logits_image.shape) == 2, print('the fore proposal is zero in this batch', logits_image.shape)
-            weight = torch.cat([torch.ones(self.data_classes), torch.ones(1)* self.background_weight], dim=0).to(logits_image.device)
-            loss_cls = cross_entropy(logits_image, gt_classes, reduction="mean", weight=weight)
             # 当选前景 proposals 进入 mask head即 self.fore_mask_cls=True，这里 cls_accuracy=fg_cls_accuracy
-            _log_classification_stats(logits_image, gt_classes , 'fast_rcnn')
             # if select_fore_cls=True, custom_mask_rcnn_loss should select foreground masks
+            
             loss ={"loss_mask": self.custom_mask_rcnn_loss(low_res_masks, instances, self.vis_period, select_fore_cls) * self.mask_loss_weight,
-                   "loss_cls": loss_cls
+                   "loss_cls": self.softmax_cross_entropy_loss(logits_image, gt_classes) * self.mask_loss_weight,
                    }
             return loss
         else:
@@ -244,6 +252,40 @@ class samMaskHead(BaseMaskRCNNHead):
                                                             attnpool=attnpool)
             return new_instances
         
+    def softmax_cross_entropy_loss(self, pred_class_logits, gt_classes):
+        """
+        change _no_instance handling
+        """
+        if pred_class_logits.numel() == 0:
+            return pred_class_logits.new_zeros([1])[0]
+
+        if self.ignore_zero_cats and (self.freq_weight is not None):
+            zero_weight = torch.cat([
+                (self.freq_weight.view(-1) > 1e-4).float(),
+                self.freq_weight.new_ones(1)*self.background_weight]) # C + 1
+            loss = F.cross_entropy(
+                pred_class_logits, gt_classes, 
+                weight=zero_weight, reduction="mean")
+        elif self.use_fed_loss and (self.freq_weight is not None): # fedloss
+            C = pred_class_logits.shape[1] - 1
+            appeared = get_fed_loss_inds(
+                gt_classes, 
+                num_sample_cats=self.fed_loss_num_cat,
+                C=C,
+                weight=self.freq_weight)
+            appeared_mask = appeared.new_zeros(C + 1).float()
+            appeared_mask[appeared] = 1. # C + 1
+            appeared_mask[C] = 1.
+            loss = F.cross_entropy(
+                pred_class_logits, gt_classes, 
+                weight=appeared_mask, reduction="mean")        
+        else:
+            loss = F.cross_entropy(
+                pred_class_logits, gt_classes, reduction="mean")   
+            
+        _log_classification_stats(pred_class_logits, gt_classes , 'fast_rcnn')
+        return loss
+
     # @torch.jit.unused
     # def sigmoid_focal_loss(self, inputs, targets, gt_classes, alpha: float = 0.25, gamma: float = 2):
     #     """Compute the sigmoid focal loss."""
@@ -300,13 +342,14 @@ class samMaskHead(BaseMaskRCNNHead):
                 # A tensor of shape (N, M, M), N=#instances in the image; M=mask_side_len
             else:
                 gt_masks_per_image = instances_per_image.gt_masks.tensor
+                pred_mask_list.append(pred_logits_per_image)
             gt_masks_per_image = F.pad(gt_masks_per_image, (0, self.train_size-gt_masks_per_image.shape[-1], 0, self.train_size-gt_masks_per_image.shape[-2]), value=0)
             gt_masks.append(gt_masks_per_image)
         ###########
-        gt_masks = cat(gt_masks, dim=0)
-        pred_mask_logits = cat(pred_mask_list, dim=0)
         if len(gt_masks) == 0:
             return pred_mask_logits.sum() * 0
+        gt_masks = cat(gt_masks, dim=0)
+        pred_mask_logits = cat(pred_mask_list, dim=0)
         if cls_agnostic_mask:
             pred_mask_logits = pred_mask_logits[:, 0]
         else:
@@ -332,7 +375,6 @@ class samMaskHead(BaseMaskRCNNHead):
         false_negative = (mask_incorrect & gt_masks_bool).sum().item() / max(num_positive, 1.0)
 
         storage = get_event_storage()
-        
         storage.put_scalar("mask_rcnn/accuracy", mask_accuracy)
         storage.put_scalar("mask_rcnn/false_positive", false_positive)
         storage.put_scalar("mask_rcnn/false_negative", false_negative)
@@ -345,7 +387,7 @@ class samMaskHead(BaseMaskRCNNHead):
                 vis_mask = torch.stack([vis_mask] * 3, axis=0)
                 storage.put_image(name, vis_mask)
                 break
-
+        
         if self.mask_loss_type == 'ce':
             mask_loss = F.binary_cross_entropy_with_logits(pred_mask_logits, gt_masks, reduction="mean")
         elif self.mask_loss_type == 'focal_dice':

@@ -21,6 +21,7 @@ from detic import constants
 from torch.cuda.amp import autocast
 import detectron2.utils.comm as comm
 import pickle
+from detic.modeling.utils import load_class_freq
 import sys
 @META_ARCH_REGISTRY.register()
 class ClipOpenDetector(GeneralizedRCNN):
@@ -31,7 +32,7 @@ class ClipOpenDetector(GeneralizedRCNN):
         sam_type=None,
         mask_thr_binary=0.5,
         do_postprocess=True,
-        clip=None,
+        clip_model=None,
         backbone_name=None,
         add_unfrozen='xxx',
         fpn_in_features=[],
@@ -41,6 +42,7 @@ class ClipOpenDetector(GeneralizedRCNN):
         sam_pixel_std=None,
         sam_weights=None,
         eval_ar= False,
+        zs_weight_path=None,
         **kwargs
     ):
         self.fp16=fp16
@@ -54,18 +56,19 @@ class ClipOpenDetector(GeneralizedRCNN):
                 params.requires_grad = False
         else: self.sam = None
         self.sam_on = sam_on
-        self.clip = clip
+        self.clip = clip_model
         self.mask_thr_binary = mask_thr_binary
         self.do_postprocess = do_postprocess
         self.backbone_name = backbone_name
         self.fpn_in_features = fpn_in_features
-        #####可以从这里保存 text features 、
+        ####可以从这里保存 text features 、
         # self.text_feats =  self.get_custom_text_feat(constants.COCO_SEEN_CLS)
         # if comm.is_main_process():
         #     with open('datasets/coco/coco_cls_seen.pkl', 'wb') as f:
         #         pickle.dump(self.text_feats, f)
         #     sys.exit()
-        ###########
+
+        ##########
         # set params in sam and clip to no_grad
         for name, params in self.clip.named_parameters():
             params.requires_grad = False
@@ -88,7 +91,7 @@ class ClipOpenDetector(GeneralizedRCNN):
             "pixel_std": cfg.MODEL.PIXEL_STD,
             "sam_pixel_mean": cfg.MODEL.SAM_PIXEL_MEAN,
             "sam_pixel_std": cfg.MODEL.SAM_PIXEL_STD,
-            "clip": clip_model,
+            "clip_model": clip_model,
             'fp16': cfg.FP16,
             "sam_type": cfg.MODEL.BACKBONE.TYPE,
             "do_postprocess": cfg.TEST.DO_POSTPROCESS,
@@ -99,7 +102,7 @@ class ClipOpenDetector(GeneralizedRCNN):
             'fpn_in_features': cfg.MODEL.FPN.IN_FEATURES,
             "sam_on": cfg.MODEL.SAM_ON,
             "sam_weights": cfg.MODEL.SAM_WEIGHTS,
-            "eval_ar": cfg.EVAL_AR
+            "eval_ar": cfg.EVAL_AR,
         })
         return ret
     
