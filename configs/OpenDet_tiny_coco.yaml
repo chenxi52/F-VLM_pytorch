@@ -33,6 +33,7 @@ MODEL:
     SELECT_FORE_CLS: False # !!!!! consider the background class is important
     BOX_PROMPTER: False # !!!!! 
     ADD_PE_CONTEXT: True # !!!!!
+    IOU_LOSS_WEIGHT: 0. # !!!!
   MASK_ON: True
   SAM_ON: True # !!!!
 DATASETS:

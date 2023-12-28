@@ -168,6 +168,7 @@ def add_rsprompter_config(cfg):
     _C.MODEL.ROI_MASK_HEAD.BOX_PROMPTER = False
     _C.MODEL.ROI_MASK_HEAD.ADD_PE_CONTEXT = True
     _C.MODEL.ROI_MASK_HEAD.ADD_POSTTION_EMB = False
+    _C.MODEL.ROI_MASK_HEAD.IOU_LOSS_WEIGHT = 0.
     
     _C.MODEL.SAM_FROZEN = True
     _C.MODEL.SAM_ON = False

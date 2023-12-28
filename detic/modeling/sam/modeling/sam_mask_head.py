@@ -4,7 +4,7 @@ from typing import Tuple, List
 from detectron2.modeling import BaseMaskRCNNHead, ROI_MASK_HEAD_REGISTRY
 from detectron2.config import configurable
 from einops import repeat
-from detectron2.structures import Instances, Boxes
+from detectron2.structures import Instances, Boxes, BitMasks
 import torch.nn.functional as F
 from detectron2.utils.events import get_event_storage
 from detectron2.layers import cat, batched_nms
@@ -115,7 +115,7 @@ class samMaskHead(BaseMaskRCNNHead):
             self.register_buffer('freq_weight', freq_weight)
         else:
             self.freq_weight = None
-
+        
     @classmethod
     def from_config(cls, cfg, input_shape):
         if cfg.MODEL.ROI_MASK_HEAD.CLS_AGNOSTIC_MASK:
@@ -160,7 +160,9 @@ class samMaskHead(BaseMaskRCNNHead):
                 'use_fed_loss': cfg.MODEL.ROI_BOX_HEAD.USE_FED_LOSS,
                 'fed_loss_num_cat': cfg.MODEL.NUM_SAMPLE_CATS,
                 'fed_loss_freq_weight': cfg.MODEL.ROI_BOX_HEAD.FED_LOSS_FREQ_WEIGHT,
-                'add_position_emb': cfg.MODEL.ROI_MASK_HEAD.ADD_POSTTION_EMB
+                'add_position_emb': cfg.MODEL.ROI_MASK_HEAD.ADD_POSTTION_EMB,
+
+                'iou_loss_weight': cfg.MODEL.ROI_MASK_HEAD.IOU_LOSS_WEIGHT,
                 }
     
     def forward(
@@ -189,9 +191,11 @@ class samMaskHead(BaseMaskRCNNHead):
                 point_emd = torch.sin(point_emd[..., ::2]) + point_emd[..., 1::2] #模拟sin+Emb
             elif self.add_position_emb and not self.with_sincos:
                 sam_point_emb = sam.prompt_encoder.point_embeddings
-                point_labels = (0,1)# postive points and negative points
+                point_labels = torch.ones()# postive points and negative points
                 # 1. negative points extraction
                 # 2. randomly sample background points, the least roi, or the least 
+                
+                neg_points = sample_points(boxes.tensor, image_size=self.train_size, num_points=4)
                 point_emd[point_labels==1] += sam_point_emb[0].weight
                 point_emd[point_labels==0] += sam_point_emb[1].weight
             nomask_dense_embeddings = sam.prompt_encoder.no_mask_embed.weight.reshape(1, -1, 1, 1).expand(
@@ -216,7 +220,7 @@ class samMaskHead(BaseMaskRCNNHead):
         with autocast():
             # box和 image features对应关系是，
             if self.box_prompter:
-                low_res_masks, mask_tokens = sam.mask_decoder.forward_batch(
+                low_res_masks, mask_tokens, iou_outs = sam.mask_decoder.forward_batch(
                     image_embeddings=sam_features,
                     image_pe=img_pe,
                     sparse_prompt_embeddings=sparse_embeddings,
@@ -224,7 +228,7 @@ class samMaskHead(BaseMaskRCNNHead):
                     multimask_output=False,
                 )
             else:
-                low_res_masks, mask_tokens = sam.mask_decoder.forward_batch(
+                low_res_masks, mask_tokens, iou_outs = sam.mask_decoder.forward_batch(
                     image_embeddings=sam_features,
                     image_pe=img_pe,
                     sparse_prompt_embeddings=point_emd,
@@ -239,15 +243,18 @@ class samMaskHead(BaseMaskRCNNHead):
                 
             if len(logits_image.shape) > 2: #[bzs, n_tokens, dim]
                 logits_image = logits_image.squeeze()
+        #  set mask_pred that outside of the box to 0
         low_res_masks = torch.nn.functional.interpolate(low_res_masks, size=(self.train_size, self.train_size), mode='bilinear', align_corners=False)
+        low_res_masks = self.mask_out_boxes(low_res_masks, boxes=cat([b.tensor for b in boxes], dim=0))
         if self.training:
             del boxes
             gt_classes = (cat([p.gt_classes for p in instances], dim=0) )
             assert len(logits_image.shape) == 2, print('the fore proposal is zero in this batch', logits_image.shape)
             # 当选前景 proposals 进入 mask head即 self.fore_mask_cls=True，这里 cls_accuracy=fg_cls_accuracy
             # if select_fore_cls=True, custom_mask_rcnn_loss should select foreground masks
-            
-            loss ={"loss_mask": self.custom_mask_rcnn_loss(low_res_masks, instances, self.vis_period, select_fore_cls) * self.mask_loss_weight,
+            mask_loss, iou_loss = self.custom_mask_rcnn_loss(low_res_masks, instances, self.vis_period, select_fore_cls, iou_outs=iou_outs)
+            loss ={"loss_mask": mask_loss * self.mask_loss_weight,
+                   "loss_iou": iou_loss * self.iou_loss_weight,
                    "loss_cls": self.softmax_cross_entropy_loss(logits_image, gt_classes) * self.mask_loss_weight,
                    }
             return loss
@@ -261,6 +268,14 @@ class samMaskHead(BaseMaskRCNNHead):
                                                             attnpool=attnpool)
             return new_instances
         
+    def mask_out_boxes(self, masks, boxes):
+        # set masks out of boxes to 0
+        tem_masks = torch.zeros_like(masks)
+        for i, boxes in enumerate(boxes):
+            tem_masks[i, :, boxes[1]:boxes[3], boxes[0]:boxes[2]] = 1 
+        masks = masks * tem_masks
+        return masks
+
     def softmax_cross_entropy_loss(self, pred_class_logits, gt_classes):
         """
         change _no_instance handling
@@ -328,7 +343,8 @@ class samMaskHead(BaseMaskRCNNHead):
     def custom_mask_rcnn_loss(self, pred_mask_logits: torch.Tensor, 
                               instances: List[Instances], 
                               vis_period: int = 0,
-                              select_fore_cls: bool = False):
+                              select_fore_cls: bool = False,
+                              iou_outs: torch.Tensor = None):
         """
         remove gt_masks.crop_and_resize from original mask_rcnn_loss 
         with foreground selection
@@ -411,12 +427,16 @@ class samMaskHead(BaseMaskRCNNHead):
             mask_loss = focalLoss + diceLoss
         elif self.mask_loss_type == 'ce_dice':
             ceLoss = F.binary_cross_entropy_with_logits(pred_mask_logits, gt_masks, reduction="mean")
-            diceLoss = dice_loss(pred_mask_logits,
-                                gt_masks)
+            diceLoss,dice = dice_loss(pred_mask_logits,gt_masks,return_dice=True)
             mask_loss = ceLoss + diceLoss
+            if self.iou_loss_weight > 0:
+                assert iou_outs is not None
+                iouLoss = torch.nn.BCELoss(iou_outs, dice, reduction="mean")
+            else: 
+                iouLoss = diceLoss.new_zeros(1)
         else:
             assert False, 'mask loss type not supported'
-        return mask_loss
+        return mask_loss, iouLoss
 
     def custom_mask_rcnn_inference(self, 
                                 pred_mask_logits: torch.Tensor, 
@@ -493,7 +513,7 @@ class samMaskHead(BaseMaskRCNNHead):
             ensembled_socres = ensembled_socres / ensembled_socres.sum(dim=1, keepdim=True)
             ensembled_socres = ensembled_socres[:, :-1]
             assert ensembled_socres[:, self.unused_index].max() < 1e-5, 'unused classes should not be evaluated'
-
+        
         filter_mask = ensembled_socres > self.score_thresh
         num_bbox_reg_classes = boxes.shape[1] // 4
         filter_inds = filter_mask.nonzero()
@@ -522,7 +542,8 @@ def dice_loss(pred,
             weight=None,
             eps=1e-3,
             reduction='mean',
-            avg_factor=None):
+            avg_factor=None,
+            return_dice=False):
     """
     Args:
         pred (torch.Tensor): The prediction, has a shape (n, *)
@@ -548,7 +569,10 @@ def dice_loss(pred,
         assert weight.ndim == loss.ndim
         assert len(weight) == len(pred)
     loss = weight_reduce_loss(loss, weight, reduction, avg_factor)
+    if return_dice:
+        return loss,d
     return loss
+
 @torch.jit.unused
 def weight_reduce_loss(loss, weight=None, reduction='mean', avg_factor=None):
     # if weight is specified, apply element-wise weight
@@ -575,3 +599,28 @@ def reduce_loss(loss, reduction):
         return loss.mean()
     elif reduction_enum == 2:
         return loss.sum()
+
+def sample_points(boxes, image_size, num_points=5):
+    # Expand the boxes by 1 pixel
+    expanded_boxes = boxes.clone()
+    expanded_boxes[:, :2] -= 1  # left top point
+    expanded_boxes[:, 2:] += 1  # right down point
+
+    # Ensure the expanded boxes do not exceed the image size
+    expanded_boxes[:, :2].clamp_(min=0)
+    expanded_boxes[:, 2:].clamp_(max=image_size)
+
+    # Sample points in the expanded boxes
+    sampled_points = torch.rand((num_points, 2)) * (expanded_boxes[:, 2:] - expanded_boxes[:, :2]) + expanded_boxes[:, :2]
+
+    # Check if the sampled points are on the border of the original boxes
+    on_border = (sampled_points == boxes[:, :2]) | (sampled_points == boxes[:, 2:])
+
+    # If a point is on the border of the original box, resample it
+    while on_border.any():
+        resample_indices = on_border.any(dim=-1)
+        new_points = torch.rand((resample_indices.sum(), 2)) * (expanded_boxes[resample_indices, 2:] - expanded_boxes[resample_indices, :2]) + expanded_boxes[resample_indices, :2]
+        sampled_points[resample_indices] = new_points
+        on_border = (sampled_points == boxes[:, :2]) | (sampled_points == boxes[:, 2:])
+
+    return sampled_points
