@@ -271,6 +271,7 @@ class samMaskHead(BaseMaskRCNNHead):
     def mask_out_boxes(self, masks, boxes):
         # set masks out of boxes to 0
         tem_masks = torch.zeros_like(masks)
+        boxes = boxes.to(torch.int64)
         for i, boxes in enumerate(boxes):
             tem_masks[i, :, boxes[1]:boxes[3], boxes[0]:boxes[2]] = 1 
         masks = masks * tem_masks
