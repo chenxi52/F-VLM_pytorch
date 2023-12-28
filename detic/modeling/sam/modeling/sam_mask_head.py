@@ -353,8 +353,10 @@ class samMaskHead(BaseMaskRCNNHead):
         cls_agnostic_mask = pred_mask_logits.size(1) == 1
         gt_masks = []
         pred_mask_list = []
+        iou_pred_list = []
         pred_mask_per_logits = pred_mask_logits.split([len(x) for x in instances], dim=0)
-        for instances_per_image, pred_logits_per_image in zip(instances, pred_mask_per_logits):
+        iou_outs = iou_outs.split([len(x) for x in instances], dim=0)
+        for instances_per_image, pred_logits_per_image, iou_out_per_image in zip(instances, pred_mask_per_logits, iou_outs):
             if len(instances_per_image) == 0:
                 continue
             gt_classes_per_image = instances_per_image.gt_classes.to(dtype=torch.int64)
@@ -365,10 +367,12 @@ class samMaskHead(BaseMaskRCNNHead):
                     continue
                 gt_masks_per_image = instances_per_image[fg_inds].gt_masks.tensor
                 pred_mask_list.append(pred_logits_per_image[fg_inds])
+                iou_pred_list.append(iou_out_per_image[fg_inds])
                 # A tensor of shape (N, M, M), N=#instances in the image; M=mask_side_len
             else:
                 gt_masks_per_image = instances_per_image.gt_masks.tensor
                 pred_mask_list.append(pred_logits_per_image)
+                iou_pred_list.append(iou_out_per_image)
             gt_masks_per_image = F.pad(gt_masks_per_image, (0, self.train_size-gt_masks_per_image.shape[-1], 0, self.train_size-gt_masks_per_image.shape[-2]), value=0)
             gt_masks.append(gt_masks_per_image)
         ###########
@@ -376,6 +380,7 @@ class samMaskHead(BaseMaskRCNNHead):
             return pred_mask_logits.sum() * 0
         gt_masks = cat(gt_masks, dim=0)
         pred_mask_logits = cat(pred_mask_list, dim=0)
+        iou_preds = cat(iou_pred_list, dim=0)
         if cls_agnostic_mask:
             pred_mask_logits = pred_mask_logits[:, 0]
         else:
@@ -428,13 +433,14 @@ class samMaskHead(BaseMaskRCNNHead):
             mask_loss = focalLoss + diceLoss
         elif self.mask_loss_type == 'ce_dice':
             ceLoss = F.binary_cross_entropy_with_logits(pred_mask_logits, gt_masks, reduction="mean")
-            diceLoss,dice = dice_loss(pred_mask_logits,gt_masks,return_dice=True)
+            diceLoss, dice = dice_loss(pred_mask_logits,gt_masks,return_dice=True)
             mask_loss = ceLoss + diceLoss
             if self.iou_loss_weight > 0:
                 assert iou_outs is not None
-                iouLoss = torch.nn.BCELoss(iou_outs, dice, reduction="mean")
+                iou_preds = iou_preds.squeeze(1)
+                iouLoss = torch.nn.BCEWithLogitsLoss(reduction="mean")(iou_preds, dice)
             else: 
-                iouLoss = diceLoss.new_zeros(1)
+                iouLoss = diceLoss.new_zeros(1)[0]
         else:
             assert False, 'mask loss type not supported'
         return mask_loss, iouLoss
