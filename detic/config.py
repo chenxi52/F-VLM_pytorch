@@ -150,8 +150,6 @@ def add_rsprompter_config(cfg):
     _C.MODEL.FPN.IN_CHANNELS = [768, 768, 768]
 
 
-    _C.MODEL.ROI_HEADS.FPN_PE='fixed'
-
     _C.MODEL.ROI_BOX_HEAD.CAT_FREQ_PATH = 'datasets/metadata/lvis_v1_train_cat_info.json'
     _C.MODEL.ROI_BOX_HEAD.IGNORE_ZERO_CATS = False
     _C.MODEL.ROI_BOX_HEAD.BASE_ALPHA = 0.35
@@ -169,6 +167,7 @@ def add_rsprompter_config(cfg):
     _C.MODEL.ROI_MASK_HEAD.ADD_PE_CONTEXT = True
     _C.MODEL.ROI_MASK_HEAD.ADD_POSTTION_EMB = False
     _C.MODEL.ROI_MASK_HEAD.IOU_LOSS_WEIGHT = 0.
+    _C.MODEL.ROI_MASK_HEAD.ADD_PE_BEFORE_POOL = True
     
     _C.MODEL.SAM_FROZEN = True
     _C.MODEL.SAM_ON = False

@@ -14,7 +14,6 @@ MODEL:
     POST_NMS_TOPK_TEST: 300
     BATCH_SIZE_PER_IMAGE: 256
   ROI_HEADS:
-    FPN_PE: "fixed" # !!!!!
     NMS_THRESH_TEST: 0.4
     BATCH_SIZE_PER_IMAGE: 32  #!!!!!!
     NUM_CLASSES: 48 # num of seen classes
@@ -34,6 +33,7 @@ MODEL:
     BOX_PROMPTER: False # !!!!! 
     ADD_PE_CONTEXT: True # !!!!!
     IOU_LOSS_WEIGHT: 0. # !!!!
+    ADD_PE_BEFORE_POOL: True # !!!!
   MASK_ON: True
   SAM_ON: True # !!!!
 DATASETS:

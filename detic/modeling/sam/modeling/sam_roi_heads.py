@@ -27,8 +27,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         sam_on: bool = False,
         select_fore_cls: bool = False,
         box_prompter: bool = False,
-        generate_pe: Tensor = None,
-        fpn_pe: str = 'fixedSin',
+        add_pe_before_mask_pool: bool = False,
         **kwargs
     ):
         """
@@ -43,15 +42,10 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         self.sam_on = sam_on
         self.select_fore_cls = select_fore_cls 
         self.box_prompter = box_prompter
-        self.generate_pe = generate_pe
-        self.fpn_pe_name = fpn_pe
-        if self.fpn_pe_name=='learn':
-            self.fpn_pe = nn.Parameter(torch.randn(1, 256, 32, 32))
-        elif self.fpn_pe_name == 'fixed':
-            self.fpn_pe = SinePositionalEncoding(num_feats=128, normalize=True)
-        elif self.fpn_pe_name == 'clip':
-            self.fpn_pe = None
-            # get when forward
+        if add_pe_before_mask_pool:
+            # tiny 320
+            self.sam_pe = SinePositionalEncoding(256//2, normalize=True)
+
     @classmethod
     def from_config(cls, cfg, input_shape):
         """
@@ -75,7 +69,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             )
         ret['select_fore_cls'] = cfg.MODEL.ROI_MASK_HEAD.SELECT_FORE_CLS
         ret['box_prompter'] = cfg.MODEL.ROI_MASK_HEAD.BOX_PROMPTER
-        ret['fpn_pe'] = cfg.MODEL.ROI_HEADS.FPN_PE 
+        ret['add_pe_before_mask_pool'] = cfg.MODEL.ROI_MASK_HEAD.ADD_PE_BEFORE_POOL
         return ret
     
     @classmethod
@@ -129,10 +123,14 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         if self.training and self.select_fore_cls:
             instances, _ = select_foreground_proposals(instances, self.num_classes)
         boxes = [i.proposal_boxes if self.training else i.pred_boxes for i in instances]
+        # boxes is relative to origin image_size
         if not self.box_prompter:
             if self.mask_pooler is not None:
                 # sam_features 大小和 clip_features不一样
                 # mask pool 修改
+                if hasattr(self, 'sam_pe'):
+                    b,_,h,w = sam_features.shape
+                    sam_features = self.sam_pe(torch.zeros((b,h,w), device=sam_features.device, dtype=torch.bool))
                 features = self.mask_pooler([sam_features], boxes)
                 if features.size(0)==0:
                     results_instances = []
@@ -207,15 +205,6 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             proposals = self.label_and_sample_proposals(proposals, targets)
         del targets
         x = [fpn_features[f] for f in self.box_in_features]
-        bs,_,h,w = x[-1].shape
-       
-        if self.fpn_pe_name == 'learn':
-            pe = self.fpn_pe
-        elif self.fpn_pe_name == 'fixed':
-            pe = self.fpn_pe(x[-1].new_zeros((bs, h, w), dtype=torch.bool))
-        # add pos to fpn features
-        for i in range(len(x)):
-            x[i] = x[i] + torch.nn.functional.interpolate(pe, size=x[i].shape[-2:], mode='bilinear', align_corners=False).to(x[i].device)
         if self.training:
             losses = self._forward_box(attnpool, clip_final_feats=None, features=x, proposals=proposals)
             if self.mask_on:
@@ -225,7 +214,9 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
                                                         sam=sam, 
                                                         sam_features=sam_features,
                                                         attnpool=None))
-                else: losses.update(self._forward_mask(x, proposals))
+                else: 
+                    # FVLM
+                    losses.update(self._forward_mask(x, proposals))
             return proposals, losses
         else:
             pred_instances = self._forward_box(attnpool, clip_final_feats, x, proposals)
