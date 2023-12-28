@@ -3,7 +3,7 @@ MODEL:
   BACKBONE:
     TYPE: "vit_t"
     CLIP_TYPE: "RN50"
-  CLIP_TEXT_FEATS_PATH: "datasets/coco/coco_cls.pkl"
+  CLIP_TEXT_FEATS_PATH: "datasets/coco/coco_cls_seen.pkl"
   SAM_WEIGHTS: "mobile_sam.pt"
   PROPOSAL_GENERATOR:
     NAME: "SAMRPN"
@@ -17,11 +17,12 @@ MODEL:
     FPN_PE: "fixed" # !!!!!
     NMS_THRESH_TEST: 0.4
     BATCH_SIZE_PER_IMAGE: 32  #!!!!!!
-    NUM_CLASSES: 80 # num of seen classes
+    NUM_CLASSES: 48 # num of seen classes
   ROI_BOX_HEAD:
     BACKGROUND_WEIGHT: 0.2
-    IGNORE_ZERO_CATS: True 
-    CAT_FREQ_PATH: 'datasets/coco/zero-shot/instances_train2017_seen_2_oriorder_cat_info.json'
+    IGNORE_ZERO_CATS: True  # open-vocabulary
+    # CAT_FREQ_PATH: 'datasets/coco/zero-shot/instances_train2017_seen_2_oriorder_cat_info.json'
+    CAT_FREQ_PATH: '' # whether consider unseen classes in softmax ce loss
     BASE_ALPHA: 0.2
     NOVEL_BETA: 0.45
   ROI_MASK_HEAD:
@@ -43,7 +44,7 @@ SOLVER:
   IMS_PER_BATCH: 32  # change  # max 8 imgs per batch
   BASE_LR: 0.001  # change0.000025
   MAX_ITER: 22500
-  CHECKPOINT_PERIOD: 900000  #  change
+  CHECKPOINT_PERIOD: 20000  #  change
   OPTIMIZER: 'SGD'
   WEIGHT_DECAY: 0.01
   LR_SCHEDULER_NAME: "WarmupMultiStepLR"

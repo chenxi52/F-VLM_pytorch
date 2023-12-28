@@ -1,4 +1,4 @@
-_BASE_: "Base_ov_mine.yaml"
+_BASE_: "OpenDet_tiny_coco.yaml"
 MODEL:
   BACKBONE:
     TYPE: "vit_t"
@@ -12,7 +12,7 @@ MODEL:
   SAM_PIXEL_STD: [58.395, 57.12, 57.375]
   RPN:
     HEAD_NAME: "StandardRPNHead"
-    POST_NMS_TOPK_TEST: 300
+    POST_NMS_TOPK_TEST: 100
     BATCH_SIZE_PER_IMAGE: 256
   ROI_HEADS:
     NMS_THRESH_TEST: 0.4
@@ -25,10 +25,10 @@ MODEL:
     TRAIN_ON_PRED_BOXES: False #!!!!!
   ROI_MASK_HEAD:
     NAME: "samMaskHead"
-    MASK_LOSS_TYPE: "ce_dice" 
     WITH_SINCOS: True
     PER_QUERY_POINT: 4
     SELECT_FORE_CLS: False # !!!!!
+    ADD_PE_CONTEXT: True # !!!!
   MASK_ON: True
   SAM_ON: True # !!!!
 DATASETS:
@@ -40,7 +40,7 @@ INPUT:
   CLIP_TRAIN_SIZE: 1024
   CUSTOM_AUG: ResizeLongLSJ2 # !!!!
 TEST:
-  DETECTIONS_PER_IMAGE: 300  #test_topk_per_image
+  DETECTIONS_PER_IMAGE: 100  #test_topk_per_image
   IMS_PER_BATCH: 4 #every gpu has most 2 images  # change
   SCORE_TYPE: 'cls'
   GEOMETRIC_FACT: 0.35

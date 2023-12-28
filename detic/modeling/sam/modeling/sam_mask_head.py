@@ -36,6 +36,7 @@ class samMaskHead(BaseMaskRCNNHead):
             add_pe_context: bool = False,
             cat_freq_path: str = None,
             fed_loss_freq_weight: float = 1.0,
+            data_classes: int = 80,
             **kwargs
             ) -> None:
         super().__init__(vis_period=vis_period)
@@ -110,7 +111,7 @@ class samMaskHead(BaseMaskRCNNHead):
         else:
             self.contextformer_pe = None
         if self.use_fed_loss or self.ignore_zero_cats:
-            freq_weight = load_class_freq(cat_freq_path, fed_loss_freq_weight)
+            freq_weight = load_class_freq(cat_freq_path, fed_loss_freq_weight, data_classes)
             self.register_buffer('freq_weight', freq_weight)
         else:
             self.freq_weight = None
@@ -159,6 +160,7 @@ class samMaskHead(BaseMaskRCNNHead):
                 'use_fed_loss': cfg.MODEL.ROI_BOX_HEAD.USE_FED_LOSS,
                 'fed_loss_num_cat': cfg.MODEL.NUM_SAMPLE_CATS,
                 'fed_loss_freq_weight': cfg.MODEL.ROI_BOX_HEAD.FED_LOSS_FREQ_WEIGHT,
+                'add_position_emb': cfg.MODEL.ROI_MASK_HEAD.ADD_POSTTION_EMB
                 }
     
     def forward(
@@ -183,8 +185,15 @@ class samMaskHead(BaseMaskRCNNHead):
             batch_size = roi_features.shape[0]
             point_emd = self.point_emb(roi_features) #prompt head 
             point_emd = point_emd.view(batch_size, self.per_query_point, -1)
-            if self.with_sincos: 
-                point_emd = torch.sin(point_emd[..., ::2]) + point_emd[..., 1::2]
+            if self.with_sincos and not self.add_position_emb: 
+                point_emd = torch.sin(point_emd[..., ::2]) + point_emd[..., 1::2] #模拟sin+Emb
+            elif self.add_position_emb and not self.with_sincos:
+                sam_point_emb = sam.prompt_encoder.point_embeddings
+                point_labels = (0,1)# postive points and negative points
+                # 1. negative points extraction
+                # 2. randomly sample background points, the least roi, or the least 
+                point_emd[point_labels==1] += sam_point_emb[0].weight
+                point_emd[point_labels==0] += sam_point_emb[1].weight
             nomask_dense_embeddings = sam.prompt_encoder.no_mask_embed.weight.reshape(1, -1, 1, 1).expand(
                 point_emd.shape[0], -1, *sam_features.shape[-2:]
             )
