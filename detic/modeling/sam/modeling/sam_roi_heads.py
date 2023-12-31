@@ -130,7 +130,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
                 # mask pool 修改
                 if hasattr(self, 'sam_pe'):
                     b,_,h,w = sam_features.shape
-                    sam_features = self.sam_pe(torch.zeros((b,h,w), device=sam_features.device, dtype=torch.bool))
+                    sam_features = sam_features+self.sam_pe(torch.zeros((b,h,w), device=sam_features.device, dtype=torch.bool))
                 features = self.mask_pooler([sam_features], boxes)
                 if features.size(0)==0:
                     results_instances = []

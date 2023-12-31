@@ -245,7 +245,6 @@ class samMaskHead(BaseMaskRCNNHead):
                 logits_image = logits_image.squeeze()
         #  set mask_pred that outside of the box to 0
         low_res_masks = torch.nn.functional.interpolate(low_res_masks, size=(self.train_size, self.train_size), mode='bilinear', align_corners=False)
-        low_res_masks = self.mask_out_boxes(low_res_masks, boxes=cat([b.tensor for b in boxes], dim=0))
         if self.training:
             del boxes
             gt_classes = (cat([p.gt_classes for p in instances], dim=0) )
