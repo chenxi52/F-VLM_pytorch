@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from typing import Tuple, List
+from typing import Tuple, List, Dict
 from detectron2.modeling import BaseMaskRCNNHead, ROI_MASK_HEAD_REGISTRY
 from detectron2.config import configurable
 from einops import repeat
@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from detectron2.utils.events import get_event_storage
 from detectron2.layers import cat, batched_nms
 from detectron2.layers.wrappers import move_device_like
-from detic.modeling.ContextFormer import build_contextformer, build_yhs_contextFormer
+from detic.modeling.ContextFormer import build_contextformer, build_my_contextFormer
 from detectron2.modeling.roi_heads.fast_rcnn import _log_classification_stats
 from detectron2.layers import nonzero_tuple
 from fvcore.nn import sigmoid_focal_loss_jit
@@ -21,6 +21,8 @@ import pickle
 from detectron2.modeling.poolers import ROIPooler
 from detectron2.layers import cross_entropy
 from detic.data.datasets.coco_zeroshot import get_contigous_ids
+from detic.data.datasets.lvis_v1_zeroshot import get_contigous_ids_lvis
+
 @ROI_MASK_HEAD_REGISTRY.register()
 class samMaskHead(BaseMaskRCNNHead):
     @configurable
@@ -37,6 +39,10 @@ class samMaskHead(BaseMaskRCNNHead):
             cat_freq_path: str = None,
             fed_loss_freq_weight: float = 1.0,
             data_classes: int = 80,
+            test_dataset_name: str = 'coco_2017_val',
+            context_former_layer: str = 'DetrDecoderLayer',
+            roi_prompter: str = 'CLIP',
+            roi_prompter_fuse_type: str = 'add',
             **kwargs
             ) -> None:
         super().__init__(vis_period=vis_period)
@@ -53,10 +59,13 @@ class samMaskHead(BaseMaskRCNNHead):
             sincos = 2
         else:
             sincos = 1
-
+        
         # Prompt encoder
+        in_channels = 256
+        if roi_prompter=='FUSE' and roi_prompter_fuse_type=='stack':
+            in_channels = in_channels * 2
         point_emb = nn.Sequential(
-            nn.Conv2d(256, 256, 3, stride=2, padding=1),
+            nn.Conv2d(in_channels, 256, 3, stride=2, padding=1),
             nn.BatchNorm2d(256),
             nn.ReLU(inplace=True),
             nn.Flatten(),
@@ -80,11 +89,12 @@ class samMaskHead(BaseMaskRCNNHead):
             self.text_dim = 1024
             self.emb_dim = 4096
             self.down_dim = self.emb_dim
-        self.contextformer = build_yhs_contextFormer(
+        self.contextformer = build_my_contextFormer(
             mask_dim=256,
             d_model=self.text_dim, 
             normalize_before=True,
             vis_dim=self.emb_dim,
+            layer_type=context_former_layer
         )
         def init_weights(m):
             if type(m) == nn.Linear:
@@ -93,21 +103,26 @@ class samMaskHead(BaseMaskRCNNHead):
                 weight_init.c2_msra_fill(m)
         self.point_emb.apply(init_weights)
         self.contextformer.apply(init_weights)
-        if ignore_zero_cats:
+        if ignore_zero_cats and 'coco' in test_dataset_name:
             base_ones = torch.zeros(len(get_contigous_ids('all'))) 
             base_ones[get_contigous_ids('seen')] = 1
-            base_ones = torch.cat([base_ones, torch.ones(1)])
-            self.register_buffer('base_ones', base_ones)
-            unused_index = get_contigous_ids('unused') # [0-79]
-            self.register_buffer('unused_index', torch.tensor(unused_index))
             novel_ones = torch.zeros(len(get_contigous_ids('all')))
             novel_ones[get_contigous_ids('unseen')] = 1
-            novel_ones = torch.cat([novel_ones, torch.ones(1)])
-            self.register_buffer('novel_ones', novel_ones)
+            unused_index = get_contigous_ids('unused') # [0-79]
+            self.register_buffer('unused_index', torch.tensor(unused_index))
+        elif ignore_zero_cats and 'lvis' in test_dataset_name:
+            base_ones = torch.zeros(len(get_contigous_ids_lvis('all')))
+            base_ones[get_contigous_ids_lvis('seen')] = 1
+            novel_ones = 1 - base_ones
+        base_ones = torch.cat([base_ones, torch.ones(1)])
+        self.register_buffer('base_ones', base_ones)
+        novel_ones = torch.cat([novel_ones, torch.ones(1)])
+        self.register_buffer('novel_ones', novel_ones)
+
         del self.text_feats
         self.register_buffer('text_feats', text_feats)
         if add_pe_context:
-            self.contextformer_pe = nn.Parameter(torch.randn(1, (train_size//32)**2+1, self.contextformer.d_model), requires_grad=True)
+            self.contextformer_pe = nn.Parameter(torch.randn(1, (train_size//32)**2, self.contextformer.d_model), requires_grad=True)
         else:
             self.contextformer_pe = None
         if self.use_fed_loss or self.ignore_zero_cats:
@@ -136,7 +151,7 @@ class samMaskHead(BaseMaskRCNNHead):
                 'train_size':  cfg.INPUT.TRAIN_SIZE,
                 'num_classes': num_classes,
                 'vis_period': cfg.VIS_PERIOD,
-                'clip_type': cfg.MODEL.BACKBONE.CLIP_TYPE,
+                'clip_type': cfg.MODEL.BACKBONE.TYPE,
                 'score_thresh': cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST,
                 'top_per_instance': cfg.TEST.DETECTIONS_PER_IMAGE,
                 'test_nms_thresh': cfg.MODEL.ROI_HEADS.NMS_THRESH_TEST,
@@ -163,7 +178,11 @@ class samMaskHead(BaseMaskRCNNHead):
                 'add_position_emb': cfg.MODEL.ROI_MASK_HEAD.ADD_POSTTION_EMB,
 
                 'iou_loss_weight': cfg.MODEL.ROI_MASK_HEAD.IOU_LOSS_WEIGHT,
-                'use_sigmoid_ce': cfg.MODEL.ROI_BOX_HEAD.USE_SIGMOID_CE
+                'use_iou_score': cfg.TEST.USE_IOU_SCORE,
+                'test_dataset_name': cfg.DATASETS.TEST[0],
+                'context_former_layer': cfg.MODEL.ROI_MASK_HEAD.CONTEXT_FORMER_LAYER,
+                'roi_prompter': cfg.MODEL.ROI_MASK_HEAD.ROI_PROMPTER,
+                'roi_prompter_fuse_type': cfg.MODEL.ROI_MASK_HEAD.ROI_PROMPTER_FUSE_TYPE,
                 }
     
     def forward(
@@ -172,79 +191,75 @@ class samMaskHead(BaseMaskRCNNHead):
             instances: List[Instances],
             sam: nn.Module,
             sam_features: torch.Tensor,
-            clip_final_feats: torch.Tensor,
+            clip_features: [torch.Tensor, Dict[str, torch.Tensor]],
             boxes: List[Boxes],
             attnpool: nn.Module = None,
-            select_fore_cls: bool = True
+            select_fore_cls: bool = True,
+            box_prompter: str = 'Roi',
         ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         firstly, inference, and then calculate losses
         Args:
-            roi_feature: features after maskroi, multi-level---> roi box
+            roi_feature: sam features after maskroi, multi-level---> roi box, None when use boxPrompter
         Returns:
             A dict of losses in training. The predicted "instances" in inference(List[Dict['instances': Instances]]).
         """
-        if not self.box_prompter:
+        if roi_features is not None:
             batch_size = roi_features.shape[0]
-            point_emd = self.point_emb(roi_features) #prompt head 
-            point_emd = point_emd.view(batch_size, self.per_query_point, -1)
+            sparse_embeddings = self.point_emb(roi_features) #prompt head 
+            sparse_embeddings = sparse_embeddings.view(batch_size, self.per_query_point, -1)
             if self.with_sincos and not self.add_position_emb: 
-                point_emd = torch.sin(point_emd[..., ::2]) + point_emd[..., 1::2] #模拟sin+Emb
+                sparse_embeddings = torch.sin(sparse_embeddings[..., ::2]) + sparse_embeddings[..., 1::2] #模拟sin+Emb
             elif self.add_position_emb and not self.with_sincos:
-                sam_point_emb = sam.prompt_encoder.point_embeddings
-                point_labels = torch.ones()# postive points and negative points
-                # 1. negative points extraction
-                # 2. randomly sample background points, the least roi, or the least 
-                
-                neg_points = sample_points(boxes.tensor, image_size=self.train_size, num_points=4)
-                point_emd[point_labels==1] += sam_point_emb[0].weight
-                point_emd[point_labels==0] += sam_point_emb[1].weight
-            nomask_dense_embeddings = sam.prompt_encoder.no_mask_embed.weight.reshape(1, -1, 1, 1).expand(
-                point_emd.shape[0], -1, *sam_features.shape[-2:]
+                assert NotImplementedError
+                # sam_point_emb = sam.prompt_encoder.point_embeddings
+                # point_labels = torch.ones()# postive points and negative points
+                # # 1. negative points extraction
+                # # 2. randomly sample background points, the least roi, or the least 
+                # neg_points = sample_points(boxes.tensor, image_size=self.train_size, num_points=4)
+                # point_emd[point_labels==1] += sam_point_emb[0].weight
+                # point_emd[point_labels==0] += sam_point_emb[1].weight
+            dense_embeddings = sam.prompt_encoder.no_mask_embed.weight.reshape(1, -1, 1, 1).expand(
+                sparse_embeddings.shape[0], -1, *sam_features.shape[-2:]
             )
         else:
-            sparse_embeddings, dense_embeddings = sam.prompt_encoder(
+            sparse_embeddings = torch.empty((len(instances), 0, 256), device=boxes[0].device)
+        if 'Box' in box_prompter: # box prompter
+            # box prompter
+            box_sparse_embeddings, box_dense_embeddings = sam.prompt_encoder(
                 points= None,
                 boxes = cat([b.tensor for b in boxes], dim=0),
                 masks = None
             )
+            sparse_embeddings = torch.cat([sparse_embeddings, box_sparse_embeddings], dim=1)
+            
+        clip_final_feats, _ = clip_features
         img_flag_ids = torch.tensor([len(i) for i in instances], device=clip_final_feats.device, dtype=torch.long)
-        padding = torch.zeros((len(sam_features)-len(img_flag_ids),), device=img_flag_ids.device, dtype=img_flag_ids.dtype)
-        img_flag_ids = torch.cat([img_flag_ids, padding])
-        
         sam_features = torch.repeat_interleave(sam_features, img_flag_ids, dim=0)
         batch_clip_final_feats = torch.repeat_interleave(clip_final_feats, img_flag_ids, dim=0)
+        
         img_pe = sam.prompt_encoder.get_dense_pe()
         img_pe = repeat(img_pe, 'b c h w -> (b n) c h w', n=sam_features.shape[0])
         
         # select foreGround proposals first will save computation here.
         with autocast():
             # box和 image features对应关系是，
-            if self.box_prompter:
-                low_res_masks, mask_tokens, iou_outs = sam.mask_decoder.forward_batch(
-                    image_embeddings=sam_features,
-                    image_pe=img_pe,
-                    sparse_prompt_embeddings=sparse_embeddings,
-                    dense_prompt_embeddings=dense_embeddings,
-                    multimask_output=False,
-                )
-            else:
-                low_res_masks, mask_tokens, iou_outs = sam.mask_decoder.forward_batch(
-                    image_embeddings=sam_features,
-                    image_pe=img_pe,
-                    sparse_prompt_embeddings=point_emd,
-                    dense_prompt_embeddings=nomask_dense_embeddings,
-                    multimask_output=False,)
-        
-            logits_image = self.contextformer(mask_tokens, 
-                                            batch_clip_final_feats, 
-                                            self.text_feats, 
-                                            pos=self.contextformer_pe[:,1:] if self.add_pe_context else None, 
-                                            query_pos=self.contextformer_pe[:,:1] if self.add_pe_context else None)
-                
+            low_res_masks, mask_tokens, iou_outs = sam.mask_decoder.forward_batch(
+                image_embeddings=sam_features,
+                image_pe=img_pe,
+                sparse_prompt_embeddings=sparse_embeddings,
+                dense_prompt_embeddings=dense_embeddings,
+                multimask_output=False,
+            )
+            logits_image = self.contextformer(
+                mask_tokens, 
+                batch_clip_final_feats, 
+                self.text_feats, 
+                pos=self.contextformer_pe if self.add_pe_context else None, 
+                attention_mask=None)
             if len(logits_image.shape) > 2: #[bzs, n_tokens, dim]
                 logits_image = logits_image.squeeze()
-        #  set mask_pred that outside of the box to 0
+
         low_res_masks = torch.nn.functional.interpolate(low_res_masks, size=(self.train_size, self.train_size), mode='bilinear', align_corners=False)
         if self.training:
             del boxes
@@ -255,28 +270,19 @@ class samMaskHead(BaseMaskRCNNHead):
             mask_loss, iou_loss = self.custom_mask_rcnn_loss(low_res_masks, instances, self.vis_period, select_fore_cls, iou_outs=iou_outs)
             loss ={"loss_mask": mask_loss * self.mask_loss_weight,
                    "loss_iou": iou_loss * self.iou_loss_weight,
-                   "loss_cls": self.softmax_cross_entropy_loss(logits_image, gt_classes) * self.mask_loss_weight if not self.use_sigmoid_ce
-                            else self.sigmoid_cross_entropy_loss(logits_image, gt_classes) * self.mask_loss_weight,
+                   "loss_cls": self.softmax_cross_entropy_loss(logits_image, gt_classes) * self.mask_loss_weight,
                    }
             return loss
         else:
-            # low_res_masks, logits_image(scores, class), vlm_scores, 
             new_instances = self.custom_mask_rcnn_inference(pred_mask_logits = low_res_masks, 
                                                             pred_instances=instances, 
                                                             logits_image=logits_image, 
                                                             boxes=boxes,
                                                             clip_features=clip_final_feats,
-                                                            attnpool=attnpool)
+                                                            attnpool=attnpool,
+                                                            iou_pred=iou_outs)
             return new_instances
         
-    def mask_out_boxes(self, masks, boxes):
-        # set masks out of boxes to 0
-        tem_masks = torch.zeros_like(masks)
-        boxes = boxes.to(torch.int64)
-        for i, boxes in enumerate(boxes):
-            tem_masks[i, :, boxes[1]:boxes[3], boxes[0]:boxes[2]] = 1 
-        masks = masks * tem_masks
-        return masks
 
     def softmax_cross_entropy_loss(self, pred_class_logits, gt_classes):
         """
@@ -311,45 +317,7 @@ class samMaskHead(BaseMaskRCNNHead):
             
         _log_classification_stats(pred_class_logits, gt_classes , 'fast_rcnn')
         return loss
-    
-    def sigmoid_cross_entropy_loss(self, pred_class_logits, gt_classes):
-        """
-        Args:
-            pred_class_logits: shape (N, K+1), scores for each of the N box. Each row contains the
-            scores for K object categories and 1 background class
-            gt_classes: a long tensor of shape R that contains the gt class label of each proposal.
-        """
-        if pred_class_logits.numel() == 0:
-            return pred_class_logits.new_zeros([1])[0]
 
-        N = pred_class_logits.shape[0]
-        K = pred_class_logits.shape[1] - 1
-
-        target = pred_class_logits.new_zeros(N, K + 1)
-        target[range(len(gt_classes)), gt_classes] = 1
-        target = target[:, :K]
-
-        cls_loss = F.binary_cross_entropy_with_logits(
-            pred_class_logits[:, :-1], target, reduction="none"
-        )
-
-        if self.use_fed_loss:
-            fed_loss_classes = self.get_fed_loss_classes(
-                gt_classes,
-                num_fed_loss_classes=self.fed_loss_num_classes,
-                num_classes=K,
-                weight=self.fed_loss_cls_weights,
-            )
-            fed_loss_classes_mask = fed_loss_classes.new_zeros(K + 1)
-            fed_loss_classes_mask[fed_loss_classes] = 1
-            fed_loss_classes_mask = fed_loss_classes_mask[:K]
-            weight = fed_loss_classes_mask.view(1, K).expand(N, K).float()
-        else:
-            weight = 1
-
-        loss = torch.sum(cls_loss * weight) / N
-        return loss
-    
     # @torch.jit.unused
     # def sigmoid_focal_loss(self, inputs, targets, gt_classes, alpha: float = 0.25, gamma: float = 2):
     #     """Compute the sigmoid focal loss."""
@@ -457,7 +425,7 @@ class samMaskHead(BaseMaskRCNNHead):
                 vis_mask = torch.stack([vis_mask] * 3, axis=0)
                 storage.put_image(name, vis_mask)
                 break
-        
+                
         if self.mask_loss_type == 'ce':
             mask_loss = F.binary_cross_entropy_with_logits(pred_mask_logits, gt_masks, reduction="mean")
         elif self.mask_loss_type == 'focal_dice':
@@ -491,6 +459,7 @@ class samMaskHead(BaseMaskRCNNHead):
                                 boxes: List[Boxes],
                                 clip_features: torch.Tensor = None,
                                 attnpool: nn.AdaptiveAvgPool2d = None,
+                                iou_pred: torch.Tensor = None
                                 ):
         """
         boxes to crop vlm features and get vlm_scores
@@ -521,21 +490,25 @@ class samMaskHead(BaseMaskRCNNHead):
         vlm_scores = vlm_scores.split(num_boxes_per_image, dim=0)
         logits_image = logits_image.split(num_boxes_per_image, dim=0)
         mask_probs_pred = mask_probs_pred.split(num_boxes_per_image, dim=0)
+        iou_pred = iou_pred.split(num_boxes_per_image, dim=0)
         results = [self.inference_single_image(mask_preds_per_img, 
                                            scores_ori=scores_per_img, 
                                            instances=instances_per_img,
-                                           vlm_scores_ori=vlm_scores_per_img) 
-                    for vlm_scores_per_img, scores_per_img, mask_preds_per_img, instances_per_img in 
-                         zip(vlm_scores, logits_image, mask_probs_pred, pred_instances)]
+                                           vlm_scores_ori=vlm_scores_per_img,
+                                           iou_pred=iou_pred_per_img) 
+                    for vlm_scores_per_img, scores_per_img, mask_preds_per_img, instances_per_img, iou_pred_per_img in 
+                         zip(vlm_scores, logits_image, mask_probs_pred, pred_instances, iou_pred)]
         return results
 
     # classification score consider vlm text score.
-    def inference_single_image(self, mask_pred, scores_ori, instances, vlm_scores_ori):
+    def inference_single_image(self, mask_pred, scores_ori, instances, vlm_scores_ori, iou_pred):
         vlm_scores = vlm_scores_ori.clone()
         scores = scores_ori.clone()
-        scores[:, self.unused_index] = float('-inf')
-        vlm_scores[:, self.unused_index] = float('-inf')
-        # 先去掉背景类别再 softmax
+        if self.use_iou_score: 
+            scores = scores * iou_pred.sigmoid()
+        if hasattr(self, 'unsed_index'):
+            scores[:, self.unused_index] = float('-inf')
+            vlm_scores[:, self.unused_index] = float('-inf')
         vlm_scores = F.softmax(vlm_scores, dim=1)
         scores = F.softmax(scores, dim=1)
 
@@ -555,11 +528,13 @@ class samMaskHead(BaseMaskRCNNHead):
             base_score = ((scores * self.base_ones)**(1-self.base_alpha)) * ((vlm_scores*self.base_ones)**(self.base_alpha))
             novel_score = ((scores * self.novel_ones)**(1-self.novel_beta)) * ((vlm_scores * self.novel_ones)**(self.novel_beta))
             ensembled_socres = base_score + novel_score
+            # use detection 
             ensembled_socres = torch.cat([ensembled_socres[:,:-1], scores[:,-1:]], dim=1)
             ensembled_socres = ensembled_socres / ensembled_socres.sum(dim=1, keepdim=True)
             ensembled_socres = ensembled_socres[:, :-1]
-            assert ensembled_socres[:, self.unused_index].max() < 1e-5, 'unused classes should not be evaluated'
-        
+            if hasattr(self, 'unsed_index'):
+                assert ensembled_socres[:, self.unused_index].max() < 1e-5, 'unused classes should not be evaluated'
+
         filter_mask = ensembled_socres > self.score_thresh
         num_bbox_reg_classes = boxes.shape[1] // 4
         filter_inds = filter_mask.nonzero()

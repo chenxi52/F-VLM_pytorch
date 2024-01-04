@@ -136,19 +136,17 @@ def add_detic_config(cfg):
 def add_rsprompter_config(cfg):
     _C = cfg
     _C.MODEL.SAM_WEIGHTS = ''
-    _C.MODEL.BACKBONE.TYPE = 'vit_h'
-    _C.MODEL.BACKBONE.CLIP_TYPE = 'RN50'
+    _C.MODEL.BACKBONE.TYPE = 'RN50'
+    _C.MODEL.BACKBONE.SAM_TYPE = 'vit_t'
     _C.MODEL.BACKBONE.ADD_UNFROZEN = 'xxx'
     _C.MODEL.RPN.OBJECTNESS_LOSS_TYPE = 'binary_ce'
     _C.MODEL.NUM_SAMPLE_CATS = 50
-
 
     _C.MODEL.FPN.INNER_CHANNELS  = 32
     _C.MODEL.FPN.UP_SAMPLE_SCALE = 4
     _C.MODEL.FPN.ANCHOR_STRIDE = [8, 16, 32]
     _C.MODEL.FPN.SELECTED_CHANNELS = list(range(8, 32, 2))
     _C.MODEL.FPN.IN_CHANNELS = [768, 768, 768]
-
 
     _C.MODEL.ROI_BOX_HEAD.CAT_FREQ_PATH = 'datasets/metadata/lvis_v1_train_cat_info.json'
     _C.MODEL.ROI_BOX_HEAD.IGNORE_ZERO_CATS = False
@@ -163,12 +161,16 @@ def add_rsprompter_config(cfg):
     _C.MODEL.ROI_MASK_HEAD.MASK_LOSS_WEIGHT = 1.0
     _C.MODEL.ROI_MASK_HEAD.PER_QUERY_POINT = 4
     _C.MODEL.ROI_MASK_HEAD.SELECT_FORE_CLS = False
-    _C.MODEL.ROI_MASK_HEAD.BOX_PROMPTER = False
+    _C.MODEL.ROI_MASK_HEAD.BOX_PROMPTER = 'Roi'  #Box or Roi
     _C.MODEL.ROI_MASK_HEAD.ADD_PE_CONTEXT = True
     _C.MODEL.ROI_MASK_HEAD.ADD_POSTTION_EMB = False
     _C.MODEL.ROI_MASK_HEAD.IOU_LOSS_WEIGHT = 0.
     _C.MODEL.ROI_MASK_HEAD.ADD_PE_BEFORE_POOL = True
-    
+    _C.MODEL.ROI_MASK_HEAD.IN_FEATURES = ['feat2', 'feat2', 'feat4', 'feat5']
+    _C.MODEL.ROI_MASK_HEAD.ROI_PROMPTER = ''
+    _C.MODEL.ROI_MASK_HEAD.CONTEXT_FORMER_LAYER = 'DetrDecoderLayer'
+    _C.MODEL.ROI_MASK_HEAD.ROI_PROMPTER_FUSE_TYPE = 'add'
+
     _C.MODEL.SAM_FROZEN = True
     _C.MODEL.SAM_ON = False
     _C.MODEL.SAM_PIXEL_MEAN = [0.,0.,0.]
@@ -196,7 +198,9 @@ def add_rsprompter_config(cfg):
     _C.TEST.IMS_PER_BATCH = 2 #the batch_size of testing
     _C.TEST.SCORE_TYPE = 'cls'
     _C.TEST.GEOMETRIC_FACT = 0.35
-
+    _C.TEST.USE_IOU_SCORE = False
+    _C.TEST.FIXED_AP = False
+    
     _C.MODEL.ROI_HEADS.ALLOW_LOW_QUALITY_MATCHES = True
     
     _C.MODEL.CLIP_TEXT_FEATS_PATH = 'san'

@@ -6,23 +6,14 @@
 #SBATCH --gres=gpu:8
 #SBATCH --output=.output/slurm_out/eval.%j.out
 #SBATCH --error=.output/slurm_out/eval.%j.error
-path="output/clipRpn/SamOn/twoFpn_MycontextFormer/clip_rois/"
+path="output/clipRpn/SamOn/twoFpn_lvis/"
 model_weight=$path"model_final.pth"
 
 
-srun python train_net_stand.py --config-file configs/OpenDet_tiny_coco_eval.yaml --eval-only --num-gpus 8 \
+srun python train_net_stand.py --config-file configs/OpenDet_tiny_lvis_eval.yaml --eval-only --num-gpus 8 \
     MODEL.WEIGHTS $model_weight \
-    MODEL.ROI_BOX_HEAD.BASE_ALPHA 0.2 \
-    MODEL.ROI_BOX_HEAD.NOVEL_BETA 0.45 \
-    OUTPUT_DIR $path \
-    MODEL.ROI_MASK_HEAD.ROI_PROMPTER CLIP
-
-
-# srun python train_net_stand.py --config-file configs/OpenDet_tiny_coco_eval.yaml --eval-only --num-gpus 8 \
-#     MODEL.WEIGHTS output/clipRpn/SamOn/twoFpn_MycontextFormer_FPNbn/model_final.pth \
-#     MODEL.ROI_BOX_HEAD.BASE_ALPHA 0.2 \
-#     MODEL.ROI_BOX_HEAD.NOVEL_BETA 0.45 \
-#     OUTPUT_DIR output/clipRpn/SamOn/twoFpn_MycontextFormer_FPNbn/ 
+    OUTPUT_DIR $path'fixedAp' \
+    TEST.FIXED_AP True
 
 # srun python train_net_stand.py --config-file configs/OpenDet_tiny_coco_eval.yaml --eval-only --num-gpus 8 \
 #     MODEL.WEIGHTS $model_weight \

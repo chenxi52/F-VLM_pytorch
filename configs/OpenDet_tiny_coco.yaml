@@ -1,8 +1,8 @@
 _BASE_: "Base_ov_mine.yaml"
 MODEL:
   BACKBONE:
-    TYPE: "vit_t"
-    CLIP_TYPE: "RN50"
+    SAM_TYPE: "vit_t"
+    TYPE: "RN50"
   CLIP_TEXT_FEATS_PATH: "datasets/coco/coco_cls_seen.pkl"
   SAM_WEIGHTS: "mobile_sam.pt"
   PROPOSAL_GENERATOR:
@@ -30,11 +30,15 @@ MODEL:
     WITH_SINCOS: True
     PER_QUERY_POINT: 4
     SELECT_FORE_CLS: False # !!!!! consider the background class is important
-    BOX_PROMPTER: False # !!!!! 
+    BOX_PROMPTER: 'BoxWithRoi' # !!!!!  # BoxWithRoi/Box/Roi
     ADD_PE_CONTEXT: True # !!!!!
     IOU_LOSS_WEIGHT: 0. # !!!!
     ADD_PE_BEFORE_POOL: True # !!!!
-  MASK_ON: True
+    IN_FEATURES: ["feat2", "feat3", "feat4", "feat5"]
+    ROI_PROMPTER: "FUSE" # SAM/CLIP/FUSE
+    ROI_PROMPTER_FUSE_TYPE: "add" # add/stack
+    CONTEXT_FORMER_LAYER: 'OpensegDecoderLayer' # !!!!  DetrDecoderLayer or. OpensegDecoderLayer
+  MASK_ON: True 
   SAM_ON: True # !!!!
 DATASETS:
   TRAIN: ("coco_zeroshot_train",)
@@ -44,11 +48,11 @@ DATALOADER:
 SOLVER:
   IMS_PER_BATCH: 32  # change  # max 8 imgs per batch
   BASE_LR: 0.001  # change0.000025
-  MAX_ITER: 22500
+  MAX_ITER: 45000
   CHECKPOINT_PERIOD: 20000  #  change
   OPTIMIZER: 'SGD'
-  WEIGHT_DECAY: 0.01
-  LR_SCHEDULER_NAME: "WarmupMultiStepLR"
+  WEIGHT_DECAY: 0.0001
+  LR_SCHEDULER_NAME: "WarmupCosineLR"
   WARMUP_FACTOR: 0.16
   WARMUP_METHOD: "linear"
   WARMUP_ITERS: 2000

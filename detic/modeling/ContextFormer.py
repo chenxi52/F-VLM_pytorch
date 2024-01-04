@@ -22,7 +22,7 @@ def _get_clones(module, N):
 
 class TransformerDecoderLayer(nn.Module):
     def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1,
-                 activation="relu", normalize_before=False):
+                 activation="relu", normalize_before=False, layer_type='DetrDecoderLayer'):
         super().__init__()
         self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=True)
         self.multihead_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=True)
@@ -34,15 +34,62 @@ class TransformerDecoderLayer(nn.Module):
         self.norm1 = nn.LayerNorm(d_model)
         self.norm2 = nn.LayerNorm(d_model)
         self.norm3 = nn.LayerNorm(d_model)
+        self.normk = nn.LayerNorm(d_model)
         self.dropout1 = nn.Dropout(dropout)
         self.dropout2 = nn.Dropout(dropout)
         self.dropout3 = nn.Dropout(dropout)
 
         self.activation = _get_activation_fn(activation)
         self.normalize_before = normalize_before
+        self.layer_type = layer_type
 
     def with_pos_embed(self, tensor, pos: Optional[Tensor]):
         return tensor if pos is None else tensor + pos
+
+    def forward_qk_norm(self, tgt, memory,
+                        memory_mask: Optional[Tensor] = None,
+                        memory_key_padding_mask: Optional[Tensor] = None,
+                        kv_pos: Optional[Tensor] = None,
+                        query_pos: Optional[Tensor] = None):
+        k = v = self.with_pos_embed(memory, kv_pos)
+        q, k = self.norm1(tgt), self.norm2(k)
+        q = self.multihead_attn(query=q,
+                                   key=k,
+                                   value=v,
+                                   attn_mask=None,
+                                   key_padding_mask=None)[0]
+        q = self.dropout(q) + tgt
+        return q
+
+    def forward_pre_knorm(self, tgt, memory,
+                    tgt_mask: Optional[Tensor] = None,
+                    memory_mask: Optional[Tensor] = None,
+                    tgt_key_padding_mask: Optional[Tensor] = None,
+                    memory_key_padding_mask: Optional[Tensor] = None,
+                    pos: Optional[Tensor] = None,
+                    query_pos: Optional[Tensor] = None):
+        """
+        self-atten; multihead-atten; feedforward
+        """
+        tgt2 = self.norm1(tgt)
+        q = k = self.with_pos_embed(tgt2, query_pos)
+        # q, k with pos_embed; self-atten mask token
+        tgt2 = self.self_attn(q, k, value=tgt2, attn_mask=tgt_mask,
+                              key_padding_mask=tgt_key_padding_mask)[0] 
+        tgt = tgt + self.dropout1(tgt2)
+        tgt2 = self.norm2(tgt)
+        # mask token cross-atten with clip features
+        # conditional tgt_mask 
+        memory_k = self.normk(memory)
+        tgt2 = self.multihead_attn(query=self.with_pos_embed(tgt2, query_pos),
+                                   key=self.with_pos_embed(memory_k, pos),
+                                   value=memory, attn_mask=memory_mask,
+                                   key_padding_mask=memory_key_padding_mask)[0]
+        tgt = tgt + self.dropout2(tgt2)
+        tgt2 = self.norm3(tgt)
+        tgt2 = self.linear2(self.dropout(self.activation(self.linear1(tgt2))))
+        tgt = tgt + self.dropout3(tgt2)
+        return tgt
 
     def forward_post(self, tgt, memory,
                      tgt_mask: Optional[Tensor] = None,
@@ -80,12 +127,18 @@ class TransformerDecoderLayer(nn.Module):
                     memory_key_padding_mask: Optional[Tensor] = None,
                     pos: Optional[Tensor] = None,
                     query_pos: Optional[Tensor] = None):
+        """
+        self-atten; multihead-atten; feedforward
+        """
         tgt2 = self.norm1(tgt)
         q = k = self.with_pos_embed(tgt2, query_pos)
+        # q, k with pos_embed; self-atten mask token
         tgt2 = self.self_attn(q, k, value=tgt2, attn_mask=tgt_mask,
-                              key_padding_mask=tgt_key_padding_mask)[0]
+                              key_padding_mask=tgt_key_padding_mask)[0] 
         tgt = tgt + self.dropout1(tgt2)
         tgt2 = self.norm2(tgt)
+        # mask token cross-atten with clip features
+        # conditional tgt_mask 
         tgt2 = self.multihead_attn(query=self.with_pos_embed(tgt2, query_pos),
                                    key=self.with_pos_embed(memory, pos),
                                    value=memory, attn_mask=memory_mask,
@@ -103,11 +156,16 @@ class TransformerDecoderLayer(nn.Module):
                 memory_key_padding_mask: Optional[Tensor] = None,
                 pos: Optional[Tensor] = None,
                 query_pos: Optional[Tensor] = None):
-        if self.normalize_before:
-            return self.forward_pre(tgt, memory, tgt_mask, memory_mask,
+        assert self.layer_type in ['DetrDecoderLayer', 'OpensegDecoderLayer']
+        if self.layer_type == 'OpensegDecoderLayer':
+            return self.forward_pre_knorm(tgt, memory, pos=pos)
+            # return self.forward_qk_norm(tgt, memory, kv_pos=pos)
+        elif self.layer_type == 'DetrDecoderLayer':
+            if self.normalize_before:
+                return self.forward_pre(tgt, memory, tgt_mask, memory_mask,
+                                        tgt_key_padding_mask, memory_key_padding_mask, pos, query_pos)
+            return self.forward_post(tgt, memory, tgt_mask, memory_mask,
                                     tgt_key_padding_mask, memory_key_padding_mask, pos, query_pos)
-        return self.forward_post(tgt, memory, tgt_mask, memory_mask,
-                                 tgt_key_padding_mask, memory_key_padding_mask, pos, query_pos)
 
 class TransformerDecoder(nn.Module):
 
@@ -215,10 +273,10 @@ class build_contextformer(nn.Module):
         mask_cls_txt = mask_cls_img.t()
         return mask_cls_img, mask_cls_txt
     
-class build_yhs_contextFormer(nn.Module):
+class build_my_contextFormer(nn.Module):
     def __init__(self,
-        mask_dim=1024,
-        d_model=256,
+        mask_dim=256,
+        d_model=1024,
         vis_dim=2048,
         nhead=8,
         num_decoder_layers=3,
@@ -226,37 +284,49 @@ class build_yhs_contextFormer(nn.Module):
         dim_feedforward=2048,
         dropout=0.1,
         activation="relu",
-        return_intermediate_dec=False) -> None:
+        return_intermediate_dec=False,
+        layer_type=False) -> None:
         """
         use_ln: whether use ln to visual tokens and masktokens(layernorm)
         """
         super().__init__()
         # defalut: set d_model = clip_txt_dim
         self.d_model = d_model
-        attenLayer1= TransformerDecoderLayer(d_model, nhead, dim_feedforward, dropout, activation, normalize_before)
+        self.n_head = nhead
+        attenLayer1= TransformerDecoderLayer(d_model, 
+                                             nhead, 
+                                             dim_feedforward, 
+                                             dropout, 
+                                             activation, 
+                                             normalize_before, 
+                                             layer_type=layer_type)
         decoder_norm1 = nn.LayerNorm(d_model)
-        self.decoder1 = TransformerDecoder(attenLayer1, num_decoder_layers, decoder_norm1,
+        self.decoder1 = TransformerDecoder(attenLayer1, num_decoder_layers, norm=decoder_norm1,
                                             return_intermediate=return_intermediate_dec)
         self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
         self.linear = nn.Linear(mask_dim, d_model)
         self.vis_linear = nn.Linear(vis_dim, d_model)
 
-    def forward(self, mask_token, clip_vis, clip_txt, pos, query_pos):
+    def forward(self, mask_token, clip_vis, clip_txt, pos, query_pos=None, attention_mask=None):
         # for clip res50, cls_token not exits
         clip_vis = clip_vis.flatten(start_dim=2)
         clip_vis = clip_vis.permute(0,2,1)
+        # [bz, L, dim]
         clip_vis = self.vis_linear(clip_vis)
         mask_token = self.linear(mask_token)
-        semantic_token = self.decoder1(tgt=mask_token, memory=clip_vis, pos=pos, query_pos=query_pos)
+        semantic_token = self.decoder1(tgt=mask_token, 
+                                       memory=clip_vis, 
+                                       pos=pos, 
+                                       query_pos=query_pos, 
+                                       memory_mask=attention_mask)
         return self.get_logits(semantic_token, clip_txt)
 
     def get_logits(self, image, text):
         image = image/(image.norm(dim=-1, keepdim=True))
-        # text = text/(text.norm(dim=-1, keepdim=True)+ 1e-7)
         logit_scale = self.logit_scale.exp()
         mask_cls_img = logit_scale * image @ (text.t())
         return mask_cls_img
-
+    
 class PositionalEncoding(nn.Module):
     def __init__(self, D, max_len=5000):
         super(PositionalEncoding, self).__init__()

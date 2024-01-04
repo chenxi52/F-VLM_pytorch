@@ -40,13 +40,16 @@ if __name__ == '__main__':
 
     print('Loading', args.ann)
     data = json.load(open(args.ann, 'r'))
+
     catid2freq = {x['id']: x['frequency'] for x in data['categories']}# [id: freq]
-    # print('ori #anns', len(data['annotations']))
     exclude = ['r']
     data['annotations'] = [x for x in data['annotations'] 
                             if catid2freq[x['category_id']] not in exclude]  
+    # remove rare categories
+    data['categories'] = [x for x in data['categories']
+                            if catid2freq[x['id']] not in exclude]
     print('filtered #anns', len(data['annotations']))
-    out_path = args.ann[:-5] + '_norare.json'
+    out_path = args.ann[:-5] + '_seen.json'
     print('Saving to', out_path)
     json.dump(data, open(out_path, 'w'))
     print('done')
@@ -63,3 +66,9 @@ if __name__ == '__main__':
 
     # with open('datasets/lvis/lvis_cls.pkl', 'wb') as f:
     #     pickle.dump(all_text_feats, f)
+
+    # loading categories
+    cat_info = data['categories']
+    print(len(cat_info))
+
+    

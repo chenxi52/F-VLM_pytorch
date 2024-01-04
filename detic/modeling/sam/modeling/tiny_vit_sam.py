@@ -613,7 +613,8 @@ class TinyViT(nn.Module):
         B,_,C = x.size()
         x = x.view(B, 64, 64, C)
         return x
-
+    
+    @torch.no_grad()
     def forward(self, x):
         x = self.forward_features(x)
         x = x.permute(0, 3, 1, 2)

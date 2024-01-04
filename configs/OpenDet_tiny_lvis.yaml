@@ -1,9 +1,9 @@
 _BASE_: "Base_ov_mine.yaml"
 MODEL:
   BACKBONE:
-    TYPE: "vit_t"
-    CLIP_TYPE: "RN50"
-  CLIP_TEXT_FEATS_PATH: "datasets/lvis/lvis_cls.pkl" #********
+    SAM_TYPE: "vit_t"
+    TYPE: "RN50"
+  CLIP_TEXT_FEATS_PATH: "datasets/lvis/lvis_base_cls.pkl" #********
   SAM_WEIGHTS: "mobile_sam.pt"
   PROPOSAL_GENERATOR:
     NAME: "SAMRPN"
@@ -14,18 +14,15 @@ MODEL:
     POST_NMS_TOPK_TEST: 300
     BATCH_SIZE_PER_IMAGE: 256 # the sampling num 
   ROI_HEADS:
-    FPN_PE: "fixed" # !!!!!
-    SCORE_THRESH_TEST: 0.02
-    NUM_CLASSES: 1203
-    NMS_THRESH_TEST: 0.5
+    NUM_CLASSES: 866
     BATCH_SIZE_PER_IMAGE: 32 #the sampling num 
   ROI_BOX_HEAD:
     BACKGROUND_WEIGHT: 0.9
-    TRAIN_ON_PRED_BOXES: False
+    IGNORE_ZERO_CATS: True
     USE_FED_LOSS: False
     BASE_ALPHA: 0.35
     NOVEL_BETA: 0.65
-    CAT_FREQ_PATH: 'datasets/lvis/lvis_v1_train_norare_cat_info.json'
+    CAT_FREQ_PATH: ''
   ROI_MASK_HEAD:
     NAME: "samMaskHead"
     WITH_SINCOS: True
@@ -34,35 +31,35 @@ MODEL:
     SELECT_FORE_CLS: False # !!!!
     BOX_PROMPTER: False # !!!!! 
     ADD_PE_CONTEXT: True # !!!!!
+    IOU_LOSS_WEIGHT: 0. # !!!!
+    ADD_PE_BEFORE_POOL: True # !!!!
+    ROI_PROMPTER: "CLIP" #!!!!
+    IN_FEATURES: ["feat2", "feat3", "feat4", "feat5"]
   MASK_ON: True
-  NUM_SAMPLE_CATS: 50
   SAM_ON: True
+  NUM_SAMPLE_CATS: 50
 DATASETS:
-  TRAIN: ("lvis_v1_train_norare",)
+  TRAIN: ("lvis_v1_zeroshot_train",)
   TEST: ("lvis_v1_val",)
 DATALOADER:
+  SAMPLER_TRAIN: "RepeatFactorTrainingSampler"
+  REPEAT_THRESHOLD: 0.001
   NUM_WORKERS: 16 # num_workers == batchsize_per_gpu
 SOLVER:
-  IMS_PER_BATCH: 256  # change  # max 8 imgs per batch
+  IMS_PER_BATCH: 32  # change  # max 8 imgs per batch
   BASE_LR: 0.0036  # change0.000025
   MAX_ITER: 46100
   CHECKPOINT_PERIOD: 900000  #  change
-  OPTIMIZER: 'SGD'
+  OPTIMIZER: 'ADAMW'
   WEIGHT_DECAY: 0.0001
-  LR_SCHEDULER_NAME: "WarmupMultiStepLR"
+  LR_SCHEDULER_NAME: "WarmupCosineLR"
   WARMUP_FACTOR: 0.16
   WARMUP_METHOD: "linear" 
   WARMUP_ITERS: 2000
-  STEPS: (20250, 21375, 21738)
+  # STEPS: (20250, 21375, 21738)
   GAMMA: 0.1
   MOMENTUM: 0.9
 INPUT:
   CLIP_TRAIN_SIZE: 1024
   CUSTOM_AUG: ResizeLongLSJ2  #!!!!
-TEST:
-  DETECTIONS_PER_IMAGE: 300  #test_topk_per_image
-  EVAL_PERIOD: 90000 # change
-  IMS_PER_BATCH: 1 #every gpu has most 2 images  # change
-  SCORE_TYPE: 'cls'
-  GEOMETRIC_FACT: 0.65
 OUTPUT_DIR: './output/clipRpn/SamOnLvis'

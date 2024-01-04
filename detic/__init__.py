@@ -18,6 +18,7 @@ from .data.datasets import cc
 from .data.datasets import objects365
 from .data.datasets import oid
 from .data.datasets import coco_zeroshot
+from .data.datasets import lvis_v1_zeroshot
 
 try:
     from .modeling.meta_arch import d2_deformable_detr

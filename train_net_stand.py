@@ -36,6 +36,7 @@ from detic.config import add_rsprompter_config
 from detectron2.utils.logger import setup_logger
 from detic.custom_solver import build_sam_optimizer
 from detic.evaluation.custom_coco_eval import CustomCOCOEvaluator
+from detic.evaluation.custom_lvis_eval import CustomLVISEvaluator,LVISEvaluatorFixedAP
 import wandb
 import torch.nn as nn
 logger = logging.getLogger("detectron2")
@@ -54,7 +55,11 @@ def do_test(cfg, model):
         evaluator_type = MetadataCatalog.get(dataset_name).evaluator_type
 
         if evaluator_type == "lvis" :
-            evaluator = LVISEvaluator(dataset_name, cfg, True, output_folder)
+            if cfg.TEST.FIXED_AP:
+                evaluator = LVISEvaluatorFixedAP(dataset_name, cfg, True, output_folder)
+            else:
+                evaluator = CustomLVISEvaluator(dataset_name, cfg, True, output_folder)
+
         elif evaluator_type == 'coco':
             if dataset_name == 'coco_generalized_zeroshot_val':
                 # Additionally plot mAP for 'seen classes' and 'unseen classes'
@@ -63,8 +68,9 @@ def do_test(cfg, model):
                 evaluator = COCOEvaluator(dataset_name, cfg, True, output_folder)
         else:
             assert 0, evaluator_type
-        
-        results_i = inference_on_dataset(model, data_loader, evaluator)
+        if cfg.SOLVER.AMP.ENABLED:
+            with torch.cuda.amp.autocast():
+                results_i = inference_on_dataset(model, data_loader, evaluator)
         results[dataset_name] = results_i
         if comm.is_main_process():
             logger.info("Evaluation results for {} in csv format:".format(dataset_name))
@@ -118,7 +124,7 @@ def do_train(cfg, model, resume=False):
     #####
     
     data_loader = build_detection_train_loader(cfg, mapper=mapper)
-    if cfg.FP16:
+    if cfg.SOLVER.AMP.ENABLED:
         scaler = GradScaler()
     logger.info("Starting training from iteration {}".format(start_iter))
     with EventStorage(start_iter) as storage:

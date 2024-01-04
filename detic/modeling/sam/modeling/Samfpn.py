@@ -1,11 +1,19 @@
 from detectron2.modeling import Backbone, BACKBONE_REGISTRY
 from detectron2.layers import Conv2d, ShapeSpec, get_norm
-from detic.modeling.sam.build_sam import sam_model_registry
 import torch.nn as nn
 import einops
 import torch
 from timm.models.layers import trunc_normal_
-
+import math
+import torch.nn.functional as F
+from detectron2.modeling.backbone.fpn import _assert_strides_are_log2_contiguous, weight_init
+from detectron2.modeling.backbone.build import BACKBONE_REGISTRY
+from detectron2.layers import Conv2d, ShapeSpec, get_norm
+from detectron2.modeling.backbone.fpn import LastLevelMaxPool, FPN
+from typing import Union, Optional, Tuple, Dict
+from torch.nn.modules.batchnorm import _BatchNorm
+from torch.nn.modules.instancenorm import _InstanceNorm
+import warnings
 
 class SAMAggregatorNeck(Backbone):
     def __init__(
@@ -211,31 +219,125 @@ class SAMAggregatorNeck(Backbone):
     
     @property
     def size_divisibility(self):
-        return 32
+        return 0
 
     @property
     def padding_constraints(self):
-        return {"square_size": 0}
+        return {"square_size": 1024}
     
     @property
     def output_shape(self):
         return {'feat2': ShapeSpec(channels=self.out_channels, stride=self.anchor_stride[0]),
                 'feat1': ShapeSpec(channels=self.out_channels, stride=self.anchor_stride[1]),
                 'feat0': ShapeSpec(channels=self.out_channels, stride=self.anchor_stride[2])}
+class ClipFPN(FPN):
+    _fuse_type: torch.jit.Final[str]
+    def __init__(
+        self,
+        # bottom_up,
+        input_shapes,
+        in_features,
+        out_channels,
+        norm="",
+        top_block=None,
+        fuse_type="sum",
+        square_pad=0,
+    ):
+        """
+        remove assert(bottom_up, Backbone)
+        output: [p1,p2...]
+        """
+        super(FPN, self).__init__()
+        assert in_features, in_features
+        # Feature map strides and channels from the bottom up network (e.g. ResNet)
+        # input_shapes = bottom_up.output_shape
+        strides = [input_shapes[f].stride for f in in_features]
+        in_channels_per_feature = [input_shapes[f].channels for f in in_features]
 
-class Norm2d(nn.Module):
-    def __init__(self, embed_dim):
-        super().__init__()
-        self.ln = nn.LayerNorm(embed_dim, eps=1e-6)
-    def forward(self, x):
-        x = x.permute(0, 2, 3, 1)
-        x = self.ln(x)
-        x = x.permute(0, 3, 1, 2).contiguous()
-        return x
+        _assert_strides_are_log2_contiguous(strides)
+        lateral_convs = []
+        output_convs = []
+
+        use_bias = norm == ""
+        for idx, in_channels in enumerate(in_channels_per_feature):
+            lateral_norm = get_norm(norm, out_channels)
+            output_norm = get_norm(norm, out_channels)
+
+            lateral_conv = Conv2d(
+                in_channels, out_channels, kernel_size=1, bias=use_bias, norm=lateral_norm
+            )
+            output_conv = Conv2d(
+                out_channels,
+                out_channels,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+                bias=use_bias,
+                norm=output_norm,
+            )
+            weight_init.c2_xavier_fill(lateral_conv)
+            weight_init.c2_xavier_fill(output_conv)
+            stage = int(math.log2(strides[idx]))
+            self.add_module("fpn_lateral{}".format(stage), lateral_conv)
+            self.add_module("fpn_output{}".format(stage), output_conv)
+
+            lateral_convs.append(lateral_conv)
+            output_convs.append(output_conv)
+        # Place convs into top-down order (from low to high resolution)
+        # to make the top-down computation in forward clearer.
+        self.lateral_convs = lateral_convs[::-1]
+        self.output_convs = output_convs[::-1]
+        self.top_block = top_block
+        self.in_features = tuple(in_features)
+        # Return feature names are "p<stage>", like ["p2", "p3", ..., "p6"]
+        self._out_feature_strides = {"p{}".format(int(math.log2(s))): s for s in strides}
+        # top block output feature maps.
+        if self.top_block is not None:
+            for s in range(stage, stage + self.top_block.num_levels):
+                self._out_feature_strides["p{}".format(s + 1)] = 2 ** (s + 1)
+        self._out_features = list(self._out_feature_strides.keys())
+        self._out_feature_channels = {k: out_channels for k in self._out_features}
+        self._size_divisibility = strides[-1]
+        self._square_pad = square_pad
+        assert fuse_type in {"avg", "sum"}
+        self._fuse_type = fuse_type
+
+    def forward(self, bottom_up_features):
+        """
+        bottom_up_features: inter_features from clip
+        extract top_bottom features without grad
+        """
+        results = []
+        prev_features = self.lateral_convs[0](bottom_up_features[self.in_features[-1]])
+        results.append(self.output_convs[0](prev_features))
+
+        # Reverse feature maps into top-down order (from low to high resolution)
+        for idx, (lateral_conv, output_conv) in enumerate(
+            zip(self.lateral_convs, self.output_convs)
+        ):
+            if idx > 0:
+                features = self.in_features[-idx - 1]
+                features = bottom_up_features[features]
+                top_down_features = F.interpolate(prev_features, scale_factor=2.0, mode="nearest")
+                lateral_features = lateral_conv(features)
+                prev_features = lateral_features + top_down_features
+                if self._fuse_type == "avg":
+                    prev_features /= 2
+                results.insert(0, output_conv(prev_features))
+
+        if self.top_block is not None:
+            if self.top_block.in_feature in bottom_up_features:
+                top_block_in_feature = bottom_up_features[self.top_block.in_feature]
+            else:
+                top_block_in_feature = results[self._out_features.index(self.top_block.in_feature)]
+            results.extend(self.top_block(top_block_in_feature))
+        assert len(self._out_features) == len(results)
+        return {f: res for f, res in zip(self._out_features, results)}
+
+
     
 class SAMVitDet(SAMAggregatorNeck):
     def __init__(self,
-            in_channels=[1280]*16,
             out_channels=256,
             kernel_size=3,
             stride=1,
@@ -273,7 +375,6 @@ class SAMVitDet(SAMAggregatorNeck):
         self.ops = [self.fpn1, self.fpn2, self.fpn3, self.fpn4]
         self.apply(self._init_weights)
         # init_weights for fpns
-
         
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
@@ -303,51 +404,27 @@ class SAMVitDet(SAMAggregatorNeck):
         if self.num_outs>len(feature_list):
             for i in range(self.num_outs-len(feature_list)):
                 feature_list.append(nn.functional.max_pool2d(feature_list[-1], 1, stride=2))
-        return { 'feat4':feature_list[0], 'feat3': feature_list[1], 'feat2':feature_list[2], 'feat1':feature_list[3], 'feat0':feature_list[4]}
-    
+        return {f'feat{i+2}':feature_list[i] for i in range(self.num_outs)}
+
     @property
     def output_shape(self):
         return {
-                'feat4': ShapeSpec(channels=self.out_channels, stride=self.anchor_stride[0]),
-                'feat3': ShapeSpec(channels=self.out_channels, stride=self.anchor_stride[1]),
-                'feat2': ShapeSpec(channels=self.out_channels, stride=self.anchor_stride[2]),
-                'feat1': ShapeSpec(channels=self.out_channels, stride=self.anchor_stride[3]),
-                'feat0': ShapeSpec(channels=self.out_channels, stride=self.anchor_stride[4])}
+                f'feat{i+2}': ShapeSpec(channels=self.out_channels, stride=self.anchor_stride[i]) \
+                    for i in range(self.num_outs)
+                }
 
 
-@BACKBONE_REGISTRY.register()
-def build_sam_vit_fpn_backbone(cfg, input_shape=None):
-    if cfg.MODEL.BACKBONE.TYPE=='vit_h':
-        in_channels = [1280] * 32
-        selected_channels = list(range(8,32,2))
-    elif cfg.MODEL.BACKBONE.TYPE == 'vit_b':
-        in_channels = [768] * 12
-        selected_channels = list(range(4,12,2))
-    backbone = SAMAggregatorNeck(
-        in_channels=in_channels,
-        inner_channels=cfg.MODEL.FPN.INNER_CHANNELS,
-        out_channels=cfg.MODEL.FPN.OUT_CHANNELS,
-        selected_channels=selected_channels,
-        up_sample_scale=cfg.MODEL.FPN.UP_SAMPLE_SCALE,
-        anchor_stride=cfg.MODEL.FPN.ANCHOR_STRIDE
-    )
-    return backbone
 
-@BACKBONE_REGISTRY.register()
-def build_sam_vit_det_backbone(cfg, input_shape=None):
-    norm_cfg = {'type':cfg.MODEL.FPN.NORM,'requires_grad':True }
-    backbone = SAMVitDet(
-        in_channels=cfg.MODEL.FPN.IN_CHANNELS,
-        out_channels=cfg.MODEL.FPN.OUT_CHANNELS,
-        anchor_stride=cfg.MODEL.FPN.ANCHOR_STRIDE,
-        norm_cfg=norm_cfg,
-    )
-    return backbone
+class Norm2d(nn.Module):
+    def __init__(self, embed_dim):
+        super().__init__()
+        self.ln = nn.LayerNorm(embed_dim, eps=1e-6)
+    def forward(self, x):
+        x = x.permute(0, 2, 3, 1)
+        x = self.ln(x)
+        x = x.permute(0, 3, 1, 2).contiguous()
+        return x
 
-from typing import Union, Optional, Tuple, Dict
-from torch.nn.modules.batchnorm import _BatchNorm
-from torch.nn.modules.instancenorm import _InstanceNorm
-import warnings
 class ConvModule(nn.Module):
     """A conv block that bundles conv/norm/activation layers.
 
@@ -649,3 +726,53 @@ def constant_init(module, val, bias=0):
     if hasattr(module, 'bias') and module.bias is not None:
         nn.init.constant_(module.bias, bias)
 
+
+
+@BACKBONE_REGISTRY.register()
+def build_clip_fpn_backbone(cfg, input_shape=None):
+    """
+    Build a backbone from `cfg.MODEL.BACKBONE.NAME`.
+
+    Returns:
+        an instance of :class:`Backbone`
+    """
+    # backbone type
+    backbone = ClipFPN(
+        input_shapes=input_shape,
+        in_features=cfg.MODEL.FPN.IN_FEATURES,
+        out_channels=cfg.MODEL.FPN.OUT_CHANNELS,
+        norm=cfg.MODEL.FPN.NORM,
+        top_block=LastLevelMaxPool(),
+        fuse_type=cfg.MODEL.FPN.FUSE_TYPE,
+    )
+    return backbone
+
+
+
+@BACKBONE_REGISTRY.register()
+def build_sam_vit_fpn_backbone(cfg, input_shape=None):
+    if cfg.MODEL.BACKBONE.SAM_TYPE=='vit_h':
+        in_channels = [1280] * 32
+        selected_channels = list(range(8,32,2))
+    elif cfg.MODEL.BACKBONE.SAM_TYPE == 'vit_b':
+        in_channels = [768] * 12
+        selected_channels = list(range(4,12,2))
+    backbone = SAMAggregatorNeck(
+        in_channels=in_channels,
+        inner_channels=cfg.MODEL.FPN.INNER_CHANNELS,
+        out_channels=cfg.MODEL.FPN.OUT_CHANNELS,
+        selected_channels=selected_channels,
+        up_sample_scale=cfg.MODEL.FPN.UP_SAMPLE_SCALE,
+        anchor_stride=cfg.MODEL.FPN.ANCHOR_STRIDE
+    )
+    return backbone
+
+@BACKBONE_REGISTRY.register()
+def build_sam_vit_det_backbone(cfg, input_shape=None):
+    norm_cfg = {'type':cfg.MODEL.FPN.NORM,'requires_grad':True }
+    backbone = SAMVitDet(
+        out_channels=cfg.MODEL.FPN.OUT_CHANNELS,
+        anchor_stride=cfg.MODEL.FPN.ANCHOR_STRIDE,
+        norm_cfg=norm_cfg,
+    )
+    return backbone

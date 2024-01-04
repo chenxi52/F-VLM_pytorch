@@ -11,4 +11,4 @@ from .prompt_encoder import PromptEncoder
 from .transformer import TwoWayTransformer
 from .sam_mask_head import samMaskHead
 from .tiny_vit_sam import TinyViT
-from .clip_fpn import build_clip_fpn_backbone
+from .Samfpn import SAMAggregatorNeck, SAMVitDet

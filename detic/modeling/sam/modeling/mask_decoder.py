@@ -7,9 +7,7 @@
 import torch
 from torch import nn
 from torch.nn import functional as F
-
 from typing import List, Tuple, Type
-
 from .common import LayerNorm2d
 
 

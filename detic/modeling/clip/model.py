@@ -398,13 +398,16 @@ class CLIP(nn.Module):
     @property
     def dtype(self):
         return self.visual.conv1.weight.dtype
-
+    
+    @torch.no_grad()
     def encode_image(self, image):
         return self.visual(image.type(self.dtype))
-
+    
+    @torch.no_grad()
     def encode_image_feature(self,image):
         return self.visual.forward_featuremap(image.type(self.dtype))
     
+    @torch.no_grad()
     def encode_text(self, text):
         x = self.token_embedding(text).type(self.dtype)  # [batch_size, n_ctx, d_model]
 

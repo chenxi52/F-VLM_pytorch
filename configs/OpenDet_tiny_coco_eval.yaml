@@ -1,21 +1,17 @@
 _BASE_: "OpenDet_tiny_coco.yaml"
 MODEL:
   BACKBONE:
-    TYPE: "vit_t"
-    CLIP_TYPE: "RN50"
+    SAM_TYPE: "vit_t"
+    TYPE: "RN50"
   CLIP_TEXT_FEATS_PATH: "datasets/coco/coco_cls.pkl"
   WEIGHTS: ""
   SAM_WEIGHTS: "mobile_sam.pt"
-  PROPOSAL_GENERATOR:
-    NAME: "SAMRPN"
-  SAM_PIXEL_MEAN: [123.675, 116.280, 103.530]
-  SAM_PIXEL_STD: [58.395, 57.12, 57.375]
   RPN:
-    HEAD_NAME: "StandardRPNHead"
-    POST_NMS_TOPK_TEST: 100
+    POST_NMS_TOPK_TEST: 500
     BATCH_SIZE_PER_IMAGE: 256
   ROI_HEADS:
     NMS_THRESH_TEST: 0.4
+    SCORE_THRESH_TEST: 0.0
     BATCH_SIZE_PER_IMAGE: 128
     NUM_CLASSES: 80 # num of seen classes
   ROI_BOX_HEAD:
@@ -43,5 +39,6 @@ TEST:
   IMS_PER_BATCH: 4 #every gpu has most 2 images  # change
   SCORE_TYPE: 'cls'
   GEOMETRIC_FACT: 0.35
+  USE_IOU_SCORE: False
 OUTPUT_DIR: './output/clipRpn/SamOn'
 EVAL_AR: False

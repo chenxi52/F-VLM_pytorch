@@ -104,7 +104,7 @@ class ImageEncoderViT(nn.Module):
         )
         # input:(N,C, H,W) (*, channel)
         # self.norm = nn.LayerNorm(embed_dim)
-
+    @torch.no_grad()
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = torch.stack([self.preprocess(i)  for i in x], dim=0)
         x = self.patch_embed(x)

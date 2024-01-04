@@ -1,7 +1,7 @@
 _BASE_: "Base_ov_mine.yaml"
 MODEL:
   BACKBONE:
-    CLIP_TYPE: "RN50"
+    TYPE: "RN50"
   CLIP_TEXT_FEATS_PATH: "datasets/coco/coco_cls_seen.pkl"
   RPN:
     POST_NMS_TOPK_TRAIN: 1000
