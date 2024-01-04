@@ -163,6 +163,7 @@ class samMaskHead(BaseMaskRCNNHead):
                 'add_position_emb': cfg.MODEL.ROI_MASK_HEAD.ADD_POSTTION_EMB,
 
                 'iou_loss_weight': cfg.MODEL.ROI_MASK_HEAD.IOU_LOSS_WEIGHT,
+                'use_sigmoid_ce': cfg.MODEL.ROI_BOX_HEAD.USE_SIGMOID_CE
                 }
     
     def forward(
@@ -254,7 +255,8 @@ class samMaskHead(BaseMaskRCNNHead):
             mask_loss, iou_loss = self.custom_mask_rcnn_loss(low_res_masks, instances, self.vis_period, select_fore_cls, iou_outs=iou_outs)
             loss ={"loss_mask": mask_loss * self.mask_loss_weight,
                    "loss_iou": iou_loss * self.iou_loss_weight,
-                   "loss_cls": self.softmax_cross_entropy_loss(logits_image, gt_classes) * self.mask_loss_weight,
+                   "loss_cls": self.softmax_cross_entropy_loss(logits_image, gt_classes) * self.mask_loss_weight if not self.use_sigmoid_ce
+                            else self.sigmoid_cross_entropy_loss(logits_image, gt_classes) * self.mask_loss_weight,
                    }
             return loss
         else:
@@ -309,7 +311,45 @@ class samMaskHead(BaseMaskRCNNHead):
             
         _log_classification_stats(pred_class_logits, gt_classes , 'fast_rcnn')
         return loss
+    
+    def sigmoid_cross_entropy_loss(self, pred_class_logits, gt_classes):
+        """
+        Args:
+            pred_class_logits: shape (N, K+1), scores for each of the N box. Each row contains the
+            scores for K object categories and 1 background class
+            gt_classes: a long tensor of shape R that contains the gt class label of each proposal.
+        """
+        if pred_class_logits.numel() == 0:
+            return pred_class_logits.new_zeros([1])[0]
 
+        N = pred_class_logits.shape[0]
+        K = pred_class_logits.shape[1] - 1
+
+        target = pred_class_logits.new_zeros(N, K + 1)
+        target[range(len(gt_classes)), gt_classes] = 1
+        target = target[:, :K]
+
+        cls_loss = F.binary_cross_entropy_with_logits(
+            pred_class_logits[:, :-1], target, reduction="none"
+        )
+
+        if self.use_fed_loss:
+            fed_loss_classes = self.get_fed_loss_classes(
+                gt_classes,
+                num_fed_loss_classes=self.fed_loss_num_classes,
+                num_classes=K,
+                weight=self.fed_loss_cls_weights,
+            )
+            fed_loss_classes_mask = fed_loss_classes.new_zeros(K + 1)
+            fed_loss_classes_mask[fed_loss_classes] = 1
+            fed_loss_classes_mask = fed_loss_classes_mask[:K]
+            weight = fed_loss_classes_mask.view(1, K).expand(N, K).float()
+        else:
+            weight = 1
+
+        loss = torch.sum(cls_loss * weight) / N
+        return loss
+    
     # @torch.jit.unused
     # def sigmoid_focal_loss(self, inputs, targets, gt_classes, alpha: float = 0.25, gamma: float = 2):
     #     """Compute the sigmoid focal loss."""

@@ -118,9 +118,9 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         weight = 1.
         if self.use_sigmoid_ce:
             if self.ignore_zero_cats:
-                assert NotImplementedError
-            else:
                 loss_cls = self.sigmoid_cross_entropy_loss(scores, gt_classes)
+            else:
+                assert NotImplementedError
         else:
             if self.ignore_zero_cats:
                 weight = weight * torch.cat([torch.ones(self.num_classes), torch.ones(1)*self.background_weight], dim=0).to(scores.device)

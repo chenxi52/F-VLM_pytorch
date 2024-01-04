@@ -153,12 +153,13 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
                               select_fore_cls=self.select_fore_cls)
 
     def _forward_box(self, attenpool, clip_final_feats: torch.Tensor, 
-                     features: List[torch.Tensor], 
+                     fpn_features: Dict[str, torch.Tensor], 
                      proposals: List[Instances]):
         """
         add VLM pooling layer
         clip_feats: [bsz, 2048, 32, 32]
         """
+        features = [fpn_features[f] for f in self.box_in_features]
         box_features = self.box_pooler(features, [x.proposal_boxes for x in proposals])
         box_features = self.box_head(box_features) # here, box
         predictions = self.box_predictor(box_features)
@@ -204,9 +205,8 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             # ROI assigner and sampler works.
             proposals = self.label_and_sample_proposals(proposals, targets)
         del targets
-        x = [fpn_features[f] for f in self.box_in_features]
         if self.training:
-            losses = self._forward_box(attnpool, clip_final_feats=None, features=x, proposals=proposals)
+            losses = self._forward_box(attnpool, clip_final_feats=None, fpn_features=fpn_features, proposals=proposals)
             if self.mask_on:
                 if sam_features is not None:
                     losses.update(self.forward_sam_mask(instances=proposals, 
@@ -216,10 +216,10 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
                                                         attnpool=None))
                 else: 
                     # FVLM
-                    losses.update(self._forward_mask(x, proposals))
+                    losses.update(self._forward_mask(fpn_features, proposals))
             return proposals, losses
         else:
-            pred_instances = self._forward_box(attnpool, clip_final_feats, x, proposals)
+            pred_instances = self._forward_box(attnpool, clip_final_feats, fpn_features, proposals)
             if self.mask_on:
                 if sam_features is not None:
                     assert pred_instances[0].has("pred_boxes")
@@ -229,7 +229,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
                                                            sam_features, 
                                                            attnpool=attnpool)
                 else:
-                    pred_instances = self.forward_with_given_boxes(x, pred_instances)
+                    pred_instances = self.forward_with_given_boxes(fpn_features, pred_instances)
             return pred_instances, {}
     
 

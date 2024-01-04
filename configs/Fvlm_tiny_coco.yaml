@@ -19,6 +19,7 @@ MODEL:
   ROI_MASK_HEAD:
     NAME: "MaskRCNNConvUpsampleHead"
   MASK_ON: True
+  SAM_ON: False
 DATASETS:
   TRAIN: ("coco_zeroshot_train",)
   TEST: ("coco_generalized_zeroshot_val",) 
