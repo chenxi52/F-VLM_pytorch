@@ -185,7 +185,10 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         vlm_scores = logits_scale * vlm_box_features @ (self.text_feats.t().to(vlm_box_features.device))
         num_inst_per_image = [len(p) for p in proposals]
         vlm_scores[:, self.unused_index] = float('-inf')
-        vlm_scores = torch.nn.functional.softmax(vlm_scores, dim=1)
+        if not self.use_sigmoid_ce:
+            vlm_scores = torch.nn.functional.softmax(vlm_scores, dim=1)
+        else:
+            vlm_scores = torch.sigmoid(vlm_scores)
         vlm_scores = vlm_scores.split(num_inst_per_image, dim=0)
         # scores are differnent for base and novel class, and background score comes from the detector
 
@@ -239,7 +242,8 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         assert ensembled_socres[:, self.unused_index].max() < 1e-5, 'unused classes should not be evaluated'
         
         ensembled_socres = torch.cat([ensembled_socres[:,:-1], scores[:, -1:]], dim=1)
-        ensembled_socres = ensembled_socres / ensembled_socres.sum(dim=1, keepdim=True)
+        if not self.use_sigmoid_ce:
+            ensembled_socres = ensembled_socres / ensembled_socres.sum(dim=1, keepdim=True)
         ensembled_socres = ensembled_socres[:, :-1]
         assert ensembled_socres[:, self.unused_index].max() < 1e-5, 'unused classes should not be evaluated'
 
