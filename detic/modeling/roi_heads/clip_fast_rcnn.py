@@ -117,10 +117,7 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
             proposal_boxes = gt_boxes = torch.empty((0, 4), device=proposal_deltas.device)
         weight = 1.
         if self.use_sigmoid_ce:
-            if self.ignore_zero_cats:
-                loss_cls = self.sigmoid_cross_entropy_loss(scores, gt_classes)
-            else:
-                assert NotImplementedError
+            loss_cls = self.sigmoid_cross_entropy_loss(scores, gt_classes)
         else:
             if self.ignore_zero_cats:
                 weight = weight * torch.cat([torch.ones(self.num_classes), torch.ones(1)*self.background_weight], dim=0).to(scores.device)
@@ -239,11 +236,10 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         base_scores = ((scores * self.base_ones)**(1-self.base_alpha)) * ((vlm_scores*self.base_ones)**(self.base_alpha))
         novel_scores = ((scores * self.novel_ones)**(1-self.novel_beta)) * ((vlm_scores*self.novel_ones)**(self.novel_beta))
         ensembled_socres = base_scores + novel_scores
-        assert ensembled_socres[:, self.unused_index].max() < 1e-5, 'unused classes should not be evaluated'
         
         ensembled_socres = torch.cat([ensembled_socres[:,:-1], scores[:, -1:]], dim=1)
-        if not self.use_sigmoid_ce:
-            ensembled_socres = ensembled_socres / ensembled_socres.sum(dim=1, keepdim=True)
+        # if not self.use_sigmoid_ce:
+        #     ensembled_socres = ensembled_socres / ensembled_socres.sum(dim=1, keepdim=True)
         ensembled_socres = ensembled_socres[:, :-1]
         assert ensembled_socres[:, self.unused_index].max() < 1e-5, 'unused classes should not be evaluated'
 

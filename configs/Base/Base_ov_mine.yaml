@@ -97,7 +97,6 @@ SOLVER:
 INPUT:
   TRAIN_SIZE: 1024
   TEST_SIZE: 1024 
-  TEST_INPUT_TYPE: ResizeLongestSize
   CUSTOM_AUG: ResizeLongestSize
   FORMAT: "RGB"
   MASK_FORMAT: "bitmask"

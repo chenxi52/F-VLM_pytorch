@@ -24,7 +24,6 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         *,
         mask_on: bool=True,
         input_size: int = 1024,
-        sam_on: bool = False,
         select_fore_cls: bool = False,
         box_prompter: str='Roi',
         add_pe_before_mask_pool: bool = False,
@@ -44,13 +43,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
                 continue
             else:
                 setattr(self, name, value)
-
-        if add_pe_before_mask_pool:
-            # tiny 320
-            in_channel = 256
-            if roi_prompter == 'FUSE' and roi_prompter_fuse_type == 'stack':
-                in_channel = in_channel * 2
-            self.sam_pe = SinePositionalEncoding(in_channel//2, normalize=True)
+        self.generator_pe = SinePositionalEncoding(num_feats=128, normalize=True)
 
     @classmethod
     def from_config(cls, cfg, input_shape):
@@ -83,92 +76,10 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         ret = super()._init_box_head(cfg, input_shape)
         box_head = ret["box_head"]
         #update the rcnn output layer
-        if not cfg.MODEL.SAM_ON:
-            ret.update(box_predictor = ClipRCNNOutputLayers(cfg, box_head.output_shape))
-        else:
-            # remove loss_cls
-            ret.update(box_predictor = SamRCNNOutputLayers(cfg, box_head.output_shape))
-        ret['sam_on'] = cfg.MODEL.SAM_ON
+        ret.update(box_predictor = ClipRCNNOutputLayers(cfg, box_head.output_shape))
+       
         ################
         return ret
-    
-    @classmethod
-    def _init_mask_head(cls, cfg, input_shape):
-        ret = super()._init_mask_head(cfg, input_shape) 
-        #HACK we set the fpn stride same between samFpn and clipFpn, so use the same mask pooler
-        if cfg.MODEL.SAM_ON:
-            ret['mask_in_features'] = cfg.MODEL.ROI_MASK_HEAD.IN_FEATURES
-        return ret
-
-    def forward_sam_mask(
-            self, 
-            instances: List[Instances], 
-            clip_features: [torch.Tensor, Dict[str, torch.Tensor]],
-            sam: nn.Module,
-            sam_features: [torch.Tensor,Dict[str, torch.Tensor]],
-            attnpool: nn.Module,
-            ):
-        """
-        Args:
-            img_features: features output by image_encoder
-            features: Multi-level clipFpn features
-            sam_features: Multi-level fpn features output by samFpn
-            instances (list[Instances]): 
-                proposals from rpn. the per-image instances to train/predict masks. 
-                have predicted_boxes of _forward_box_head
-                        In training, they can be the proposals.
-                        In inference, they can be the boxes predicted by R-CNN box head.
-        """
-        if self.training and self.select_fore_cls:
-            instances, _ = select_foreground_proposals(instances, self.num_classes)
-        boxes = [i.proposal_boxes if self.training else i.pred_boxes for i in instances]
-        sam_img_feats, sam_fpn_feats = sam_features
-        #add pe to sam_fpn_feats and get roi_mask_feats
-        
-        if self.roi_prompter == 'FUSE':
-            sam_fpn_feats = [sam_fpn_feats[f] for f in self.mask_in_features]
-            _, clip_fpn_feats = clip_features
-            clip_fpn_feats = [clip_fpn_feats[f] for f in self.box_in_features]
-            if self.roi_prompter_fuse_type == 'add':
-                fpn_feats = [feat1+ feat2 for feat1, feat2 in zip(sam_fpn_feats, clip_fpn_feats)]
-            elif self.roi_prompter_fuse_type == 'stack':
-                fpn_feats = [torch.cat((feat1, feat2), dim=1) for feat1, feat2 in zip(sam_fpn_feats, clip_fpn_feats)]
-        elif self.roi_prompter == 'SAM':
-            fpn_feats = [sam_fpn_feats[f] for f in self.mask_in_features]
-        elif self.roi_prompter == 'CLIP':
-            del sam_fpn_feats
-            _, clip_fpn_feats = clip_features
-            fpn_feats = [clip_fpn_feats[f] for f in self.box_in_features]
-        else:
-            assert NotImplementedError, 'roi_prompter should be in [FUSE, SAM, CLIP]'
-
-        # boxes is relative to origin image_size
-        if self.mask_pooler is not None:
-            if hasattr(self, 'sam_pe'):
-                b,_,h,w = fpn_feats[0].shape
-                pe = self.sam_pe(torch.zeros((b,h,w), device=fpn_feats[0].device, dtype=torch.bool))
-                for i in range(len(fpn_feats)):
-                    fpn_feats[i] = fpn_feats[i]+ nn.functional.interpolate(pe, size=fpn_feats[i].shape[-2:])
-            roi_feats = self.mask_pooler(fpn_feats, boxes)
-            
-            if len(roi_feats) == 0:
-                results_instances = []
-                for ins in instances:
-                    ins.pred_masks = torch.tensor([], device=ins.pred_classes.device)
-                    results_instances.append(ins)
-                return results_instances
-        else:
-            assert NotImplementedError, 'Mask pooler shoud be implemented.'
-
-        return self.mask_head(roi_features=roi_feats if not (self.box_prompter=='Box') else None, 
-                              instances=instances,
-                              sam=sam, 
-                              sam_features=sam_img_feats, 
-                              clip_features=clip_features, 
-                              boxes=boxes, 
-                              attnpool=attnpool,
-                              select_fore_cls=self.select_fore_cls,
-                              box_prompter=self.box_prompter)
 
     def _forward_box(self, attenpool, clip_final_feats: torch.Tensor, 
                      fpn_feats: Dict[str, torch.Tensor], 
@@ -196,10 +107,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         else:
             # propsal_boxes is relative to the original image size.
             # roi align will assign level
-            if not self.sam_on:
-                pred_instances, _ = self.box_predictor.inference(predictions, proposals, clip_final_feats, attenpool)
-            else: 
-                pred_instances, _ = self.box_predictor.inference(predictions, proposals)
+            pred_instances, _ = self.box_predictor.inference(predictions, proposals, clip_final_feats, attenpool)
             return pred_instances
         
 
@@ -224,34 +132,26 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
             proposals = self.label_and_sample_proposals(proposals, targets)
         del targets
         clip_img_feats, clip_fpn_feats = clip_features
+        ###########
+        x = [item[1] for item in list(clip_fpn_feats.items())]
+        bs, _, h, w = x[-1].shape
+        mask_pe = torch.zeros((bs, h, w), device=x[0].device, dtype=torch.bool)
+        img_feat_pe = self.generator_pe(mask_pe)
+        for i in range(len(x)):
+            x[i] = x[i] + torch.nn.functional.interpolate(img_feat_pe, size=x[i].shape[-2:], mode='bilinear', align_corners=False)
+        x = {list(clip_fpn_feats.keys())[i]: x[i] for i in range(len(clip_fpn_feats))}
+        ############
         if self.training:
             losses = self._forward_box(attnpool, clip_final_feats=None, fpn_feats=clip_fpn_feats, proposals=proposals)
             if self.mask_on:
-                if self.sam_on:
-                    losses.update(self.forward_sam_mask(instances=proposals, 
-                                                        clip_features=clip_features, 
-                                                        sam=sam, 
-                                                        sam_features=sam_features,
-                                                        attnpool=None))
-                else: 
-                    # FVLM
-                    losses.update(self._forward_mask(clip_fpn_feats, proposals))
+                losses.update(self._forward_mask(clip_fpn_feats, proposals))
             return proposals, losses
         else:
-            pred_instances = self._forward_box(attnpool, clip_img_feats, clip_fpn_feats, proposals)
+            pred_instances = self._forward_box(attnpool, clip_img_feats, x, proposals)
             if self.mask_on:
-                if self.sam_on:
-                    assert pred_instances[0].has("pred_boxes")
-                    pred_instances = self.forward_sam_mask(pred_instances, 
-                                                           clip_features, 
-                                                           sam, 
-                                                           sam_features, 
-                                                           attnpool=attnpool)
-                else:
-                    pred_instances = self.forward_with_given_boxes(clip_fpn_feats, pred_instances)
+                pred_instances = self.forward_with_given_boxes(x, pred_instances)
             return pred_instances, {}
     
-
     
 class SinePositionalEncoding(nn.Module):
     """Position encoding with sine and cosine functions.

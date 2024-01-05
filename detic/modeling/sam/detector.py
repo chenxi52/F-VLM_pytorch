@@ -30,39 +30,23 @@ class ClipOpenDetector(GeneralizedRCNN):
     @configurable
     def __init__(
         self,
-        sam_backbone=None,
         fp16=False,
-        sam_type=None,
         mask_thr_binary=0.5,
         do_postprocess=True,
         clip_model=None,
-        add_unfrozen='xxx',
         fpn_in_features=[],
         clip_train_size=1024,
         sam_on = False,
-        sam_pixel_mean=None,
-        sam_pixel_std=None,
-        sam_weights=None,
         eval_ar= False,
         amp_enabled=True,
         **kwargs
     ):
         self.fp16=fp16
         super().__init__(**kwargs)
-        self.register_buffer("sam_pixel_mean", torch.tensor(sam_pixel_mean).view(-1,1,1), False)
-        self.register_buffer("sam_pixel_std", torch.tensor(sam_pixel_std).view(-1,1,1), False)
         assert self.proposal_generator is not None
         
-        if sam_on:
-            self.sam = sam_model_registry[sam_type](checkpoint=sam_weights)
-            for name, params in self.sam.named_parameters():
-                if add_unfrozen in name: 
-                    params.requires_grad = True
-                else:
-                    params.requires_grad = False
-            self.sam_backbone = sam_backbone
-        else: self.sam = None
         self.sam_on = sam_on
+        self.sam = None
         self.clip = clip_model
         self.mask_thr_binary = mask_thr_binary
         self.do_postprocess = do_postprocess
@@ -89,33 +73,20 @@ class ClipOpenDetector(GeneralizedRCNN):
         # FPN backbone
         backbone = build_backbone(cfg, clip_model.visual.output_shape)
         # HACK tiny_sam output_channel == FPN.out_channels = 256
-        sam_backbone = SAMVitDet(
-            out_channels=cfg.MODEL.FPN.OUT_CHANNELS,
-            anchor_stride=cfg.MODEL.FPN.ANCHOR_STRIDE,
-            norm_cfg= {'type':'LN','requires_grad':True},
-            num_outs=len(cfg.MODEL.ROI_MASK_HEAD.IN_FEATURES)
-        ) if cfg.MODEL.SAM_ON else None
         ret=({
             "backbone": backbone, 
-            'sam_backbone': sam_backbone,
             "proposal_generator": build_proposal_generator(cfg, backbone.output_shape()),
             "roi_heads": build_roi_heads(cfg, backbone.output_shape()),
             "input_format": cfg.INPUT.FORMAT,
             "vis_period": cfg.VIS_PERIOD,
             "pixel_mean": cfg.MODEL.PIXEL_MEAN,
             "pixel_std": cfg.MODEL.PIXEL_STD,
-            "sam_pixel_mean": cfg.MODEL.SAM_PIXEL_MEAN,
-            "sam_pixel_std": cfg.MODEL.SAM_PIXEL_STD,
             "clip_model": clip_model,
             'fp16': cfg.FP16,
-            "sam_type": cfg.MODEL.BACKBONE.SAM_TYPE,
             "do_postprocess": cfg.TEST.DO_POSTPROCESS,
-            "add_unfrozen":cfg.MODEL.BACKBONE.ADD_UNFROZEN,
             "clip_train_size":cfg.INPUT.CLIP_TRAIN_SIZE,
             "mask_thr_binary":cfg.TEST.MASK_THR_BINARY,
             'fpn_in_features': cfg.MODEL.FPN.IN_FEATURES,
-            "sam_on": cfg.MODEL.SAM_ON,
-            "sam_weights": cfg.MODEL.SAM_WEIGHTS,
             "eval_ar": cfg.EVAL_AR,
             "amp_enabled": cfg.SOLVER.AMP.ENABLED
         })
@@ -132,8 +103,6 @@ class ClipOpenDetector(GeneralizedRCNN):
         if self.do_postprocess:
             assert not torch.jit.is_scripting(), \
                 "Scripting is not supported for postprocess."
-            if self.sam_on:
-                return self.postprocess(pred_instances=results, batched_inputs=batched_inputs, mask_threshold=self.mask_thr_binary)
             return GeneralizedRCNN._postprocess(results, batched_inputs, clip_images.image_sizes)
         else:
             return results
@@ -142,27 +111,19 @@ class ClipOpenDetector(GeneralizedRCNN):
     def extract_feat(self, images):
         # extrac feat from clip(multi-level feats) and sam;
         # to_imageList: padding by size_divisibility, 1024 by default
-        if self.sam_on: 
-            clip_images = self.norm_imageList(images, self.pixel_mean, self.pixel_std, norm_val=255.) # ImageList
-            sam_images = self.norm_imageList(images, self.sam_pixel_mean, self.sam_pixel_std, norm_val=1.)
-        else: 
-            clip_images = self.to_imageList(images)
-            
+   
+        clip_images = self.to_imageList(images)
         sam_feat = sam_fpn_feats = None
         # we set no_grad to clip and sam image extractor
         if self.amp_enabled:
             with autocast():
                 clip_features = self.clip.encode_image_feature(clip_images.tensor.half())
                 clip_fpn_features = self.backbone(clip_features)
-                if self.sam_on: 
-                    sam_feat, _ = self.sam.image_encoder(sam_images.tensor.half())
-                    sam_fpn_feats = self.sam_backbone(sam_feat.half())
+            
         else:
             clip_features = self.clip.encode_image_feature(clip_images.tensor.float())
             clip_fpn_features = self.backbone(clip_features)
-            if self.sam_on: 
-                sam_feat, _ = self.sam.image_encoder(sam_images.tensor.float())
-                sam_fpn_feats = self.sam_backbone(sam_feat)
+         
         return sam_feat, sam_fpn_feats, clip_features, clip_fpn_features, clip_images
     
 

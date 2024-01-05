@@ -8,6 +8,6 @@
 #SBATCH --output=.output/slurm_out/runjob.%J.out
 
 
-srun python train_net_stand.py --config-file configs/Fvlm_tiny_coco.yaml --num-gpus 8 \
-    OUTPUT_DIR output/clipRpn/FVLM/stand_1x\
-    MODEL.ROI_BOX_HEAD.USE_SIGMOID_CE False\
+srun --nodelist=gpu03 python train_net_stand.py --config-file configs/Base/Base_Fvlm_coco_1x.yaml --num-gpus 8 \
+    OUTPUT_DIR output/clipRpn/FVLM/stand_1x_sigCE\
+    MODEL.ROI_BOX_HEAD.USE_SIGMOID_CE True\
