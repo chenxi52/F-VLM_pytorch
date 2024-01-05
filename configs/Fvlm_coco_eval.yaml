@@ -1,7 +1,7 @@
-_BASE_: "Base_ov_mine.yaml"
+_BASE_: "Fvlm_coco.yaml"
 MODEL:
   BACKBONE:
-    CLIP_TYPE: "RN50"
+    TYPE: "RN50"
   CLIP_TEXT_FEATS_PATH: "datasets/coco/coco_cls.pkl"
   WEIGHTS: ""
   RPN:
@@ -14,15 +14,11 @@ MODEL:
     SCORE_THRESH_TEST: 0.02
     NUM_CLASSES: 80 # num of seen classes
   ROI_BOX_HEAD:
-    BACKGROUND_WEIGHT: 0.2
     CAT_FREQ_PATH: 'datasets/coco/zero-shot/instances_train2017_seen_2_oriorder_cat_info.json'
     BASE_ALPHA: 0.2
     NOVEL_BETA: 0.45
-  ROI_MASK_HEAD:
-    NAME: "MaskRCNNConvUpsampleHead"
   MASK_ON: True
 DATASETS:
-  TRAIN: ("coco_zeroshot_train",)
   TEST: ("coco_generalized_zeroshot_val",)
 DATALOADER:
   NUM_WORKERS: 4 # num_workers == batchsize_per_gpu
@@ -31,6 +27,5 @@ INPUT:
   CUSTOM_AUG: ResizeLongLSJ
 TEST:
   DETECTIONS_PER_IMAGE: 300  #test_topk_per_image
-  EVAL_PERIOD: 11250 # change
   IMS_PER_BATCH: 4 #every gpu has most 2 images  # change
 OUTPUT_DIR: 'output/clipRpn'
