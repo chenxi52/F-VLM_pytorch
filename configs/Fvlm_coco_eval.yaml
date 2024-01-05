@@ -14,10 +14,9 @@ MODEL:
     SCORE_THRESH_TEST: 0.02
     NUM_CLASSES: 80 # num of seen classes
   ROI_BOX_HEAD:
-    CAT_FREQ_PATH: 'datasets/coco/zero-shot/instances_train2017_seen_2_oriorder_cat_info.json'
+    USE_SIGMOID_CE: False
     BASE_ALPHA: 0.2
     NOVEL_BETA: 0.45
-  MASK_ON: True
 DATASETS:
   TEST: ("coco_generalized_zeroshot_val",)
 DATALOADER:

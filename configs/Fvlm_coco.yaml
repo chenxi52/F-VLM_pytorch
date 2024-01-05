@@ -20,7 +20,6 @@ MODEL:
   SAM_ON: False
 DATASETS:
   TRAIN: ("coco_zeroshot_train",)
-  TEST: ("coco_generalized_zeroshot_val",) 
 DATALOADER:
   NUM_WORKERS: 16 # num_workers == batchsize_per_gpu
 SOLVER:

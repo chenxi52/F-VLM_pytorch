@@ -174,7 +174,7 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         align vlm_box_features with text_feats
         """
         boxes = self.predict_boxes(predictions, proposals)
-        scores = self.predict_probs(predictions, proposals)
+        scores = self.predict_probs(predictions, proposals) # already softmax or sigmoid
         image_shapes = [x.image_size for x in proposals]
         
         vlm_box_features = self.test_pooler([clip_feats], [Boxes(box) for box in boxes])

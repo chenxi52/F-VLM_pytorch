@@ -12,3 +12,4 @@ from .transformer import TwoWayTransformer
 from .sam_mask_head import samMaskHead
 from .tiny_vit_sam import TinyViT
 from .Samfpn import SAMAggregatorNeck, SAMVitDet
+from .clip_fpn import ClipFPN

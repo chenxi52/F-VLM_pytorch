@@ -2,7 +2,7 @@ MODEL:
   META_ARCHITECTURE: "ClipOpenDetector" 
   BACKBONE:
     NAME: "build_clip_fpn_backbone" #SAM vit_h
-    TYPE: "ViT-B/16" # CLIP backbone
+    TYPE: "RN50" # CLIP backbone
     ADD_UNFROZEN: 'xxx' # unfrozen extra part of model, the name is relative to sam and clip
   WEIGHTS: ''
   FPN:

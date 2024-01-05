@@ -79,7 +79,6 @@ CLIP-main
 mprofile_20231208110905.dat
 .output/slurm_out/*
 
-run.sh
-eval.sh
+*.sh
 remove_lvis_rare.py
-run_lvis.sh
+

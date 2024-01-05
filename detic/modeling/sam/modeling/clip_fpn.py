@@ -20,7 +20,6 @@ def build_clip_fpn_backbone(cfg, input_shape=None):
         norm=cfg.MODEL.FPN.NORM,
         top_block=LastLevelMaxPool(),
         fuse_type=cfg.MODEL.FPN.FUSE_TYPE,
-        fp16=cfg.FP16
     )
     return backbone
 
@@ -32,7 +31,6 @@ class ClipFPN(FPN):
     _fuse_type: torch.jit.Final[str]
     def __init__(
         self,
-        # bottom_up,
         input_shapes,
         in_features,
         out_channels,
@@ -40,7 +38,6 @@ class ClipFPN(FPN):
         top_block=None,
         fuse_type="sum",
         square_pad=0,
-        fp16=True,
     ):
         """
         remove assert(bottom_up, Backbone)
@@ -101,17 +98,12 @@ class ClipFPN(FPN):
         self._square_pad = square_pad
         assert fuse_type in {"avg", "sum"}
         self._fuse_type = fuse_type
-        self.fp16 = fp16
 
     def forward(self, bottom_up_features):
         """
         bottom_up_features: inter_features from clip
         extract top_bottom features without grad
         """
-        # with torch.no_grad():
-        #     bottom_up_features = self.bottom_up.forward_featuremap(x)
-        # if self.fp16:
-        #     bottom_up_features = {k: v.half() for k, v in bottom_up_features.items()}   
         results = []
         prev_features = self.lateral_convs[0](bottom_up_features[self.in_features[-1]])
         results.append(self.output_convs[0](prev_features))
