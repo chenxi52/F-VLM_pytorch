@@ -15,7 +15,7 @@ MODEL:
     BBOX_REG_WEIGHTS: (10.0, 10.0, 5.0, 5.0)
     BACKGROUND_WEIGHT: 0.2
     IGNORE_ZERO_CATS: True 
-    CAT_FREQ_PATH: 'datasets/coco/zero-shot/instances_train2017_seen_2_oriorder_cat_info.json'
+    CAT_FREQ_PATH: ''
   ROI_MASK_HEAD:
     NAME: "MaskRCNNConvUpsampleHead"
   MASK_ON: True
@@ -27,11 +27,11 @@ DATALOADER:
 SOLVER:
   IMS_PER_BATCH: 64  # change  # max 8 imgs per batch
   BASE_LR: 0.02  # change0.000025
-  MAX_ITER: 112500
+  MAX_ITER: 11250
   CHECKPOINT_PERIOD: 10000  #  change
   OPTIMIZER: 'SGD'
   WEIGHT_DECAY: 0.01
-  LR_SCHEDULER_NAME: "WarupStepLR"
+  LR_SCHEDULER_NAME: "WarmupMultiStepLR"
   WARMUP_FACTOR: 0.01
   WARMUP_METHOD: "linear"
   WARMUP_ITERS: 1000
