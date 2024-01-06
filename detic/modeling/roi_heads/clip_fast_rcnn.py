@@ -88,14 +88,18 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         return ret 
     
     def forward(self,x):
-        x_norm = x/x.norm(dim=1, keepdim=True)
-        with autocast():
-            scores = self.logit_scale.exp() * x_norm @ (self.text_feats.t().to(x.device))
-            if not self.training:
-                scores[:, self.unused_index] = float('-inf')
+        scores = self.logit_scale.exp() * self.get_logits(x, self.text_feats)
+        if not self.training:
+            scores[:, self.unused_index] = float('-inf')
         proposal_deltas = self.bbox_pred(x)
         return  scores, proposal_deltas
     
+    def get_logits(self, img_feats, text_feats):
+        img_feats = img_feats/img_feats.norm(dim=1, keepdim=True)
+        text_feats = text_feats/text_feats.norm(dim=1, keepdim=True)
+        logits = img_feats @ (text_feats.t().to(img_feats.device)).to(torch.float32)
+        return logits
+
     def losses(self, predictions, proposals):
         """
         change cross_entropy weight of novel class to 0
@@ -179,7 +183,7 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         vlm_box_features = attenpool(vlm_box_features)
         vlm_box_features = vlm_box_features / vlm_box_features.norm(dim=1,keepdim=True)
         logits_scale = 1/0.01
-        vlm_scores = logits_scale * vlm_box_features @ (self.text_feats.t().to(vlm_box_features.device))
+        vlm_scores = logits_scale * self.get_logits(vlm_box_features, self.text_feats)
         num_inst_per_image = [len(p) for p in proposals]
         vlm_scores[:, self.unused_index] = float('-inf')
         if not self.use_sigmoid_ce:
@@ -238,8 +242,8 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         ensembled_socres = base_scores + novel_scores
         
         ensembled_socres = torch.cat([ensembled_socres[:,:-1], scores[:, -1:]], dim=1)
-        # if not self.use_sigmoid_ce:
-        #     ensembled_socres = ensembled_socres / ensembled_socres.sum(dim=1, keepdim=True)
+        if not self.use_sigmoid_ce:
+            ensembled_socres = ensembled_socres / ensembled_socres.sum(dim=1, keepdim=True)
         ensembled_socres = ensembled_socres[:, :-1]
         assert ensembled_socres[:, self.unused_index].max() < 1e-5, 'unused classes should not be evaluated'
 

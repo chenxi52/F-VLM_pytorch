@@ -23,13 +23,13 @@ DATASETS:
 DATALOADER:
   NUM_WORKERS: 16 # num_workers == batchsize_per_gpu
 SOLVER:
-  IMS_PER_BATCH: 16  # change  # max 8 imgs per batch
+  IMS_PER_BATCH: 64  # change  # max 8 imgs per batch
   BASE_LR: 0.02  # change0.000025
-  MAX_ITER: 90000
+  MAX_ITER: 112500
   CHECKPOINT_PERIOD: 10000  #  change
   OPTIMIZER: 'SGD'
-  WEIGHT_DECAY: 0.0001
-  LR_SCHEDULER_NAME: "WarmupCosineLR"
+  WEIGHT_DECAY: 0.01
+  LR_SCHEDULER_NAME: "WarupStepLR"
   WARMUP_FACTOR: 0.01
   WARMUP_METHOD: "linear"
   WARMUP_ITERS: 1000
@@ -44,3 +44,4 @@ TEST:
   EVAL_PERIOD: 900000000 # change
   IMS_PER_BATCH: 1 #every gpu has most 2 images  # change
 OUTPUT_DIR: 'output/clipRpn'
+FP16: True

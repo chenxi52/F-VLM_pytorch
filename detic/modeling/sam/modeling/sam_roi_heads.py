@@ -133,13 +133,13 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         del targets
         clip_img_feats, clip_fpn_feats = clip_features
         ###########
-        x = [item[1] for item in list(clip_fpn_feats.items())]
-        bs, _, h, w = x[-1].shape
-        mask_pe = torch.zeros((bs, h, w), device=x[0].device, dtype=torch.bool)
-        img_feat_pe = self.generator_pe(mask_pe)
-        for i in range(len(x)):
-            x[i] = x[i] + torch.nn.functional.interpolate(img_feat_pe, size=x[i].shape[-2:], mode='bilinear', align_corners=False)
-        x = {list(clip_fpn_feats.keys())[i]: x[i] for i in range(len(clip_fpn_feats))}
+        # x = [item[1] for item in list(clip_fpn_feats.items())]
+        # bs, _, h, w = x[-1].shape
+        # mask_pe = torch.zeros((bs, h, w), device=x[0].device, dtype=torch.bool)
+        # img_feat_pe = self.generator_pe(mask_pe)
+        # for i in range(len(x)):
+        #     x[i] = x[i] + torch.nn.functional.interpolate(img_feat_pe, size=x[i].shape[-2:], mode='bilinear', align_corners=False)
+        # clip_fpn_feats = {list(clip_fpn_feats.keys())[i]: x[i] for i in range(len(clip_fpn_feats))}
         ############
         if self.training:
             losses = self._forward_box(attnpool, clip_final_feats=None, fpn_feats=clip_fpn_feats, proposals=proposals)
@@ -147,9 +147,9 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
                 losses.update(self._forward_mask(clip_fpn_feats, proposals))
             return proposals, losses
         else:
-            pred_instances = self._forward_box(attnpool, clip_img_feats, x, proposals)
+            pred_instances = self._forward_box(attnpool, clip_img_feats, clip_fpn_feats, proposals)
             if self.mask_on:
-                pred_instances = self.forward_with_given_boxes(x, pred_instances)
+                pred_instances = self.forward_with_given_boxes(clip_fpn_feats, pred_instances)
             return pred_instances, {}
     
     
