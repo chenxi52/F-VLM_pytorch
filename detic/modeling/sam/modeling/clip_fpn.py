@@ -43,6 +43,7 @@ class ClipFPN(FPN):
         remove assert(bottom_up, Backbone)
         output: [p1,p2...]
         fp16: whether to use fp16
+        add bn norm at output_conv
         """
         super(FPN, self).__init__()
         assert in_features, in_features
@@ -55,13 +56,14 @@ class ClipFPN(FPN):
         lateral_convs = []
         output_convs = []
 
+
         use_bias = norm == ""
         for idx, in_channels in enumerate(in_channels_per_feature):
-            lateral_norm = get_norm(norm, out_channels)
-            output_norm = get_norm(norm, out_channels)
+            lateral_norm = get_norm("", out_channels)
+            output_norm = get_norm("SyncBN", out_channels)
 
             lateral_conv = Conv2d(
-                in_channels, out_channels, kernel_size=1, bias=use_bias, norm=lateral_norm
+                in_channels, out_channels, kernel_size=1, bias=False, norm=lateral_norm
             )
             output_conv = Conv2d(
                 out_channels,

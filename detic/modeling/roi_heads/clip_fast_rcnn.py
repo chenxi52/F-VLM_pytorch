@@ -15,6 +15,7 @@ import numpy as np
 import pickle
 from detectron2.modeling.poolers import ROIPooler
 from torch.cuda.amp import autocast
+import fvcore.nn.weight_init as weight_init
 from detic.data.datasets.coco_zeroshot import get_contigous_ids, _get_metadata
 __all__ = ["SamRCNNOutputLayers"]
 logger = logging.getLogger(__name__)
@@ -42,7 +43,8 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
     ):
         super().__init__(input_shape, **kwargs)
         self.logit_scale = nn.Parameter(torch.ones([])*np.log(1/0.07))
-        self.cls_score = None
+        del self.cls_score
+        del self.bbox_pred
         if ignore_zero_cats:
             # 输出基于总类别数量的 continuous id
             base_ones = torch.zeros(len(get_contigous_ids('all')))
@@ -55,6 +57,18 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
             novel_ones[get_contigous_ids('unseen')] = 1
             novel_ones = torch.cat([novel_ones, torch.ones(1)]).to(torch.bool)
             self.register_buffer('novel_ones', novel_ones)
+
+            input_size = input_shape.channels * \
+                (input_shape.width or 1) * (input_shape.height or 1)
+            self.bbox_pred = nn.Sequential(
+                nn.Linear(input_size, input_size),
+                nn.ReLU(inplace=True),
+                nn.Linear(input_size, 4)
+            )
+            weight_init.c2_xavier_fill(self.bbox_pred[0])
+            nn.init.normal_(self.bbox_pred[-1].weight, std=0.001)
+            nn.init.constant_(self.bbox_pred[-1].bias, 0)
+
         self.ignore_zero_cats = ignore_zero_cats
         self.use_fed_loss = use_fed_loss
         self.fed_loss_num_cat = fed_loss_num_cat
@@ -106,6 +120,7 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         gt_classes = (
             cat([p.gt_classes for p in proposals], dim=0) if len(proposals) else torch.empty(0)
         )
+        # sigmoid ce
         _log_classification_stats(scores, gt_classes)
 
         if len(proposals):
