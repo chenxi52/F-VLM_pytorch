@@ -237,18 +237,31 @@ def main(args):
     clip_model = freeze_module(clip_model)
     model.clip = clip_model
     ###############
-    if extract_text_feat:
-        text_feats =  get_custom_text_feat(clip_model,constants.COCO_SEEN_CLS)
-        with open('datasets/coco/coco_cls_seen.pkl', 'rb') as f:
-            save_text = pickle.load(f)
-        if torch.all(text_feats == save_text):
-            logger.info('text feats are the same')
+    if 'coco' in cfg.DATASETS.TRAIN[0]:
+        if not args.eval_only:
+            text_feats =  get_custom_text_feat(clip_model,constants.COCO_SEEN_CLS)
+            with open('datasets/coco/coco_cls_seen.pkl', 'rb') as f:
+                save_text = pickle.load(f)
+            if torch.all(text_feats == save_text.to(text_feats.device)):
+                logger.info('text feats are the same')
+            else:
+                logger.info('text feats are different')
+                logger.info(torch.where(text_feats != save_text))
+                with open('datasets/coco/coco_cls_seen.pkl', 'wb') as f:
+                    pickle.dump(text_feats, f)
+                # sys.exit()
         else:
-            logger.info('text feats are different')
-            logger.info(torch.where(text_feats != save_text))
-            with open('datasets/coco/coco_cls_seen.pkl', 'wb') as f:
-                pickle.dump(text_feats, f)
-        # sys.exit()
+            text_feats =  get_custom_text_feat(clip_model,constants.COCO_INSTANCE_CLASSES)
+            with open('datasets/coco/coco_cls.pkl', 'rb') as f:
+                save_text = pickle.load(f)
+            if torch.all(text_feats == save_text.to(text_feats.device)):
+                logger.info('text feats are the same')
+            else:
+                logger.info('text feats are different')
+                logger.info(torch.where(text_feats != save_text))
+                with open('datasets/coco/coco_cls.pkl', 'wb') as f:
+                    pickle.dump(text_feats, f)
+    else: NotImplementedError
     ###############
     if args.eval_only:
         DetectionCheckpointer(model, save_dir=cfg.OUTPUT_DIR).resume_or_load(
@@ -268,7 +281,7 @@ def main(args):
 
 
 if __name__ == "__main__":
-    extract_text_feat = True
+    
     args = default_argument_parser().parse_args()
     launch(
         main,

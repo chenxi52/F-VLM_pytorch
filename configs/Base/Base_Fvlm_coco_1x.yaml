@@ -44,4 +44,4 @@ TEST:
   DETECTIONS_PER_IMAGE: 300  #test_topk_per_image
   EVAL_PERIOD: 900000000 # change
   IMS_PER_BATCH: 1 #every gpu has most 2 images  # change
-OUTPUT_DIR: 'output/clipRpn'
+OUTPUT_DIR: 'output/clipRpn/FVLM'
