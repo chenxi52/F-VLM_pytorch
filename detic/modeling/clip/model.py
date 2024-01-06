@@ -207,6 +207,12 @@ class ModifiedResNet(nn.Module):
     @property
     def output_shape(self):
         # stride 相对原图大小
+        '''{'stem': ShapeSpec(channels=64, height=None, width=None, stride=4), 
+        'res2': ShapeSpec(channels=256, height=None, width=None, stride=4), 
+        'res3': ShapeSpec(channels=512, height=None, width=None, stride=8), 
+        'res4': ShapeSpec(channels=1024, height=None, width=None, stride=16), 
+        'res5': ShapeSpec(channels=2048, height=None, width=None, stride=32), 
+        'atten': ShapeSpec(channels=2048, height=None, width=None, stride=32)}'''
         return {name: ShapeSpec(channels=self._out_feature_channels[name],stride=self._out_feature_strides[name])
                  for name  in ['stem', 'res2', 'res3', 'res4', 'res5', 'atten']}
                 

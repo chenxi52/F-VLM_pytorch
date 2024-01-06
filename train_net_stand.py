@@ -11,6 +11,7 @@ from detectron2.checkpoint import PeriodicCheckpointer,DetectionCheckpointer
 from detectron2.config import get_cfg
 from detectron2.data import MetadataCatalog, build_detection_test_loader 
 from detectron2.data.build import build_detection_train_loader
+from detic.modeling.clip import clip
 
 from detectron2.engine import default_argument_parser, default_setup, launch
 from detectron2.evaluation import (
@@ -39,8 +40,12 @@ from detic.evaluation.custom_coco_eval import CustomCOCOEvaluator
 from detic.evaluation.custom_lvis_eval import CustomLVISEvaluator,LVISEvaluatorFixedAP
 import wandb
 import torch.nn as nn
+from detic.prompt_engineering import get_prompt_templates
+from detic import constants
+import pickle
+import os
+import sys
 logger = logging.getLogger("detectron2")
-
 
 def do_test(cfg, model):
     results = OrderedDict()
@@ -81,15 +86,8 @@ def do_test(cfg, model):
 
 
 def do_train(cfg, model, resume=False):
-    if cfg.SOLVER.USE_CUSTOM_SOLVER:
-        # also set requires_grad for module
-        optimizer = build_sam_optimizer(cfg, model, logger)
-    else:
-        assert cfg.SOLVER.OPTIMIZER == 'SGD'
-        assert cfg.SOLVER.CLIP_GRADIENTS.CLIP_TYPE != 'full_model'
-        assert cfg.SOLVER.BACKBONE_MULTIPLIER == 1.
-        optimizer = build_optimizer(cfg, model)
-
+    # also set requires_grad for module
+    optimizer = build_sam_optimizer(cfg, model, logger)
     scheduler = build_lr_scheduler(cfg, optimizer)
     checkpointer = DetectionCheckpointer(
         model, cfg.OUTPUT_DIR, optimizer=optimizer, scheduler=scheduler, 
@@ -190,7 +188,41 @@ def setup(args):
     setup_logger(output=cfg.OUTPUT_DIR, \
         distributed_rank=comm.get_rank(), name="detic")
     return cfg
+from detectron2.layers.batch_norm import get_norm, FrozenBatchNorm2d
 
+def freeze_module(x):
+    """
+    """
+    for p in x.parameters():
+        p.requires_grad = False
+    FrozenBatchNorm2d.convert_frozen_batchnorm(x)
+    return x
+
+@torch.no_grad()
+def get_custom_text_feat(clip_model, class_names):
+    def extract_mean_emb(text):
+        tokens = clip.tokenize(text).cuda()
+        if len(text) > 10000:
+            text_features = torch.cat([
+                clip_model.encode_text(text[:len(text) // 2]),
+                clip_model.encode_text(text[len(text) // 2:])],
+                dim=0)
+        else:
+            text_features = clip_model.encode_text(tokens)
+        
+        text_features = torch.mean(text_features, 0, keepdims=True)
+        return text_features[0]
+
+    templates = get_prompt_templates()
+    clss_embeddings = []
+    for clss in class_names:
+        txts = [template.format(clss.replace('-other','').replace('-merged','').replace('-stuff','')) for template in templates]
+        clss_embeddings.append(extract_mean_emb(txts))
+    txts = ['background']
+    clss_embeddings.append(extract_mean_emb(txts))
+    text_emb = torch.stack(clss_embeddings, dim=0)
+    text_emb /= text_emb.norm(dim=-1, keepdim=True) 
+    return text_emb
 
 def main(args):
     cfg = setup(args)
@@ -199,6 +231,25 @@ def main(args):
         wandb.init(project='SamDetector', name=TIMESTAMP, config=cfg)
 
     model = build_model(cfg)
+    clip_model, _ = clip.load(cfg.MODEL.BACKBONE.TYPE)
+    if not args.eval_only:
+        model.train()
+    clip_model = freeze_module(clip_model)
+    model.clip = clip_model
+    ###############
+    if extract_text_feat:
+        text_feats =  get_custom_text_feat(clip_model,constants.COCO_SEEN_CLS)
+        with open('datasets/coco/coco_cls_seen.pkl', 'rb') as f:
+            save_text = pickle.load(f)
+        if torch.all(text_feats == save_text):
+            logger.info('text feats are the same')
+        else:
+            logger.info('text feats are different')
+            logger.info(torch.where(text_feats != save_text))
+            with open('datasets/coco/coco_cls_seen.pkl', 'wb') as f:
+                pickle.dump(text_feats, f)
+        # sys.exit()
+    ###############
     if args.eval_only:
         DetectionCheckpointer(model, save_dir=cfg.OUTPUT_DIR).resume_or_load(
             cfg.MODEL.WEIGHTS, resume=args.resume
@@ -210,12 +261,14 @@ def main(args):
         model = DistributedDataParallel(
             model, device_ids=[comm.get_local_rank()], broadcast_buffers=False, find_unused_parameters=True
         )
+    
     do_train(cfg, model, resume=args.resume)
     # return do_test(cfg, model)
     return None
 
 
 if __name__ == "__main__":
+    extract_text_feat = True
     args = default_argument_parser().parse_args()
     launch(
         main,

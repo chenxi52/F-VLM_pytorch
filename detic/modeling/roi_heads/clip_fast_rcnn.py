@@ -32,7 +32,6 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         input_shape: ShapeSpec,
         text_feats: torch.Tensor,
         ignore_zero_cats: bool,
-        cat_freq_path: str,
         use_fed_loss: bool,
         fed_loss_num_cat: int,
         base_alpha: float,
@@ -72,7 +71,6 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
             text_feats = pickle.load(f)
         ret['text_feats'] = text_feats
         ret['ignore_zero_cats'] = cfg.MODEL.ROI_BOX_HEAD.IGNORE_ZERO_CATS
-        ret['cat_freq_path'] = cfg.MODEL.ROI_BOX_HEAD.CAT_FREQ_PATH
         ret['use_fed_loss'] = cfg.MODEL.ROI_BOX_HEAD.USE_FED_LOSS
         ret['fed_loss_num_cat'] = cfg.MODEL.NUM_SAMPLE_CATS
         ret['base_alpha'] = cfg.MODEL.ROI_BOX_HEAD.BASE_ALPHA
