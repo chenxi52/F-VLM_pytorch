@@ -47,7 +47,7 @@ def do_test(cfg, model):
     for dataset_name in cfg.DATASETS.TEST:
         #####
         mapper = SamDatasetMapper(
-                cfg, False, augmentations=build_custom_augmentation(cfg, False))
+                cfg, False, augmentations=build_custom_augmentation(cfg, is_train=False))
         data_loader = build_detection_test_loader(cfg, dataset_name, mapper=mapper)
         #####
         output_folder = os.path.join(
@@ -81,8 +81,6 @@ def do_test(cfg, model):
 
 
 def do_train(cfg, model, resume=False):
-    # set_model_mode(model)
-    # model.train()
     if cfg.SOLVER.USE_CUSTOM_SOLVER:
         # also set requires_grad for module
         optimizer = build_sam_optimizer(cfg, model, logger)
@@ -176,14 +174,6 @@ def do_train(cfg, model, resume=False):
                     loss_dict_reduced['total_loss'] = losses_reduced
                     wandb.log(loss_dict_reduced)
             periodic_checkpointer.step(iteration)
-
-
-def set_model_mode(model):
-    model.train()
-    # 如果模型是 DDP 模型，获取其内部的原始模型
-    if isinstance(model, nn.parallel.DistributedDataParallel):
-        model = model.module
-    model.sam.eval()
 
 def setup(args):
     """

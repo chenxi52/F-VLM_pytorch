@@ -11,7 +11,7 @@ MODEL:
     NUM_CLASSES: 48 # num of seen classes
   ROI_BOX_HEAD:
     BBOX_REG_WEIGHTS: (10.0, 10.0, 5.0, 5.0)
-    BACKGROUND_WEIGHT: 0.9
+    BACKGROUND_WEIGHT: 0.2
     IGNORE_ZERO_CATS: True 
     CAT_FREQ_PATH: 'datasets/coco/zero-shot/instances_train2017_seen_2_oriorder_cat_info.json'
   ROI_MASK_HEAD:

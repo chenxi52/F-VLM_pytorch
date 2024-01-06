@@ -47,6 +47,7 @@ class ClipOpenDetector(GeneralizedRCNN):
         
         self.sam_on = sam_on
         self.sam = None
+        # if set here, the clip is loaded again?
         self.clip = clip_model
         self.mask_thr_binary = mask_thr_binary
         self.do_postprocess = do_postprocess
