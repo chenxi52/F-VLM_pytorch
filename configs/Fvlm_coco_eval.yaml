@@ -2,7 +2,7 @@ _BASE_: "Fvlm_coco.yaml"
 MODEL:
   BACKBONE:
     TYPE: "RN50"
-  CLIP_TEXT_FEATS_PATH: "datasets/coco/coco_cls.pkl"
+  CLIP_TEXT_FEATS_PATH: "datasets/coco/embeddings/coco_embed_backto_last.npy"
   WEIGHTS: ""
   FPN:
     ADD_PE: False #!!!!!!

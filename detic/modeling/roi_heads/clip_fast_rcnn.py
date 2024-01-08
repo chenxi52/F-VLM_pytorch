@@ -32,7 +32,7 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
     def __init__(
         self,
         input_shape: ShapeSpec,
-        text_feats: torch.Tensor,
+        text_feats_path: str,
         ignore_zero_cats: bool,
         use_fed_loss: bool,
         fed_loss_num_cat: int,
@@ -78,15 +78,15 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         self.novel_beta = novel_beta
         self.test_pooler = test_pooler
         self.background_weight = background_weight
+        text_feats = np.load(text_feats_path, allow_pickle=True)
+        text_feats = torch.from_numpy(text_feats).to(torch.float32)
         self.register_buffer('text_feats', text_feats)
         self.use_focal_ce = use_focal_ce
 
     @classmethod
     def from_config(cls, cfg, input_shape):
         ret = super().from_config(cfg, input_shape)
-        with open(cfg.MODEL.CLIP_TEXT_FEATS_PATH,'rb') as f:
-            text_feats = pickle.load(f).to(torch.float32)
-        ret['text_feats'] = text_feats
+        ret['text_feats_path'] = cfg.MODEL.CLIP_TEXT_FEATS_PATH
         ret['ignore_zero_cats'] = cfg.MODEL.ROI_BOX_HEAD.IGNORE_ZERO_CATS
         ret['use_fed_loss'] = cfg.MODEL.ROI_BOX_HEAD.USE_FED_LOSS
         ret['fed_loss_num_cat'] = cfg.MODEL.NUM_SAMPLE_CATS
@@ -105,8 +105,6 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
     
     def forward(self,x):
         scores = self.logit_scale.exp() * self.get_logits(x, self.text_feats)
-        if not self.training:
-            scores[:, self.unused_index] = float('-inf')
         proposal_deltas = self.bbox_pred(x)
         return  scores, proposal_deltas
     
@@ -145,7 +143,8 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
             loss_cls = self.sigmoid_focal_loss(scores, gt_classes)
         else:
             if self.ignore_zero_cats:
-                weight = weight * torch.cat([torch.ones(self.num_classes), torch.ones(1)*self.background_weight], dim=0).to(scores.device)
+                weight = torch.ones(91).to(scores.device)
+                weight[self.num_classes] *= self.background_weight
             loss_cls = cross_entropy(scores, gt_classes, reduction="mean", weight=weight)
             
         losses = {

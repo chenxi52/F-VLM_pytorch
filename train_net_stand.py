@@ -241,39 +241,35 @@ def main(args):
     # text_feats = get_custom_text_feat(cfg.MODEL.BACKBONE.TYPE, clip_model, constants.COCO_INSTANCE_CLASSES )
     # text_emb = np.load('datasets/coco/embeddings/resnet_50/coco_embed.npy')
     # text_emb= torch.tensor(text_emb).to(text_feats.device)
-    # # import ipdb; ipdb.set_trace()
     # sys.exit()
     if 'coco' in cfg.DATASETS.TRAIN[0]:
-    # if torch.all(text_feats == save_text.to(text_feats.device)):
-    #     logger.info('text feats are the same')
-    # else:
-    #     logger.info('text feats are different')
-    #     logger.info(torch.where(text_feats != save_text))
-
-        text_feats = get_custom_text_feat(cfg.MODEL.BACKBONE.TYPE, clip_model, constants.COCO_SEEN_CLS if not args.eval_only else constants.COCO_INSTANCE_CLASSES)
-        with open('datasets/coco/coco_cls_seen.pkl' if not args.eval_only else 'datasets/coco/coco_cls.pkl', 'rb') as f:
-            save_text = pickle.load(f)
-        if torch.all(text_feats == save_text.to(text_feats.device)):
-            logger.info('text feats are the same')
-        else:
-            logger.info('text feats are different')
-            logger.info(torch.where(text_feats != save_text))
-            with open('datasets/coco/coco_cls_seen.pkl' if not args.eval_only else 'datasets/coco/coco_cls.pkl', 'wb') as f:
-                pickle.dump(text_feats, f)
-    elif 'lvis' in cfg.DATASETS.TRAIN[0]:
-        import ipdb; ipdb.set_trace()
-        thing_classes = MetadataCatalog.get(cfg.DATASETS.TRAIN[0]).thing_classes
+        text_feats = np.load('datasets/coco/embeddings/resnet_50/coco_embed.npy', allow_pickle=True)
+        text_feats = text_feats[:91]
+        text_feats = np.concatenate((text_feats[1:81], text_feats[:1], text_feats[81:]), axis=0)
+        np.save('datasets/coco/embeddings/resnet_50/coco_embed_backto_last.npy', text_feats)
+    #     with open('datasets/coco/coco_cls_seen.pkl' if not args.eval_only else 'datasets/coco/coco_cls.pkl', 'rb') as f:
+    #         save_text = pickle.load(f)
+    #     if torch.all(text_feats == save_text.to(text_feats.device)):
+    #         logger.info('text feats are the same')
+    #     else:
+    #         logger.info('text feats are different')
+    #         logger.info(torch.where(text_feats != save_text))
+    #         with open('datasets/coco/coco_cls_seen.pkl' if not args.eval_only else 'datasets/coco/coco_cls.pkl', 'wb') as f:
+    #             pickle.dump(text_feats, f)
+    # elif 'lvis' in cfg.DATASETS.TRAIN[0]:
+    #     import ipdb; ipdb.set_trace()
+    #     thing_classes = MetadataCatalog.get(cfg.DATASETS.TRAIN[0]).thing_classes
         
-        text_feats = get_custom_text_feat(cfg.MODEL.BACKBONE.TYPE, thing_classes)
-        with open('datasets/lvis/lvis_base_cls.pkl' if not args.eval_only else 'datasets/lvis/lvis_cls.pkl', 'rb') as f:
-            save_text = pickle.load(f)
-        if torch.all(text_feats == save_text.to(text_feats.device)):
-            logger.info('text feats are the same')
-        else:
-            logger.info('text feats are different')
-            logger.info(torch.where(text_feats != save_text))
-            with open('datasets/lvis/lvis_base_cls.pkl' if not args.eval_only else 'datasets/lvis/lvis_cls.pkl', 'wb') as f:
-                pickle.dump(text_feats, f)
+    #     text_feats = get_custom_text_feat(cfg.MODEL.BACKBONE.TYPE, thing_classes)
+    #     with open('datasets/lvis/lvis_base_cls.pkl' if not args.eval_only else 'datasets/lvis/lvis_cls.pkl', 'rb') as f:
+    #         save_text = pickle.load(f)
+    #     if torch.all(text_feats == save_text.to(text_feats.device)):
+    #         logger.info('text feats are the same')
+    #     else:
+    #         logger.info('text feats are different')
+    #         logger.info(torch.where(text_feats != save_text))
+    #         with open('datasets/lvis/lvis_base_cls.pkl' if not args.eval_only else 'datasets/lvis/lvis_cls.pkl', 'wb') as f:
+    #             pickle.dump(text_feats, f)
     #################
     if args.eval_only:
         DetectionCheckpointer(model, save_dir=cfg.OUTPUT_DIR).resume_or_load(
@@ -300,17 +296,3 @@ if __name__ == "__main__":
         dist_url=args.dist_url,
         args=(args,),
     )
-
-
-if __name__ == "__main__":
-    
-    args = default_argument_parser().parse_args()
-    launch(
-        main,
-        args.num_gpus,
-        num_machines=args.num_machines,
-        machine_rank=args.machine_rank,
-        dist_url=args.dist_url,
-        args=(args,),
-    )
-    
