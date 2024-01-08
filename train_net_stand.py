@@ -12,7 +12,7 @@ from detectron2.config import get_cfg
 from detectron2.data import MetadataCatalog, build_detection_test_loader 
 from detectron2.data.build import build_detection_train_loader
 from detic.modeling.clip import clip
-
+import numpy as np
 from detectron2.engine import default_argument_parser, default_setup, launch
 from detectron2.evaluation import (
     COCOEvaluator,
@@ -45,6 +45,8 @@ from detic import constants
 import pickle
 import os
 import sys
+import numpy as np
+
 logger = logging.getLogger("detectron2")
 
 def do_test(cfg, model):
@@ -199,7 +201,7 @@ def freeze_module(x):
     return x
 
 @torch.no_grad()
-def get_custom_text_feat(clip_model, class_names):
+def get_custom_text_feat(clip_name, clip_model, class_names):
     def extract_mean_emb(text):
         tokens = clip.tokenize(text).cuda()
         if len(text) > 10000:
@@ -218,10 +220,9 @@ def get_custom_text_feat(clip_model, class_names):
     for clss in class_names:
         txts = [template.format(clss.replace('-other','').replace('-merged','').replace('-stuff','')) for template in templates]
         clss_embeddings.append(extract_mean_emb(txts))
-    txts = ['background']
-    clss_embeddings.append(extract_mean_emb(txts))
+    background_embedding, _ = np.load(f'./datasets/{clip_name.replace("RN", "r")}_bg_empty_embed.npy', allow_pickle=True)
+    clss_embeddings.append(torch.tensor(background_embedding).squeeze().to(clss_embeddings[0].device))
     text_emb = torch.stack(clss_embeddings, dim=0)
-    text_emb /= text_emb.norm(dim=-1, keepdim=True) 
     return text_emb
 
 def main(args):
@@ -236,33 +237,44 @@ def main(args):
         model.train()
     clip_model = freeze_module(clip_model)
     model.clip = clip_model
-    ###############
+    ##############
+    # text_feats = get_custom_text_feat(cfg.MODEL.BACKBONE.TYPE, clip_model, constants.COCO_INSTANCE_CLASSES )
+    # text_emb = np.load('datasets/coco/embeddings/resnet_50/coco_embed.npy')
+    # text_emb= torch.tensor(text_emb).to(text_feats.device)
+    # # import ipdb; ipdb.set_trace()
+    # sys.exit()
     if 'coco' in cfg.DATASETS.TRAIN[0]:
-        if not args.eval_only:
-            text_feats =  get_custom_text_feat(clip_model,constants.COCO_SEEN_CLS)
-            with open('datasets/coco/coco_cls_seen.pkl', 'rb') as f:
-                save_text = pickle.load(f)
-            if torch.all(text_feats == save_text.to(text_feats.device)):
-                logger.info('text feats are the same')
-            else:
-                logger.info('text feats are different')
-                logger.info(torch.where(text_feats != save_text))
-                with open('datasets/coco/coco_cls_seen.pkl', 'wb') as f:
-                    pickle.dump(text_feats, f)
-                # sys.exit()
+    # if torch.all(text_feats == save_text.to(text_feats.device)):
+    #     logger.info('text feats are the same')
+    # else:
+    #     logger.info('text feats are different')
+    #     logger.info(torch.where(text_feats != save_text))
+
+        text_feats = get_custom_text_feat(cfg.MODEL.BACKBONE.TYPE, clip_model, constants.COCO_SEEN_CLS if not args.eval_only else constants.COCO_INSTANCE_CLASSES)
+        with open('datasets/coco/coco_cls_seen.pkl' if not args.eval_only else 'datasets/coco/coco_cls.pkl', 'rb') as f:
+            save_text = pickle.load(f)
+        if torch.all(text_feats == save_text.to(text_feats.device)):
+            logger.info('text feats are the same')
         else:
-            text_feats =  get_custom_text_feat(clip_model,constants.COCO_INSTANCE_CLASSES)
-            with open('datasets/coco/coco_cls.pkl', 'rb') as f:
-                save_text = pickle.load(f)
-            if torch.all(text_feats == save_text.to(text_feats.device)):
-                logger.info('text feats are the same')
-            else:
-                logger.info('text feats are different')
-                logger.info(torch.where(text_feats != save_text))
-                with open('datasets/coco/coco_cls.pkl', 'wb') as f:
-                    pickle.dump(text_feats, f)
-    else: NotImplementedError
-    ###############
+            logger.info('text feats are different')
+            logger.info(torch.where(text_feats != save_text))
+            with open('datasets/coco/coco_cls_seen.pkl' if not args.eval_only else 'datasets/coco/coco_cls.pkl', 'wb') as f:
+                pickle.dump(text_feats, f)
+    elif 'lvis' in cfg.DATASETS.TRAIN[0]:
+        import ipdb; ipdb.set_trace()
+        thing_classes = MetadataCatalog.get(cfg.DATASETS.TRAIN[0]).thing_classes
+        
+        text_feats = get_custom_text_feat(cfg.MODEL.BACKBONE.TYPE, thing_classes)
+        with open('datasets/lvis/lvis_base_cls.pkl' if not args.eval_only else 'datasets/lvis/lvis_cls.pkl', 'rb') as f:
+            save_text = pickle.load(f)
+        if torch.all(text_feats == save_text.to(text_feats.device)):
+            logger.info('text feats are the same')
+        else:
+            logger.info('text feats are different')
+            logger.info(torch.where(text_feats != save_text))
+            with open('datasets/lvis/lvis_base_cls.pkl' if not args.eval_only else 'datasets/lvis/lvis_cls.pkl', 'wb') as f:
+                pickle.dump(text_feats, f)
+    #################
     if args.eval_only:
         DetectionCheckpointer(model, save_dir=cfg.OUTPUT_DIR).resume_or_load(
             cfg.MODEL.WEIGHTS, resume=args.resume
@@ -276,8 +288,18 @@ def main(args):
         )
     
     do_train(cfg, model, resume=args.resume)
-    # return do_test(cfg, model)
     return None
+
+if __name__ == "__main__":
+    args = default_argument_parser().parse_args()
+    launch(
+        main,
+        args.num_gpus,
+        num_machines=args.num_machines,
+        machine_rank=args.machine_rank,
+        dist_url=args.dist_url,
+        args=(args,),
+    )
 
 
 if __name__ == "__main__":

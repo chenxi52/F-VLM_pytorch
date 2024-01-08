@@ -13,8 +13,6 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["custom_load_lvis_json", "custom_register_lvis_instances"]
 
-categories_seen = LVIS_V1_CATEGORIES
-
 def custom_register_lvis_instances(name, metadata, json_file, image_root):
     """
     metadata : a b
@@ -37,7 +35,7 @@ def _get_metadata(cat):
         ), "Category ids are not in [1, #categories], as expected"
         # Ensure that the category list is sorted by id
         lvis_categories = sorted(LVIS_V1_CATEGORIES, key=lambda x: x["id"])
-        thing_classes = [k["synonyms"][0] for k in lvis_categories if k['frequency'] not in 'r']
+        thing_classes = [k["synonyms"][0].replace('_', ' ') for k in lvis_categories if k['frequency'] not in 'r']
         thing_ids = [k["id"] for k in lvis_categories if k['frequency'] not in 'r']
         thing_dataset_id_to_contiguous_id = {
             x: i for i, x in enumerate(thing_ids)}
@@ -45,6 +43,8 @@ def _get_metadata(cat):
             "thing_dataset_id_to_contiguous_id": thing_dataset_id_to_contiguous_id,
             "thing_classes": thing_classes,
             "thing_ids": thing_ids}
+    else:
+        raise ValueError("Invalid value for 'cat'.")
 
 
 def custom_load_lvis_json(json_file, image_root, dataset_name=None):

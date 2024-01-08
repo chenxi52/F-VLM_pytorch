@@ -147,6 +147,7 @@ def add_rsprompter_config(cfg):
     _C.MODEL.FPN.ANCHOR_STRIDE = [8, 16, 32]
     _C.MODEL.FPN.SELECTED_CHANNELS = list(range(8, 32, 2))
     _C.MODEL.FPN.IN_CHANNELS = [768, 768, 768]
+    _C.MODEL.FPN.ADD_PE = False
 
     _C.MODEL.ROI_BOX_HEAD.CAT_FREQ_PATH = 'datasets/metadata/lvis_v1_train_cat_info.json'
     _C.MODEL.ROI_BOX_HEAD.IGNORE_ZERO_CATS = False
@@ -155,7 +156,8 @@ def add_rsprompter_config(cfg):
     _C.MODEL.ROI_BOX_HEAD.BACKGROUND_WEIGHT = 0.2
     _C.MODEL.ROI_BOX_HEAD.ZEROSHOT_WEIGHT_PATH = 'datasets/metadata/lvis_v1_clip_a+cname.npy'
     _C.MODEL.ROI_BOX_HEAD.FED_LOSS_FREQ_WEIGHT = 0.5
-
+    _C.MODEL.ROI_BOX_HEAD.USE_FOCAL_CE = False
+    
     _C.MODEL.ROI_MASK_HEAD.WITH_SINCOS = True
     _C.MODEL.ROI_MASK_HEAD.MASK_LOSS_TYPE = 'ce'
     _C.MODEL.ROI_MASK_HEAD.MASK_LOSS_WEIGHT = 1.0

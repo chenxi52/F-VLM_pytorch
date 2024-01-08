@@ -3,16 +3,27 @@ MODEL:
   BACKBONE:
     TYPE: "RN50"
   CLIP_TEXT_FEATS_PATH: "datasets/coco/coco_cls_seen.pkl"
+  FPN: 
+    NORM: "SyncBN" # 'SyncBN'   or ""
+    ADD_PE: False
   RPN:
-    CONV_DIMS: (256, 256)
+    HEAD_NAME: 'CustomStandardRPNHead'
+    CONV_DIMS: (256,256)
   ROI_HEADS:
     BATCH_SIZE_PER_IMAGE: 512 
     SCORE_THRESH_TEST: 0.02
     NUM_CLASSES: 48 # num of seen classes
   ROI_BOX_HEAD:
+    NAME: 'CustomFastRCNNConvFCHead'
     NUM_FC: 1
+    NUM_CONV: 4
     BACKGROUND_WEIGHT: 0.2
     CAT_FREQ_PATH: ''
+    USE_SIGMOID_CE: False
+    NORM: 'SyncBN'
+  ROI_MASK_HEAD:
+    NAME: 'CustomMaskRCNNConvUpsampleHead'
+    NORM: 'SyncBN'
 DATASETS:
   TRAIN: ("coco_zeroshot_train",)
 DATALOADER:

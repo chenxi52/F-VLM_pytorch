@@ -1,9 +1,8 @@
 import numpy as np
-
+import random
 
 def get_prompt_templates():
     prompt_templates = [
-        '{}.',
         'a photo of a {}.',
         'a bad photo of a {}.',
         'a photo of many {}.',

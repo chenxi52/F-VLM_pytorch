@@ -17,6 +17,7 @@ from detectron2.modeling.poolers import ROIPooler
 from torch.cuda.amp import autocast
 import fvcore.nn.weight_init as weight_init
 from detic.data.datasets.coco_zeroshot import get_contigous_ids, _get_metadata
+import torch.nn.functional as F
 __all__ = ["SamRCNNOutputLayers"]
 logger = logging.getLogger(__name__)
 
@@ -39,12 +40,12 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         novel_beta: float,
         test_pooler: ROIPooler,
         background_weight: float,
+        use_focal_ce: bool,
         **kwargs
     ):
         super().__init__(input_shape, **kwargs)
         self.logit_scale = nn.Parameter(torch.ones([])*np.log(1/0.07))
         del self.cls_score
-        del self.bbox_pred
         if ignore_zero_cats:
             # 输出基于总类别数量的 continuous id
             base_ones = torch.zeros(len(get_contigous_ids('all')))
@@ -57,13 +58,14 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
             novel_ones[get_contigous_ids('unseen')] = 1
             novel_ones = torch.cat([novel_ones, torch.ones(1)]).to(torch.bool)
             self.register_buffer('novel_ones', novel_ones)
-
+            
+            del self.bbox_pred
             input_size = input_shape.channels * \
                 (input_shape.width or 1) * (input_shape.height or 1)
             self.bbox_pred = nn.Sequential(
                 nn.Linear(input_size, input_size),
                 nn.ReLU(inplace=True),
-                nn.Linear(input_size, 4)
+                nn.Linear(input_size, 4, dtype=torch.float32)
             )
             weight_init.c2_xavier_fill(self.bbox_pred[0])
             nn.init.normal_(self.bbox_pred[-1].weight, std=0.001)
@@ -76,13 +78,14 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         self.novel_beta = novel_beta
         self.test_pooler = test_pooler
         self.background_weight = background_weight
-        self.register_buffer('text_feats', text_feats) 
+        self.register_buffer('text_feats', text_feats)
+        self.use_focal_ce = use_focal_ce
 
     @classmethod
     def from_config(cls, cfg, input_shape):
         ret = super().from_config(cfg, input_shape)
         with open(cfg.MODEL.CLIP_TEXT_FEATS_PATH,'rb') as f:
-            text_feats = pickle.load(f)
+            text_feats = pickle.load(f).to(torch.float32)
         ret['text_feats'] = text_feats
         ret['ignore_zero_cats'] = cfg.MODEL.ROI_BOX_HEAD.IGNORE_ZERO_CATS
         ret['use_fed_loss'] = cfg.MODEL.ROI_BOX_HEAD.USE_FED_LOSS
@@ -97,6 +100,7 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
             pooler_type=cfg.MODEL.ROI_BOX_HEAD.POOLER_TYPE
         )
         ret['test_pooler'] = test_pooler
+        ret['use_focal_ce'] = cfg.MODEL.ROI_BOX_HEAD.USE_FOCAL_CE
         return ret 
     
     def forward(self,x):
@@ -133,8 +137,12 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         else:
             proposal_boxes = gt_boxes = torch.empty((0, 4), device=proposal_deltas.device)
         weight = 1.
-        if self.use_sigmoid_ce:
-            loss_cls = self.sigmoid_cross_entropy_loss(scores, gt_classes)
+        if self.use_sigmoid_ce and not self.use_focal_ce:
+            loss_cls = self.sigmoid_cross_entropy_loss(scores, gt_classes, self.background_weight>0)
+        elif self.use_focal_ce and not self.use_sigmoid_ce:
+            loss_cls = self.softmax_focal_loss(scores, gt_classes, gamma=0.5, reduction="mean")
+        elif self.use_focal_ce and self.use_sigmoid_ce:
+            loss_cls = self.sigmoid_focal_loss(scores, gt_classes)
         else:
             if self.ignore_zero_cats:
                 weight = weight * torch.cat([torch.ones(self.num_classes), torch.ones(1)*self.background_weight], dim=0).to(scores.device)
@@ -147,6 +155,86 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
             ),
         }
         return {k: v * self.loss_weight.get(k, 1.0) for k, v in losses.items()}
+
+    def sigmoid_cross_entropy_loss(self, pred_class_logits, gt_classes, consider_background=False):
+        """
+        Args:
+            consifer background class
+            self.background_weight>0 and use_sigmoid_ce=True means consider background class 
+        """
+        if pred_class_logits.numel() == 0:
+            return pred_class_logits.new_zeros([1])[0]
+
+        N = pred_class_logits.shape[0]
+        K = pred_class_logits.shape[1] - 1
+
+        target = pred_class_logits.new_zeros(N, K + 1)
+        target[range(len(gt_classes)), gt_classes] = 1
+        
+        if not consider_background:
+            target = target[:, :K]
+            cls_loss = F.binary_cross_entropy_with_logits(
+                pred_class_logits[:, :-1], target, reduction="none")
+        else:
+            cls_loss = F.binary_cross_entropy_with_logits(
+                pred_class_logits, target, reduction="none")
+
+        if self.use_fed_loss:
+            fed_loss_classes = self.get_fed_loss_classes(
+                gt_classes,
+                num_fed_loss_classes=self.fed_loss_num_classes,
+                num_classes=K,
+                weight=self.fed_loss_cls_weights,
+            )
+            fed_loss_classes_mask = fed_loss_classes.new_zeros(K + 1)
+            fed_loss_classes_mask[fed_loss_classes] = 1
+            fed_loss_classes_mask = fed_loss_classes_mask[:K]
+            weight = fed_loss_classes_mask.view(1, K).expand(N, K).float()
+        else:
+            weight = 1
+        loss = torch.sum(cls_loss * weight) / N
+        return loss
+    
+    def softmax_focal_loss(self, inputs, targets, gamma=0.5, reduction="mean"):
+        """Inspired by RetinaNet implementation"""
+        # use softmax score as  p of focal loss
+        if targets.numel() == 0 and reduction == "mean":
+            return input.sum() * 0.0  # connect the gradient
+        
+        # focal scaling
+        ce_loss = F.cross_entropy(inputs, targets, reduction="none")
+        p = F.softmax(inputs, dim=-1)
+        p_t = p[torch.arange(p.size(0)).to(p.device), targets]  # get prob of target class
+        loss = ce_loss * ((1 - p_t) ** gamma)
+
+        # bg loss weight
+        if self.background_weight>0:
+            loss_weight = torch.ones(loss.size(0)).to(p.device)
+            loss_weight[targets == self.num_classes] = self.background_weight
+            loss = loss * loss_weight
+
+        if reduction == "mean":
+            loss = loss.mean()
+
+        return loss
+    
+    def sigmoid_focal_loss(self, inputs, targets, alpha: float = 0.25, gamma: float = 2):
+        """Compute the sigmoid focal loss."""
+        prob = inputs.sigmoid()
+        targets_one_hot = F.one_hot(targets, num_classes=self.num_classes + 1).float()
+        ce_loss = F.binary_cross_entropy_with_logits(inputs, targets_one_hot, reduction="none")
+        p_t = prob * targets_one_hot + (1 - prob) * (1 - targets_one_hot)
+        loss = ce_loss * ((1 - p_t) ** gamma)
+        B = inputs.shape[0]
+        weight = 1
+        if alpha >= 0:
+            loss = (alpha * targets_one_hot + (1 - alpha) * (1 - targets_one_hot)) * loss
+
+        # if self.ignore_zero_cats and (self.freq_weight is not None):
+        #     w = (self.freq_weight.view(-1) > 1e-4).float()
+        #     w = torch.cat([w, w.new_ones(1)])
+        #     weight = weight * w
+        return (loss * weight).mean(1).sum() / B
 
     def box_reg_loss(self, proposal_boxes, gt_boxes, pred_deltas, gt_classes):
         """
@@ -248,15 +336,16 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
             boxes = boxes[valid_mask]
             scores = scores[valid_mask]
             vlm_scores = vlm_scores[valid_mask]
-        
+        # for softmax
+        # for simgmoid ce 
         # 0 会自动过滤掉; 0: unseen box or unused box
         base_scores = ((scores * self.base_ones)**(1-self.base_alpha)) * ((vlm_scores*self.base_ones)**(self.base_alpha))
         novel_scores = ((scores * self.novel_ones)**(1-self.novel_beta)) * ((vlm_scores*self.novel_ones)**(self.novel_beta))
         ensembled_socres = base_scores + novel_scores
         
         ensembled_socres = torch.cat([ensembled_socres[:,:-1], scores[:, -1:]], dim=1)
-        if not self.use_sigmoid_ce:
-            ensembled_socres = ensembled_socres / ensembled_socres.sum(dim=1, keepdim=True)
+        # the unused index pron has been set to 0 after softmax
+        ensembled_socres = ensembled_socres / ensembled_socres.sum(dim=1, keepdim=True)
         ensembled_socres = ensembled_socres[:, :-1]
         assert ensembled_socres[:, self.unused_index].max() < 1e-5, 'unused classes should not be evaluated'
 

@@ -317,7 +317,28 @@ class samMaskHead(BaseMaskRCNNHead):
             
         _log_classification_stats(pred_class_logits, gt_classes , 'fast_rcnn')
         return loss
+    
+    def focal_loss(self, inputs, targets, gamma=0.5, reduction="mean"):
+        """Inspired by RetinaNet implementation"""
+        if targets.numel() == 0 and reduction == "mean":
+            return input.sum() * 0.0  # connect the gradient
+        
+        # focal scaling
+        ce_loss = F.cross_entropy(inputs, targets, reduction="none")
+        p = F.softmax(inputs, dim=-1)
+        p_t = p[torch.arange(p.size(0)).to(p.device), targets]  # get prob of target class
+        loss = ce_loss * ((1 - p_t) ** gamma)
 
+        # bg loss weight
+        if self.background_weight>0:
+            loss_weight = torch.ones(loss.size(0)).to(p.device)
+            loss_weight[targets == self.data_classes] = self.background_weight
+            loss = loss * loss_weight
+
+        if reduction == "mean":
+            loss = loss.mean()
+
+        return loss
     # @torch.jit.unused
     # def sigmoid_focal_loss(self, inputs, targets, gt_classes, alpha: float = 0.25, gamma: float = 2):
     #     """Compute the sigmoid focal loss."""

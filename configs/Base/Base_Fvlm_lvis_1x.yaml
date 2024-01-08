@@ -1,0 +1,57 @@
+_BASE_: "Base_ov_mine.yaml"
+MODEL:
+  BACKBONE:
+    SAM_TYPE: "vit_t"
+    TYPE: "RN50"
+  CLIP_TEXT_FEATS_PATH: "datasets/lvis/lvis_base_cls.pkl" #********
+  SAM_WEIGHTS: "mobile_sam.pt"
+  SAM_PIXEL_MEAN: [123.675, 116.280, 103.530]
+  SAM_PIXEL_STD: [58.395, 57.12, 57.375]
+  FPN: 
+    NORM: "SyncBN" # 'SyncBN'   or ""
+    ADD_PE: False
+  RPN:
+    CONV_DIMS: (256,256)
+    BATCH_SIZE_PER_IMAGE: 256 # the sampling num 
+  ROI_HEADS:
+    NUM_CLASSES: 866
+    BATCH_SIZE_PER_IMAGE: 32 #the sampling num 
+  ROI_BOX_HEAD:
+    NUM_FC: 1 
+    BACKGROUND_WEIGHT: 0.9
+    IGNORE_ZERO_CATS: True
+    USE_FED_LOSS: True
+    BASE_ALPHA: 0.35
+    NOVEL_BETA: 0.65
+    CAT_FREQ_PATH: ''
+  ROI_MASK_HEAD:
+    NORM: SyncBN
+    NAME: "MaskRCNNConvUpsampleHead"
+  MASK_ON: True
+  SAM_ON: False
+  NUM_SAMPLE_CATS: 50
+DATASETS:
+  TRAIN: ("lvis_v1_zeroshot_train",)
+  TEST: ("lvis_v1_val",)
+DATALOADER:
+  SAMPLER_TRAIN: "RepeatFactorTrainingSampler"
+  REPEAT_THRESHOLD: 0.001
+  NUM_WORKERS: 16 # num_workers == batchsize_per_gpu
+SOLVER:
+  IMS_PER_BATCH: 32  # change  # max 8 imgs per batch
+  BASE_LR: 0.0036  # change0.000025
+  MAX_ITER: 90000
+  CHECKPOINT_PERIOD: 900000  #  change
+  OPTIMIZER: 'ADAMW'
+  WEIGHT_DECAY: 0.0001
+  LR_SCHEDULER_NAME: "WarmupCosineLR"
+  WARMUP_FACTOR: 0.0001
+  WARMUP_METHOD: "linear" 
+  WARMUP_ITERS: 100000
+  STEPS: (20250, 21375, 21738)
+  GAMMA: 0.1
+  MOMENTUM: 0.9
+INPUT:
+  CLIP_TRAIN_SIZE: 1024
+  CUSTOM_AUG: ResizeLongLSJ  #!!!!
+OUTPUT_DIR: './output/clipRpn/FVLM_Lvis'

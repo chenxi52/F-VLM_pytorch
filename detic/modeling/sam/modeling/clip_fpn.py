@@ -57,10 +57,9 @@ class ClipFPN(FPN):
         output_convs = []
 
 
-        use_bias = norm == ""
         for idx, in_channels in enumerate(in_channels_per_feature):
             lateral_norm = get_norm("", out_channels)
-            output_norm = get_norm("SyncBN", out_channels)
+            output_norm = get_norm(norm, out_channels)
 
             lateral_conv = Conv2d(
                 in_channels, out_channels, kernel_size=1, bias=False, norm=lateral_norm
@@ -71,7 +70,7 @@ class ClipFPN(FPN):
                 kernel_size=3,
                 stride=1,
                 padding=1,
-                bias=use_bias,
+                bias=True,
                 norm=output_norm,
             )
             weight_init.c2_xavier_fill(lateral_conv)

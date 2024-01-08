@@ -29,6 +29,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         add_pe_before_mask_pool: bool = False,
         roi_prompter: str = "",
         roi_prompter_fuse_type: str = "",
+        add_fpn_pe: bool = False,
         **kwargs
     ):
         """
@@ -69,6 +70,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         ret['add_pe_before_mask_pool'] = cfg.MODEL.ROI_MASK_HEAD.ADD_PE_BEFORE_POOL
         ret['roi_prompter'] = cfg.MODEL.ROI_MASK_HEAD.ROI_PROMPTER
         ret['roi_prompter_fuse_type'] = cfg.MODEL.ROI_MASK_HEAD.ROI_PROMPTER_FUSE_TYPE
+        ret['add_fpn_pe'] = cfg.MODEL.FPN.ADD_PE
         return ret
     
     @classmethod
@@ -133,13 +135,14 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         del targets
         clip_img_feats, clip_fpn_feats = clip_features
         ###########
-        # x = [item[1] for item in list(clip_fpn_feats.items())]
-        # bs, _, h, w = x[-1].shape
-        # mask_pe = torch.zeros((bs, h, w), device=x[0].device, dtype=torch.bool)
-        # img_feat_pe = self.generator_pe(mask_pe)
-        # for i in range(len(x)):
-        #     x[i] = x[i] + torch.nn.functional.interpolate(img_feat_pe, size=x[i].shape[-2:], mode='bilinear', align_corners=False)
-        # clip_fpn_feats = {list(clip_fpn_feats.keys())[i]: x[i] for i in range(len(clip_fpn_feats))}
+        if self.add_fpn_pe:
+            x = [item[1] for item in list(clip_fpn_feats.items())]
+            bs, _, h, w = x[-1].shape
+            mask_pe = torch.zeros((bs, h, w), device=x[0].device, dtype=torch.bool)
+            img_feat_pe = self.generator_pe(mask_pe)
+            for i in range(len(x)):
+                x[i] = x[i] + torch.nn.functional.interpolate(img_feat_pe, size=x[i].shape[-2:], mode='bilinear', align_corners=False)
+            clip_fpn_feats = {list(clip_fpn_feats.keys())[i]: x[i] for i in range(len(clip_fpn_feats))}
         ############
         if self.training:
             losses = self._forward_box(attnpool, clip_final_feats=None, fpn_feats=clip_fpn_feats, proposals=proposals)

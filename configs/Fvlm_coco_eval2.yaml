@@ -4,10 +4,10 @@ MODEL:
     TYPE: "RN50"
   CLIP_TEXT_FEATS_PATH: "datasets/coco/coco_cls.pkl"
   WEIGHTS: ""
-  FPN:
-    ADD_PE: False #!!!!!!
   RPN:
-    PRE_NMS_TOPK_TEST: 1000  # Per FPN level sum=5000
+    CONV_DIMS: (-1,)
+    HEAD_NAME: "StandardRPNHead"
+    PRE_NMS_TOPK_TEST: 1000  # Per FPN level
     POST_NMS_TOPK_TEST: 1000
   ROI_HEADS:
     NMS_THRESH_TEST: 0.4
