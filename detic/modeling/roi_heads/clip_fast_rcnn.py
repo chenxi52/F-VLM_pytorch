@@ -5,19 +5,19 @@ import torch.nn as nn
 from typing import  List, Tuple
 from fvcore.nn import giou_loss, smooth_l1_loss
 
-from detectron2.layers import cat, ciou_loss, diou_loss
+from detectron2.layers import cat
 from detectron2.config import configurable
 from detectron2.layers import ShapeSpec, batched_nms, cat, cross_entropy, nonzero_tuple
 from detectron2.structures import Instances, Boxes
-from detectron2.modeling.roi_heads.fast_rcnn import FastRCNNOutputLayers, _log_classification_stats
-from detic.modeling.utils import load_class_freq
+from detectron2.modeling.roi_heads.fast_rcnn import FastRCNNOutputLayers
 import numpy as np
 import pickle
 from detectron2.modeling.poolers import ROIPooler
-from torch.cuda.amp import autocast
 import fvcore.nn.weight_init as weight_init
-from detic.data.datasets.coco_zeroshot import get_contigous_ids, _get_metadata
+from detic.data.datasets.coco_zeroshot import get_contigous_ids
 import torch.nn.functional as F
+from detectron2.utils.events import get_event_storage
+
 __all__ = ["SamRCNNOutputLayers"]
 logger = logging.getLogger(__name__)
 
@@ -84,7 +84,7 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         self.use_focal_ce = use_focal_ce
 
     @classmethod
-    def from_config(cls, cfg, input_shape):
+    def from_config(cls, cfg, input_shape, roi_input_shape):
         ret = super().from_config(cfg, input_shape)
         ret['text_feats_path'] = cfg.MODEL.CLIP_TEXT_FEATS_PATH
         ret['ignore_zero_cats'] = cfg.MODEL.ROI_BOX_HEAD.IGNORE_ZERO_CATS
@@ -93,9 +93,10 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         ret['base_alpha'] = cfg.MODEL.ROI_BOX_HEAD.BASE_ALPHA
         ret['novel_beta'] = cfg.MODEL.ROI_BOX_HEAD.NOVEL_BETA
         ret['background_weight'] = cfg.MODEL.ROI_BOX_HEAD.BACKGROUND_WEIGHT
+        in_features = cfg.MODEL.ROI_HEADS.IN_FEATURES
         test_pooler = ROIPooler(
             output_size=cfg.MODEL.ROI_BOX_HEAD.POOLER_RESOLUTION,
-            scales=[1./32,],
+            scales=[1/32.],
             sampling_ratio=cfg.MODEL.ROI_BOX_HEAD.POOLER_SAMPLING_RATIO,
             pooler_type=cfg.MODEL.ROI_BOX_HEAD.POOLER_TYPE
         )
@@ -105,6 +106,8 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
     
     def forward(self,x):
         scores = self.logit_scale.exp() * self.get_logits(x, self.text_feats)
+        if not self.training:
+            scores[:, self.unused_index] = float('-inf')
         proposal_deltas = self.bbox_pred(x)
         return  scores, proposal_deltas
     
@@ -123,7 +126,7 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
             cat([p.gt_classes for p in proposals], dim=0) if len(proposals) else torch.empty(0)
         )
         # sigmoid ce
-        _log_classification_stats(scores, gt_classes)
+        self.log_classification_stats(scores, gt_classes)
 
         if len(proposals):
             proposal_boxes = cat([p.proposal_boxes.tensor for p in proposals], dim=0)  # Nx4
@@ -154,6 +157,39 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
             ),
         }
         return {k: v * self.loss_weight.get(k, 1.0) for k, v in losses.items()}
+
+
+    def log_classification_stats(self, pred_logits, gt_classes, prefix="fast_rcnn"):
+        """
+        Log the classification metrics to EventStorage.
+
+        Args:
+            pred_logits: Rx(K+1) logits. The last column is for background class.
+            gt_classes: R labels
+        """
+        num_instances = gt_classes.numel()
+        if num_instances == 0:
+            return
+        pred_classes = pred_logits.argmax(dim=1)
+        bg_class_ind = self.num_classes
+
+        fg_inds = (gt_classes >= 0) & (gt_classes < bg_class_ind)
+        num_fg = fg_inds.nonzero().numel()
+        fg_gt_classes = gt_classes[fg_inds]
+        fg_pred_classes = pred_classes[fg_inds]
+
+        # num_false: not equal to gt_classes
+        num_false_negative = (fg_pred_classes>=bg_class_ind).nonzero().numel()
+        num_accurate = (pred_classes == gt_classes).nonzero().numel()
+        fg_num_accurate = (fg_pred_classes == fg_gt_classes).nonzero().numel()
+
+        storage = get_event_storage()
+        storage.put_scalar(f"{prefix}/cls_accuracy", num_accurate / num_instances)
+        if num_fg > 0:
+            storage.put_scalar(f"{prefix}/fg_cls_accuracy", fg_num_accurate / num_fg)
+            storage.put_scalar(f"{prefix}/false_negative", num_false_negative / num_fg)
+
+
 
     def sigmoid_cross_entropy_loss(self, pred_class_logits, gt_classes, consider_background=False):
         """
@@ -278,14 +314,15 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         scores = self.predict_probs(predictions, proposals) # already softmax or sigmoid
         image_shapes = [x.image_size for x in proposals]
         
-        vlm_box_features = self.test_pooler([clip_feats], [Boxes(box) for box in boxes])
+        # multi-level cropping
+        proposal_boxes = [p.proposal_boxes for p in proposals]
+        vlm_box_features = self.test_pooler([clip_feats], proposal_boxes)
         # vlm pooler layer: clip attenpool
         vlm_box_features = attenpool(vlm_box_features)
-        vlm_box_features = vlm_box_features / vlm_box_features.norm(dim=1,keepdim=True)
+ 
         logits_scale = 1/0.01
         vlm_scores = logits_scale * self.get_logits(vlm_box_features, self.text_feats)
         num_inst_per_image = [len(p) for p in proposals]
-        vlm_scores[:, self.unused_index] = float('-inf')
         if not self.use_sigmoid_ce:
             vlm_scores = torch.nn.functional.softmax(vlm_scores, dim=1)
         else:
@@ -335,18 +372,15 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
             boxes = boxes[valid_mask]
             scores = scores[valid_mask]
             vlm_scores = vlm_scores[valid_mask]
-        # for softmax
-        # for simgmoid ce 
-        # 0 会自动过滤掉; 0: unseen box or unused box
-        base_scores = ((scores * self.base_ones)**(1-self.base_alpha)) * ((vlm_scores*self.base_ones)**(self.base_alpha))
-        novel_scores = ((scores * self.novel_ones)**(1-self.novel_beta)) * ((vlm_scores*self.novel_ones)**(self.novel_beta))
-        ensembled_socres = base_scores + novel_scores
+        base_ones = torch.cat([self.base_ones, torch.zeros(scores.shape[1]-self.base_ones.shape[0]).to(self.base_ones.device)]).to(torch.bool)
+        base_scores = (scores **(1-self.base_alpha)) * (vlm_scores**(self.base_alpha))
+        novel_scores = (scores **(1-self.novel_beta)) * (vlm_scores**(self.novel_beta))
         
-        ensembled_socres = torch.cat([ensembled_socres[:,:-1], scores[:, -1:]], dim=1)
-        # the unused index pron has been set to 0 after softmax
-        ensembled_socres = ensembled_socres / ensembled_socres.sum(dim=1, keepdim=True)
-        ensembled_socres = ensembled_socres[:, :-1]
-        assert ensembled_socres[:, self.unused_index].max() < 1e-5, 'unused classes should not be evaluated'
+        ensembled_scores = torch.where(base_ones, base_scores, novel_scores)
+        ensembled_scores[:,self.num_classes] = scores[:, self.num_classes]
+        ensembled_scores = ensembled_scores / ensembled_scores.sum(dim=1, keepdim=True)
+        ensembled_scores = ensembled_scores[:, :self.num_classes]
+        assert ensembled_scores[:, self.unused_index].max() < 1e-5, 'unused classes should not be evaluated'
 
         num_bbox_reg_classes = boxes.shape[1] // 4
         boxes = Boxes(boxes.reshape(-1, 4))
@@ -354,7 +388,7 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         boxes = boxes.tensor.view(-1, num_bbox_reg_classes, 4)  # R x C x 4
         # 1. Filter results based on detection scores. It can make NMS more efficient
         #    by filtering out low-confidence detections.
-        filter_mask = ensembled_socres > self.test_score_thresh  # R x K
+        filter_mask = ensembled_scores > self.test_score_thresh  # R x K
         # R' x 2. First column contains indices of the R predictions;
         # Second column contains indices of classes.
         filter_inds = filter_mask.nonzero()
@@ -362,16 +396,16 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
             boxes = boxes[filter_inds[:, 0], 0]
         else:
             boxes = boxes[filter_mask]
-        ensembled_socres = ensembled_socres[filter_mask]
+        ensembled_scores = ensembled_scores[filter_mask]
 
         # 2. Apply NMS for each class independently.
-        keep = batched_nms(boxes, ensembled_socres, filter_inds[:, 1], self.test_nms_thresh)
+        keep = batched_nms(boxes, ensembled_scores, filter_inds[:, 1], self.test_nms_thresh)
         if self.test_topk_per_image >= 0:
             keep = keep[:self.test_topk_per_image]
-        boxes, ensembled_socres, filter_inds = boxes[keep], ensembled_socres[keep], filter_inds[keep]
+        boxes, ensembled_scores, filter_inds = boxes[keep], ensembled_scores[keep], filter_inds[keep]
 
         result = Instances(image_shape)
         result.pred_boxes = Boxes(boxes)
-        result.scores = ensembled_socres
+        result.scores = ensembled_scores
         result.pred_classes = filter_inds[:, 1]
         return result, filter_inds[:, 0]
