@@ -78,7 +78,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         ret = super()._init_box_head(cfg, input_shape)
         box_head = ret["box_head"]
         #update the rcnn output layer
-        ret.update(box_predictor = ClipRCNNOutputLayers(cfg, box_head.output_shape, input_shape))
+        ret.update(box_predictor = ClipRCNNOutputLayers(cfg, box_head.output_shape))
        
         ################
         return ret

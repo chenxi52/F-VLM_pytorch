@@ -84,7 +84,7 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         self.use_focal_ce = use_focal_ce
 
     @classmethod
-    def from_config(cls, cfg, input_shape, roi_input_shape):
+    def from_config(cls, cfg, input_shape):
         ret = super().from_config(cfg, input_shape)
         ret['text_feats_path'] = cfg.MODEL.CLIP_TEXT_FEATS_PATH
         ret['ignore_zero_cats'] = cfg.MODEL.ROI_BOX_HEAD.IGNORE_ZERO_CATS
@@ -93,7 +93,6 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         ret['base_alpha'] = cfg.MODEL.ROI_BOX_HEAD.BASE_ALPHA
         ret['novel_beta'] = cfg.MODEL.ROI_BOX_HEAD.NOVEL_BETA
         ret['background_weight'] = cfg.MODEL.ROI_BOX_HEAD.BACKGROUND_WEIGHT
-        in_features = cfg.MODEL.ROI_HEADS.IN_FEATURES
         test_pooler = ROIPooler(
             output_size=cfg.MODEL.ROI_BOX_HEAD.POOLER_RESOLUTION,
             scales=[1/32.],
