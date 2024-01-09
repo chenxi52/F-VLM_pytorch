@@ -239,7 +239,7 @@ def main(args):
     
     ######### can not run with training
 
-    # if "coco_embed_80.npy" in cfg.MODEL.CLIP_TEXT_FEATS_PATH:
+    # if cfg.MODEL.CLIP_TEXT_FEATS_PATH.endswith('npy'):
     #     if 'coco' in cfg.DATASETS.TRAIN[0]:
     #         if not os.path.exists('datasets/coco/embeddings/resnet_50/coco_embed_80.npy'):
     #             text_feats = np.load('datasets/coco/embeddings/resnet_50/coco_embed.npy', allow_pickle=True)
@@ -251,7 +251,7 @@ def main(args):
     #             text_feats = np.concatenate((text_feats[1:1204], text_feats[:1]), axis=0)
     #             np.save('datasets/lvis/embeddings/resnet_50/lvis_embed_1203.npy', text_feats)
     
-    # elif "coco_cls.pkl" in cfg.MODEL.CLIP_TEXT_FEATS_PATH:
+    # elif cfg.MODEL.CLIP_TEXT_FEATS_PATH.endswith('pkl'):
     #     if 'coco' in cfg.DATASETS.TRAIN[0]:
     #         thing_classes = constants.COCO_INSTANCE_CLASSES
     #         text_feats = get_custom_text_feat(cfg.MODEL.BACKBONE.TYPE, clip_model=clip_model, class_names=thing_classes)
@@ -266,7 +266,7 @@ def main(args):
     #                 pickle.dump(text_feats, f)
     #     elif 'lvis' in cfg.DATASETS.TRAIN[0]:
     #         # HACK rthr thing classes
-    #         thing_classes = MetadataCatalog.get(cfg.DATASETS.TRAIN[0]).thing_classthing_classeses
+    #         thing_classes = [s.replace('_', ' ') for s in constants.LVIS_CATEGORIES]
     #         text_feats = get_custom_text_feat(cfg.MODEL.BACKBONE.TYPE,clip_model=clip_model, class_names=thing_classes)
     #         with open( 'datasets/lvis/lvis_cls.pkl', 'rb') as f:
     #             save_text = pickle.load(f)
@@ -275,7 +275,7 @@ def main(args):
     #         else:
     #             logger.info('text feats are different')
     #             logger.info(torch.where(text_feats != save_text))
-    #             with open('datasets/lvis/lvis_base_cls.pkl' if not args.eval_only else 'datasets/lvis/lvis_cls.pkl', 'wb') as f:
+    #             with open('datasets/lvis/lvis_cls.pkl', 'wb') as f:
     #                 pickle.dump(text_feats, f)
     # else: 
     #     assert NotImplementedError

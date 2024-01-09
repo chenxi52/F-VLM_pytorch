@@ -15,6 +15,7 @@ import pickle
 from detectron2.modeling.poolers import ROIPooler
 import fvcore.nn.weight_init as weight_init
 from detic.data.datasets.coco_zeroshot import get_contigous_ids
+from detic.data.datasets.lvis_v1_zeroshot import get_contigous_ids_lvis
 import torch.nn.functional as F
 from detectron2.utils.events import get_event_storage
 
@@ -41,6 +42,7 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         test_pooler: ROIPooler,
         background_weight: float,
         use_focal_ce: bool,
+        dataset: str,
         **kwargs
     ):
         super().__init__(input_shape, **kwargs)
@@ -52,8 +54,12 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         del self.cls_score
         if ignore_zero_cats:
             # 输出基于总类别数量的 continuous id
-            base_ones = torch.zeros(len(get_contigous_ids('all')))
-            base_ones[get_contigous_ids('seen')] = 1
+            if 'coco' in dataset:
+                base_ones = torch.zeros(len(get_contigous_ids('all')))
+                base_ones[get_contigous_ids('seen')] = 1
+            elif 'lvis' in dataset:
+                base_ones = torch.zeros(len(get_contigous_ids_lvis('all')))
+                base_ones[get_contigous_ids_lvis('seen')] = 1
             base_ones = torch.cat([base_ones, torch.ones(1)]).to(torch.bool)
             self.register_buffer('base_ones', base_ones)
 
@@ -108,7 +114,7 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         )
         ret['test_pooler'] = test_pooler
         ret['use_focal_ce'] = cfg.MODEL.ROI_BOX_HEAD.USE_FOCAL_CE
-    
+        ret['dataset'] = cfg.DATASETS.TRAIN[0]
         return ret 
     
     def forward(self,x):

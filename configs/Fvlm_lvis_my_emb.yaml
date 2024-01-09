@@ -24,6 +24,7 @@ MODEL:
     BACKGROUND_WEIGHT: 0.9
     CAT_FREQ_PATH: ''
     USE_SIGMOID_CE: False
+    USE_FED_LOSS: False
     NORM: 'SyncBN'
   ROI_MASK_HEAD:
     NORM: 'SyncBN'
@@ -37,17 +38,22 @@ DATALOADER:
   REPEAT_THRESHOLD: 0.001
   NUM_WORKERS: 16 # num_workers == batchsize_per_gpu
 SOLVER:
-  IMS_PER_BATCH: 256  # change  # max 8 imgs per batch
-  BASE_LR: 0.36  # change0.000025
-  MAX_ITER: 46100
+  # IMS_PER_BATCH: 256  # change  # max 8 imgs per batch
+  # BASE_LR: 0.36  # change0.000025
+  # MAX_ITER: 46100  
+  # WARMUP_FACTOR: 0.889
+  # WARMUP_ITERS: 1000
+  IMS_PER_BATCH: 64  # change  # max 8 imgs per batch
+  BASE_LR: 0.08  # change0.000025
+  MAX_ITER: 184400  
+  WARMUP_FACTOR: 0.04
+  WARMUP_ITERS: 1000
+  STEPS: (147520, 169560, 178980)
   CHECKPOINT_PERIOD: 90000000  #  change
   OPTIMIZER: 'SGD'
+  WARMUP_METHOD: "linear" 
   WEIGHT_DECAY: 0.0001
   LR_SCHEDULER_NAME: "WarmupMultiStepLR"
-  WARMUP_FACTOR: 0.889
-  WARMUP_METHOD: "linear" 
-  WARMUP_ITERS: 1000
-  STEPS: (20250, 21375, 21738)
   GAMMA: 0.1
   MOMENTUM: 0.9
 INPUT:
