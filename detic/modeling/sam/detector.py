@@ -51,13 +51,6 @@ class ClipOpenDetector(GeneralizedRCNN):
         self.do_postprocess = do_postprocess
 
         self.fpn_in_features = fpn_in_features
-        ####可以从这里保存 text features 、
-        # self.text_feats =  self.get_custom_text_feat(constants.COCO_SEEN_CLS)
-        # if comm.is_main_process():
-        #     with open('datasets/coco/coco_cls_seen.pkl', 'wb') as f:
-        #         pickle.dump(self.text_feats, f)
-        #     sys.exit()
-        ##########
         self.clip_train_size = clip_train_size
         self.eval_ar = eval_ar
         self.amp_enabled = amp_enabled

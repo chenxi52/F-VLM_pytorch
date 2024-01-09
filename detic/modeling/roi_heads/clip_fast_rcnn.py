@@ -80,6 +80,7 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         self.background_weight = background_weight
         text_feats = np.load(text_feats_path, allow_pickle=True)
         text_feats = torch.from_numpy(text_feats).to(torch.float32)
+        text_feats = text_feats[base_ones]
         self.register_buffer('text_feats', text_feats)
         self.use_focal_ce = use_focal_ce
 
@@ -145,7 +146,7 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
             loss_cls = self.sigmoid_focal_loss(scores, gt_classes)
         else:
             if self.ignore_zero_cats:
-                weight = torch.ones(91).to(scores.device)
+                weight = torch.ones(self.num_classes+1).to(scores.device)
                 weight[self.num_classes] *= self.background_weight
             loss_cls = cross_entropy(scores, gt_classes, reduction="mean", weight=weight)
             

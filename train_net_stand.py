@@ -231,6 +231,16 @@ def main(args):
     if comm.is_main_process() and cfg.WANDB:
         wandb.init(project='SamDetector', name=TIMESTAMP, config=cfg)
 
+    if 'coco' in cfg.DATASETS.TRAIN[0]:
+        if not os.path.exists('datasets/coco/embeddings/resnet_50/coco_embed_80.npy'):
+            text_feats = np.load('datasets/coco/embeddings/resnet_50/coco_embed.npy', allow_pickle=True)
+            text_feats = np.concatenate((text_feats[1:81], text_feats[:1]), axis=0)
+            np.save('datasets/coco/embeddings/resnet_50/coco_embed_80.npy', text_feats)
+    if 'lvis' in cfg.DATASETS.TRAIN[0]:
+        if not os.path.exists('datasets/lvis/embeddings/resnet_50/lvis_embed_1203.npy'):
+            text_feats = np.load('datasets/lvis/embeddings/resnet_50/lvis_embed.npy', allow_pickle=True)
+            text_feats = np.concatenate((text_feats[1:1204], text_feats[:1]), axis=0)
+            np.save('datasets/lvis/embeddings/resnet_50/lvis_embed_1203.npy', text_feats)
     model = build_model(cfg)
     clip_model, _ = clip.load(cfg.MODEL.BACKBONE.TYPE)
     if not args.eval_only:
@@ -242,11 +252,7 @@ def main(args):
     # text_emb = np.load('datasets/coco/embeddings/resnet_50/coco_embed.npy')
     # text_emb= torch.tensor(text_emb).to(text_feats.device)
     # sys.exit()
-    if 'coco' in cfg.DATASETS.TRAIN[0]:
-        text_feats = np.load('datasets/coco/embeddings/resnet_50/coco_embed.npy', allow_pickle=True)
-        text_feats = text_feats[:91]
-        text_feats = np.concatenate((text_feats[1:81], text_feats[:1], text_feats[81:]), axis=0)
-        np.save('datasets/coco/embeddings/resnet_50/coco_embed_backto_last.npy', text_feats)
+
     #     with open('datasets/coco/coco_cls_seen.pkl' if not args.eval_only else 'datasets/coco/coco_cls.pkl', 'rb') as f:
     #         save_text = pickle.load(f)
     #     if torch.all(text_feats == save_text.to(text_feats.device)):
