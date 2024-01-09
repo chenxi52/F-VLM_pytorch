@@ -42,11 +42,10 @@ import wandb
 import torch.nn as nn
 from detic.prompt_engineering import get_prompt_templates
 from detic import constants
-import pickle
 import os
-import sys
 import numpy as np
-
+import pickle
+import sys
 logger = logging.getLogger("detectron2")
 
 def do_test(cfg, model):
@@ -217,11 +216,11 @@ def get_custom_text_feat(clip_name, clip_model, class_names):
 
     templates = get_prompt_templates()
     clss_embeddings = []
-    for clss in class_names:
+    for clss in class_names+['background']:
         txts = [template.format(clss.replace('-other','').replace('-merged','').replace('-stuff','')) for template in templates]
         clss_embeddings.append(extract_mean_emb(txts))
-    background_embedding, _ = np.load(f'./datasets/{clip_name.replace("RN", "r")}_bg_empty_embed.npy', allow_pickle=True)
-    clss_embeddings.append(torch.tensor(background_embedding).squeeze().to(clss_embeddings[0].device))
+    # background_embedding, _ = np.load(f'./datasets/{clip_name.replace("RN", "r")}_bg_empty_embed.npy', allow_pickle=True)
+    # clss_embeddings.append(torch.tensor(background_embedding).squeeze().to(clss_embeddings[0].device))
     text_emb = torch.stack(clss_embeddings, dim=0)
     return text_emb
 
@@ -230,53 +229,59 @@ def main(args):
     TIMESTAMP = "{0:%Y-%m-%dT%H-%M-%S/}".format(datetime.datetime.now())
     if comm.is_main_process() and cfg.WANDB:
         wandb.init(project='SamDetector', name=TIMESTAMP, config=cfg)
-
-    if 'coco' in cfg.DATASETS.TRAIN[0]:
-        if not os.path.exists('datasets/coco/embeddings/resnet_50/coco_embed_80.npy'):
-            text_feats = np.load('datasets/coco/embeddings/resnet_50/coco_embed.npy', allow_pickle=True)
-            text_feats = np.concatenate((text_feats[1:81], text_feats[:1]), axis=0)
-            np.save('datasets/coco/embeddings/resnet_50/coco_embed_80.npy', text_feats)
-    if 'lvis' in cfg.DATASETS.TRAIN[0]:
-        if not os.path.exists('datasets/lvis/embeddings/resnet_50/lvis_embed_1203.npy'):
-            text_feats = np.load('datasets/lvis/embeddings/resnet_50/lvis_embed.npy', allow_pickle=True)
-            text_feats = np.concatenate((text_feats[1:1204], text_feats[:1]), axis=0)
-            np.save('datasets/lvis/embeddings/resnet_50/lvis_embed_1203.npy', text_feats)
+    #####
     model = build_model(cfg)
     clip_model, _ = clip.load(cfg.MODEL.BACKBONE.TYPE)
     if not args.eval_only:
         model.train()
     clip_model = freeze_module(clip_model)
     model.clip = clip_model
-    ##############
-    # text_feats = get_custom_text_feat(cfg.MODEL.BACKBONE.TYPE, clip_model, constants.COCO_INSTANCE_CLASSES )
-    # text_emb = np.load('datasets/coco/embeddings/resnet_50/coco_embed.npy')
-    # text_emb= torch.tensor(text_emb).to(text_feats.device)
-    # sys.exit()
+    
+    ######### can not run with training
 
-    #     with open('datasets/coco/coco_cls_seen.pkl' if not args.eval_only else 'datasets/coco/coco_cls.pkl', 'rb') as f:
-    #         save_text = pickle.load(f)
-    #     if torch.all(text_feats == save_text.to(text_feats.device)):
-    #         logger.info('text feats are the same')
-    #     else:
-    #         logger.info('text feats are different')
-    #         logger.info(torch.where(text_feats != save_text))
-    #         with open('datasets/coco/coco_cls_seen.pkl' if not args.eval_only else 'datasets/coco/coco_cls.pkl', 'wb') as f:
-    #             pickle.dump(text_feats, f)
-    # elif 'lvis' in cfg.DATASETS.TRAIN[0]:
-    #     import ipdb; ipdb.set_trace()
-    #     thing_classes = MetadataCatalog.get(cfg.DATASETS.TRAIN[0]).thing_classes
-        
-    #     text_feats = get_custom_text_feat(cfg.MODEL.BACKBONE.TYPE, thing_classes)
-    #     with open('datasets/lvis/lvis_base_cls.pkl' if not args.eval_only else 'datasets/lvis/lvis_cls.pkl', 'rb') as f:
-    #         save_text = pickle.load(f)
-    #     if torch.all(text_feats == save_text.to(text_feats.device)):
-    #         logger.info('text feats are the same')
-    #     else:
-    #         logger.info('text feats are different')
-    #         logger.info(torch.where(text_feats != save_text))
-    #         with open('datasets/lvis/lvis_base_cls.pkl' if not args.eval_only else 'datasets/lvis/lvis_cls.pkl', 'wb') as f:
-    #             pickle.dump(text_feats, f)
+    # if "coco_embed_80.npy" in cfg.MODEL.CLIP_TEXT_FEATS_PATH:
+    #     if 'coco' in cfg.DATASETS.TRAIN[0]:
+    #         if not os.path.exists('datasets/coco/embeddings/resnet_50/coco_embed_80.npy'):
+    #             text_feats = np.load('datasets/coco/embeddings/resnet_50/coco_embed.npy', allow_pickle=True)
+    #             text_feats = np.concatenate((text_feats[1:81], text_feats[:1]), axis=0)
+    #             np.save('datasets/coco/embeddings/resnet_50/coco_embed_80.npy', text_feats)
+    #     if 'lvis' in cfg.DATASETS.TRAIN[0]:
+    #         if not os.path.exists('datasets/lvis/embeddings/resnet_50/lvis_embed_1203.npy'):
+    #             text_feats = np.load('datasets/lvis/embeddings/resnet_50/lvis_embed.npy', allow_pickle=True)
+    #             text_feats = np.concatenate((text_feats[1:1204], text_feats[:1]), axis=0)
+    #             np.save('datasets/lvis/embeddings/resnet_50/lvis_embed_1203.npy', text_feats)
+    
+    # elif "coco_cls.pkl" in cfg.MODEL.CLIP_TEXT_FEATS_PATH:
+    #     if 'coco' in cfg.DATASETS.TRAIN[0]:
+    #         thing_classes = constants.COCO_INSTANCE_CLASSES
+    #         text_feats = get_custom_text_feat(cfg.MODEL.BACKBONE.TYPE, clip_model=clip_model, class_names=thing_classes)
+    #         with open('datasets/coco/coco_cls.pkl', 'rb') as f:
+    #             save_text = pickle.load(f)
+    #         if torch.all(text_feats == save_text.to(text_feats.device)):
+    #             logger.info('text feats are the same')
+    #         else:
+    #             logger.info('text feats are different')
+    #             logger.info(torch.where(text_feats != save_text))
+    #             with open('datasets/coco/coco_cls.pkl', 'wb') as f:
+    #                 pickle.dump(text_feats, f)
+    #     elif 'lvis' in cfg.DATASETS.TRAIN[0]:
+    #         # HACK rthr thing classes
+    #         thing_classes = MetadataCatalog.get(cfg.DATASETS.TRAIN[0]).thing_classthing_classeses
+    #         text_feats = get_custom_text_feat(cfg.MODEL.BACKBONE.TYPE,clip_model=clip_model, class_names=thing_classes)
+    #         with open( 'datasets/lvis/lvis_cls.pkl', 'rb') as f:
+    #             save_text = pickle.load(f)
+    #         if torch.all(text_feats == save_text.to(text_feats.device)):
+    #             logger.info('text feats are the same')
+    #         else:
+    #             logger.info('text feats are different')
+    #             logger.info(torch.where(text_feats != save_text))
+    #             with open('datasets/lvis/lvis_base_cls.pkl' if not args.eval_only else 'datasets/lvis/lvis_cls.pkl', 'wb') as f:
+    #                 pickle.dump(text_feats, f)
+    # else: 
+    #     assert NotImplementedError
+    # sys.exit()
     #################
+
     if args.eval_only:
         DetectionCheckpointer(model, save_dir=cfg.OUTPUT_DIR).resume_or_load(
             cfg.MODEL.WEIGHTS, resume=args.resume

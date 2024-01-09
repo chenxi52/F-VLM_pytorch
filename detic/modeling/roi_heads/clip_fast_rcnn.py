@@ -44,7 +44,11 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         **kwargs
     ):
         super().__init__(input_shape, **kwargs)
-        self.logit_scale = nn.Parameter(torch.ones([])*np.log(1/0.07))
+        self.upscale = True
+        if self.upscale :
+            self.logit_scale = nn.Parameter(torch.ones([])) 
+        else:
+            self.logit_scale = nn.Parameter(torch.ones([])*np.log(1/0.07))
         del self.cls_score
         if ignore_zero_cats:
             # 输出基于总类别数量的 continuous id
@@ -52,12 +56,9 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
             base_ones[get_contigous_ids('seen')] = 1
             base_ones = torch.cat([base_ones, torch.ones(1)]).to(torch.bool)
             self.register_buffer('base_ones', base_ones)
+
             unused_index = get_contigous_ids('unused') # [0-79]
             self.register_buffer('unused_index', torch.tensor(unused_index))
-            novel_ones = torch.zeros(len(get_contigous_ids('all')))
-            novel_ones[get_contigous_ids('unseen')] = 1
-            novel_ones = torch.cat([novel_ones, torch.ones(1)]).to(torch.bool)
-            self.register_buffer('novel_ones', novel_ones)
             
             del self.bbox_pred
             input_size = input_shape.channels * \
@@ -70,7 +71,7 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
             weight_init.c2_xavier_fill(self.bbox_pred[0])
             nn.init.normal_(self.bbox_pred[-1].weight, std=0.001)
             nn.init.constant_(self.bbox_pred[-1].bias, 0)
-
+           
         self.ignore_zero_cats = ignore_zero_cats
         self.use_fed_loss = use_fed_loss
         self.fed_loss_num_cat = fed_loss_num_cat
@@ -78,10 +79,15 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         self.novel_beta = novel_beta
         self.test_pooler = test_pooler
         self.background_weight = background_weight
-        text_feats = np.load(text_feats_path, allow_pickle=True)
-        text_feats = torch.from_numpy(text_feats).to(torch.float32)
-        text_feats = text_feats[base_ones]
+        if text_feats_path.endswith('npy'):
+            text_feats = np.load(text_feats_path, allow_pickle=True)
+            text_feats = torch.from_numpy(text_feats).to(torch.float32)
+        elif text_feats_path.endswith('pkl'):
+            text_feats = pickle.load(open(text_feats_path, 'rb'))
+        assert text_feats.shape[0] == len(base_ones)
+        text_feats_base = text_feats[base_ones]
         self.register_buffer('text_feats', text_feats)
+        self.register_buffer('text_feats_base', text_feats_base)
         self.use_focal_ce = use_focal_ce
 
     @classmethod
@@ -102,10 +108,18 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         )
         ret['test_pooler'] = test_pooler
         ret['use_focal_ce'] = cfg.MODEL.ROI_BOX_HEAD.USE_FOCAL_CE
+    
         return ret 
     
     def forward(self,x):
-        scores = self.logit_scale.exp() * self.get_logits(x, self.text_feats)
+        if self.training:
+            text_feats = self.text_feats_base
+        else:
+            text_feats = self.text_feats
+        if not self.upscale:
+            scores = self.logit_scale.exp() * self.get_logits(x, text_feats)
+        else:
+            scores = 1/(0.1*self.logit_scale) * self.get_logits(x, text_feats)
         if not self.training:
             scores[:, self.unused_index] = float('-inf')
         proposal_deltas = self.bbox_pred(x)
@@ -313,10 +327,12 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         boxes = self.predict_boxes(predictions, proposals)
         scores = self.predict_probs(predictions, proposals) # already softmax or sigmoid
         image_shapes = [x.image_size for x in proposals]
-        
         # multi-level cropping
         proposal_boxes = [p.proposal_boxes for p in proposals]
+    
+        # vlm_box_features = self.test_pooler([clip_feats], [Boxes(box) for box in boxes])
         vlm_box_features = self.test_pooler([clip_feats], proposal_boxes)
+
         # vlm pooler layer: clip attenpool
         vlm_box_features = attenpool(vlm_box_features)
  
@@ -324,6 +340,7 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         vlm_scores = logits_scale * self.get_logits(vlm_box_features, self.text_feats)
         num_inst_per_image = [len(p) for p in proposals]
         if not self.use_sigmoid_ce:
+            vlm_scores[:, self.unused_index] = float('-inf')
             vlm_scores = torch.nn.functional.softmax(vlm_scores, dim=1)
         else:
             vlm_scores = torch.sigmoid(vlm_scores)
@@ -372,14 +389,14 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
             boxes = boxes[valid_mask]
             scores = scores[valid_mask]
             vlm_scores = vlm_scores[valid_mask]
-        base_ones = torch.cat([self.base_ones, torch.zeros(scores.shape[1]-self.base_ones.shape[0]).to(self.base_ones.device)]).to(torch.bool)
-        base_scores = (scores **(1-self.base_alpha)) * (vlm_scores**(self.base_alpha))
-        novel_scores = (scores **(1-self.novel_beta)) * (vlm_scores**(self.novel_beta))
         
-        ensembled_scores = torch.where(base_ones, base_scores, novel_scores)
-        ensembled_scores[:,self.num_classes] = scores[:, self.num_classes]
+        base_scores = (scores **(1-self.base_alpha)) * (vlm_scores**(self.base_alpha))
+        novel_scores = (scores **(1-self.novel_beta)) * (vlm_scores**(self.novel_beta)) 
+        
+        ensembled_scores = torch.where(self.base_ones, base_scores, novel_scores)
+        ensembled_scores[:,-1] = scores[:, -1]
         ensembled_scores = ensembled_scores / ensembled_scores.sum(dim=1, keepdim=True)
-        ensembled_scores = ensembled_scores[:, :self.num_classes]
+        ensembled_scores = ensembled_scores[:, :-1]
         assert ensembled_scores[:, self.unused_index].max() < 1e-5, 'unused classes should not be evaluated'
 
         num_bbox_reg_classes = boxes.shape[1] // 4
@@ -409,3 +426,20 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         result.scores = ensembled_scores
         result.pred_classes = filter_inds[:, 1]
         return result, filter_inds[:, 0]
+    
+
+def huber_loss(pred_boxes, gt_boxes,  delta=0.111, reduction='mean'):
+    assert pred_boxes.shape == gt_boxes.shape
+    weights = gt_boxes != 0.0
+    assert weights.shape == gt_boxes.shape
+    x = torch.abs(pred_boxes - gt_boxes)
+    loss = torch.where(
+        x < delta,
+        0.5 * x ** 2 * weights ,
+        (0.5 * delta ** 2 + delta* (x - delta) ) * weights
+    )
+    if reduction == 'mean':
+        loss = loss.sum()/(weights!=0).sum() if loss.numel() > 0 else 0.0 * loss.sum()
+    elif reduction == 'sum':
+        loss = loss.sum()
+    return loss

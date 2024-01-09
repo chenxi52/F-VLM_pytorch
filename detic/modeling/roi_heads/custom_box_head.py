@@ -1,6 +1,7 @@
 from detectron2.modeling.roi_heads import ROI_BOX_HEAD_REGISTRY, FastRCNNConvFCHead
 from detectron2.config import configurable
-from detectron2.layers import Conv2d, ShapeSpec, get_norm
+from detectron2.layers import Conv2d, ShapeSpec
+from ..layers.custom_batchnorm import get_norm
 from typing import List
 import fvcore.nn.weight_init as weight_init
 from torch import nn
@@ -28,7 +29,7 @@ class CustomFastRCNNConvFCHead(FastRCNNConvFCHead):
                 kernel_size=3,
                 padding=1,
                 bias=not conv_norm,
-                norm=get_norm(conv_norm, conv_dim),
+                norm=get_norm(conv_norm, conv_dim, momentum=0.997, epsilon=1e-4 ),
                 activation=nn.ReLU(),
             )
             self.add_module("conv{}".format(k + 1), conv)
@@ -41,7 +42,7 @@ class CustomFastRCNNConvFCHead(FastRCNNConvFCHead):
                 self.add_module("flatten", nn.Flatten())
             fc = nn.Linear(int(np.prod(self._output_size)), fc_dim)
             self.add_module("fc{}".format(k + 1), fc)
-            self.add_module('fc_norm{}'.format(k + 1), get_norm(conv_norm, fc_dim))
+            self.add_module('fc_norm{}'.format(k + 1), get_norm(conv_norm, fc_dim, momentum=0.997, epsilon=1e-4))
             self.add_module("fc_relu{}".format(k + 1), nn.ReLU())
             self.fcs.append(fc)
             self._output_size = fc_dim

@@ -1,5 +1,6 @@
 from detectron2.modeling.backbone.build import BACKBONE_REGISTRY
-from detectron2.layers import Conv2d, ShapeSpec, get_norm
+from detectron2.layers import Conv2d, ShapeSpec
+from ...layers.custom_batchnorm import get_norm
 from detic.modeling.clip import clip
 from detectron2.modeling.backbone.fpn import LastLevelMaxPool, FPN
 from typing import Dict
@@ -59,7 +60,7 @@ class ClipFPN(FPN):
 
         for idx, in_channels in enumerate(in_channels_per_feature):
             lateral_norm = get_norm("", out_channels)
-            output_norm = get_norm(norm, out_channels)
+            output_norm = get_norm(norm, out_channels, momentum=0.997, epsilon=1e-4)
 
             lateral_conv = Conv2d(
                 in_channels, out_channels, kernel_size=1, bias=False, norm=lateral_norm

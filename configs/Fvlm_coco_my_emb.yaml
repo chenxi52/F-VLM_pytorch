@@ -2,9 +2,9 @@ _BASE_: "Base/Base_Fvlm_coco_1x.yaml"
 MODEL:
   BACKBONE:
     TYPE: "RN50"
-  CLIP_TEXT_FEATS_PATH: "datasets/coco/embeddings/resnet_50/coco_embed_80.npy"
+  CLIP_TEXT_FEATS_PATH: "datasets/coco/coco_cls.pkl"
   FPN: 
-    NORM: "BN" # 'SyncBN'  or ""
+    NORM: "SyncBN" # 'SyncBN'  or ""
     ADD_PE: False
   RPN: # default "syncBN”
     HEAD_NAME: 'CustomStandardRPNHead'
@@ -14,7 +14,6 @@ MODEL:
     NAME: 'CustomRPN'
   ROI_HEADS:
     BATCH_SIZE_PER_IMAGE: 512 
-    SCORE_THRESH_TEST: 0.02
     NUM_CLASSES: 48 # num of seen classes
   ROI_BOX_HEAD:
     NAME: 'CustomFastRCNNConvFCHead'
@@ -39,7 +38,7 @@ SOLVER:
   OPTIMIZER: 'SGD'
   WEIGHT_DECAY: 0.01
   LR_SCHEDULER_NAME: "WarmupMultiStepLR"
-  WARMUP_FACTOR: 0.01
+  WARMUP_FACTOR: 0.16
   WARMUP_METHOD: "linear"
   WARMUP_ITERS: 1000
   STEPS: (10125, 10688, 10869)

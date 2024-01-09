@@ -1,6 +1,7 @@
 from detectron2.modeling.roi_heads import MaskRCNNConvUpsampleHead, ROI_MASK_HEAD_REGISTRY, BaseMaskRCNNHead
 from detectron2.config import configurable
-from detectron2.layers import Conv2d, ConvTranspose2d, ShapeSpec, cat, get_norm
+from detectron2.layers import Conv2d, ConvTranspose2d, ShapeSpec, cat
+from ..layers.custom_batchnorm import get_norm
 from torch import nn
 import fvcore.nn.weight_init as weight_init
 
@@ -26,7 +27,7 @@ class CustomMaskRCNNConvUpsampleHead(MaskRCNNConvUpsampleHead):
                 stride=1,
                 padding=1,
                 bias=not conv_norm,
-                norm=get_norm(conv_norm, conv_dim),
+                norm=get_norm(conv_norm, conv_dim, momentum=0.997, epsilon=1e-4),
                 activation=nn.ReLU(),
             )
             self.add_module("mask_fcn{}".format(k + 1), conv)
@@ -37,7 +38,7 @@ class CustomMaskRCNNConvUpsampleHead(MaskRCNNConvUpsampleHead):
             cur_channels, conv_dims[-1], kernel_size=2, stride=2, padding=0
         )
         self.add_module("deconv_relu", nn.ReLU())
-        self.norm = get_norm(conv_norm, conv_dims[-1])
+        self.norm = get_norm(conv_norm, conv_dims[-1], momentum=0.997, epsilon=1e-4)
         cur_channels = conv_dims[-1]
 
         self.predictor = Conv2d(cur_channels, num_classes, kernel_size=1, stride=1, padding=0)

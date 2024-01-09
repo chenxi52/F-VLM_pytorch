@@ -244,16 +244,12 @@ class SAMVitDet(SAMAggregatorNeck):
             use_residual=False,
             num_outs = 5):
         super(SAMAggregatorNeck, self).__init__()
-        self.kernel_size = kernel_size
-        self.norm_cfg = norm_cfg
-        self.act_cfg = act_cfg
         self.out_channels = out_channels
         self.stride = stride
         self.up_sample_scale = up_sample_scale
 
         self._square_pad = square_pad
         self.anchor_stride= anchor_stride
-        self.use_residual = use_residual
         self.num_outs = num_outs
 
         self.fpn1 = nn.Sequential(

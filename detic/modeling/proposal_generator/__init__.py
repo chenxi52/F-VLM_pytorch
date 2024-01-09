@@ -1,1 +1,1 @@
-from .custom_rpn import CustomStandardRPNHead
+from .custom_rpn import CustomStandardRPNHead, CustomRPN
