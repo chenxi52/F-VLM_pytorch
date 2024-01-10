@@ -8,6 +8,8 @@ from fvcore.common.file_io import PathManager
 from detectron2.data import DatasetCatalog, MetadataCatalog
 from detectron2.data.datasets.lvis import get_lvis_instances_meta
 import json
+from lvis import LVIS
+
 from detectron2.data.datasets.lvis_v1_categories import LVIS_CATEGORIES as LVIS_V1_CATEGORIES
 logger = logging.getLogger(__name__)
 
@@ -24,28 +26,6 @@ def custom_register_lvis_instances(name, metadata, json_file, image_root):
         evaluator_type="lvis", **metadata
     )
 
-def _get_metadata(cat):
-    if cat == 'all':
-        return get_lvis_instances_meta('lvis_v1_train')
-    elif cat == 'seen':
-        assert len(LVIS_V1_CATEGORIES) == 1203
-        cat_ids = [k["id"] for k in LVIS_V1_CATEGORIES]
-        assert min(cat_ids) == 1 and max(cat_ids) == len(
-            cat_ids
-        ), "Category ids are not in [1, #categories], as expected"
-        # Ensure that the category list is sorted by id
-        lvis_categories = sorted(LVIS_V1_CATEGORIES, key=lambda x: x["id"])
-        thing_classes = [k["synonyms"][0].replace('_', ' ') for k in lvis_categories if k['frequency'] not in 'r']
-        thing_ids = [k["id"] for k in lvis_categories if k['frequency'] not in 'r']
-        thing_dataset_id_to_contiguous_id = {
-            x: i for i, x in enumerate(thing_ids)}
-        return {
-            "thing_dataset_id_to_contiguous_id": thing_dataset_id_to_contiguous_id,
-            "thing_classes": thing_classes,
-            "thing_ids": thing_ids}
-    else:
-        raise ValueError("Invalid value for 'cat'.")
-
 
 def custom_load_lvis_json(json_file, image_root, dataset_name=None):
     '''
@@ -54,7 +34,6 @@ def custom_load_lvis_json(json_file, image_root, dataset_name=None):
       convert neg_category_ids
       add pos_category_ids
     '''
-    from lvis import LVIS
 
     json_file = PathManager.get_local_path(json_file)
 
@@ -101,17 +80,17 @@ def custom_load_lvis_json(json_file, image_root, dataset_name=None):
         record["width"] = img_dict["width"]
         record["not_exhaustive_category_ids"] = img_dict.get(
             "not_exhaustive_category_ids", [])
-        # record["neg_category_ids"] = img_dict.get("neg_category_ids", [])
+        record["neg_category_ids"] = img_dict.get("neg_category_ids", [])
         # NOTE: modified by Xingyi: convert to 0-based
-        # record["neg_category_ids"] = [
-        #     catid2contid[x] for x in record["neg_category_ids"]]
+        record["neg_category_ids"] = [
+            catid2contid[x] for x in record["neg_category_ids"]]
         if 'pos_category_ids' in img_dict:
             record['pos_category_ids'] = [
                 catid2contid[x] for x in img_dict.get("pos_category_ids", [])]
-        # if 'captions' in img_dict:
-        #     record['captions'] = img_dict['captions']
-        # if 'caption_features' in img_dict:
-        #     record['caption_features'] = img_dict['caption_features']
+        if 'captions' in img_dict:
+            record['captions'] = img_dict['captions']
+        if 'caption_features' in img_dict:
+            record['caption_features'] = img_dict['caption_features']
         image_id = record["image_id"] = img_dict["id"]
 
         objs = []
@@ -139,14 +118,13 @@ def custom_load_lvis_json(json_file, image_root, dataset_name=None):
     return dataset_dicts
 
 _CUSTOM_SPLITS_LVIS = {
-    # "lvis_v1_train_oriorder": ("coco/", "lvis/zero-shot/lvis_v1_train_seen_ori_order.json", 'all'),
-    "lvis_v1_zeroshot_train": ("coco/", "lvis/zero-shot/lvis_v1_train_seen.json", 'seen'),
+    "lvis_v1_zeroshot_train": ("coco/", "lvis/zero-shot/lvis_v1_train_seen.json"),
 }
 
-for key, (image_root, json_file, cat) in _CUSTOM_SPLITS_LVIS.items():
+for key, (image_root, json_file) in _CUSTOM_SPLITS_LVIS.items():
     custom_register_lvis_instances(
         key,
-        _get_metadata(cat),
+        get_lvis_instances_meta(key),
         os.path.join("datasets", json_file) if "://" not in json_file else json_file,
         os.path.join("datasets", image_root),
     )
@@ -158,8 +136,15 @@ def get_contigous_ids_lvis(cat):
         return list(range(1203))
     elif cat == 'seen':
         # 拿到所有的 seen id
-        base_ids = _get_metadata('seen')['thing_ids']
-        contiguous_ids = [x-1 for x in base_ids]
+        json_file =  "lvis/zero-shot/lvis_v1_train_seen.json"
+        json_file = os.path.join("datasets", json_file) if "://" not in json_file else json_file
+        lvis_api = LVIS(json_file)
+        catid2contid = {x['id']: i for i, x in enumerate(
+            sorted(lvis_api.dataset['categories'], key=lambda x: x['id']))}
+        base_ids = [x['id'] for x in lvis_api.dataset['categories'] if x['frequency'] not in 'r']
+        contiguous_ids = [catid2contid[x] for x in base_ids]
+    else:
+        assert NotImplementedError
     return contiguous_ids
 
 
