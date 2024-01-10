@@ -9,7 +9,7 @@ from detectron2.layers import cat
 from detectron2.config import configurable
 from detectron2.layers import ShapeSpec, batched_nms, cat, cross_entropy, nonzero_tuple
 from detectron2.structures import Instances, Boxes
-from detectron2.modeling.roi_heads.fast_rcnn import FastRCNNOutputLayers
+from detectron2.modeling.roi_heads.fast_rcnn import FastRCNNOutputLayers, _log_classification_stats
 import numpy as np
 import pickle
 from detectron2.modeling.poolers import ROIPooler
@@ -47,7 +47,7 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
     ):
         super().__init__(input_shape, **kwargs)
         self.upscale = True
-        if self.upscale :
+        if self.upscale:
             self.logit_scale = nn.Parameter(torch.ones([])) 
         else:
             self.logit_scale = nn.Parameter(torch.ones([])*np.log(1/0.07))
@@ -62,9 +62,9 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
                 base_ones[get_contigous_ids_lvis('seen')] = 1
             base_ones = torch.cat([base_ones, torch.ones(1)]).to(torch.bool)
             self.register_buffer('base_ones', base_ones)
-
-            unused_index = get_contigous_ids('unused') # [0-79]
-            self.register_buffer('unused_index', torch.tensor(unused_index))
+            if 'coco' in dataset:
+                unused_index = get_contigous_ids('unused')
+                self.register_buffer('unused_index', torch.tensor(unused_index))
             
             del self.bbox_pred
             input_size = input_shape.channels * \
@@ -90,7 +90,7 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
             text_feats = torch.from_numpy(text_feats).to(torch.float32)
         elif text_feats_path.endswith('pkl'):
             text_feats = pickle.load(open(text_feats_path, 'rb'))
-        assert text_feats.shape[0] == len(base_ones)
+        assert text_feats.shape[0] == len(base_ones), 'text_feats should be the same length as base_ones'
         text_feats_base = text_feats[base_ones]
         self.register_buffer('text_feats', text_feats)
         self.register_buffer('text_feats_base', text_feats_base)
@@ -126,7 +126,7 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
             scores = self.logit_scale.exp() * self.get_logits(x, text_feats)
         else:
             scores = 1/(0.1*self.logit_scale) * self.get_logits(x, text_feats)
-        if not self.training:
+        if not self.training and hasattr(self, 'unused_index'):
             scores[:, self.unused_index] = float('-inf')
         proposal_deltas = self.bbox_pred(x)
         return  scores, proposal_deltas
@@ -146,7 +146,7 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
             cat([p.gt_classes for p in proposals], dim=0) if len(proposals) else torch.empty(0)
         )
         # sigmoid ce
-        self.log_classification_stats(scores, gt_classes)
+        _log_classification_stats(scores, gt_classes)
 
         if len(proposals):
             proposal_boxes = cat([p.proposal_boxes.tensor for p in proposals], dim=0)  # Nx4
@@ -167,7 +167,7 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         else:
             if self.ignore_zero_cats:
                 weight = torch.ones(self.num_classes+1).to(scores.device)
-                weight[self.num_classes] *= self.background_weight
+                weight[-1] *= self.background_weight
             loss_cls = cross_entropy(scores, gt_classes, reduction="mean", weight=weight)
             
         losses = {
@@ -177,38 +177,6 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
             ),
         }
         return {k: v * self.loss_weight.get(k, 1.0) for k, v in losses.items()}
-
-
-    def log_classification_stats(self, pred_logits, gt_classes, prefix="fast_rcnn"):
-        """
-        Log the classification metrics to EventStorage.
-
-        Args:
-            pred_logits: Rx(K+1) logits. The last column is for background class.
-            gt_classes: R labels
-        """
-        num_instances = gt_classes.numel()
-        if num_instances == 0:
-            return
-        pred_classes = pred_logits.argmax(dim=1)
-        bg_class_ind = self.num_classes
-
-        fg_inds = (gt_classes >= 0) & (gt_classes < bg_class_ind)
-        num_fg = fg_inds.nonzero().numel()
-        fg_gt_classes = gt_classes[fg_inds]
-        fg_pred_classes = pred_classes[fg_inds]
-
-        # num_false: not equal to gt_classes
-        num_false_negative = (fg_pred_classes>=bg_class_ind).nonzero().numel()
-        num_accurate = (pred_classes == gt_classes).nonzero().numel()
-        fg_num_accurate = (fg_pred_classes == fg_gt_classes).nonzero().numel()
-
-        storage = get_event_storage()
-        storage.put_scalar(f"{prefix}/cls_accuracy", num_accurate / num_instances)
-        if num_fg > 0:
-            storage.put_scalar(f"{prefix}/fg_cls_accuracy", fg_num_accurate / num_fg)
-            storage.put_scalar(f"{prefix}/false_negative", num_false_negative / num_fg)
-
 
 
     def sigmoid_cross_entropy_loss(self, pred_class_logits, gt_classes, consider_background=False):
@@ -345,7 +313,7 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         logits_scale = 1/0.01
         vlm_scores = logits_scale * self.get_logits(vlm_box_features, self.text_feats)
         num_inst_per_image = [len(p) for p in proposals]
-        if not self.use_sigmoid_ce:
+        if not self.use_sigmoid_ce and hasattr(self, 'unused_index'):
             vlm_scores[:, self.unused_index] = float('-inf')
             vlm_scores = torch.nn.functional.softmax(vlm_scores, dim=1)
         else:
@@ -403,7 +371,8 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         ensembled_scores[:,-1] = scores[:, -1]
         ensembled_scores = ensembled_scores / ensembled_scores.sum(dim=1, keepdim=True)
         ensembled_scores = ensembled_scores[:, :-1]
-        assert ensembled_scores[:, self.unused_index].max() < 1e-5, 'unused classes should not be evaluated'
+        if hasattr(self, 'unused_index'):
+            assert ensembled_scores[:, self.unused_index].max() < 1e-5, 'unused classes should not be evaluated'
 
         num_bbox_reg_classes = boxes.shape[1] // 4
         boxes = Boxes(boxes.reshape(-1, 4))

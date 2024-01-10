@@ -4,7 +4,7 @@ MODEL:
     TYPE: "RN50"
   CLIP_TEXT_FEATS_PATH: "datasets/lvis/lvis_cls.pkl" #********
   FPN: 
-    NORM: "BN" # 'SyncBN'   or ""
+    NORM: "SyncBN" # 'SyncBN'   or ""
     ADD_PE: False
   RPN:
     HEAD_NAME: 'CustomStandardRPNHead'
@@ -16,7 +16,6 @@ MODEL:
   ROI_HEADS:
     BATCH_SIZE_PER_IMAGE: 512 
     NUM_CLASSES: 866
-    BATCH_SIZE_PER_IMAGE: 32 #the sampling num 
   ROI_BOX_HEAD:
     NAME: 'CustomFastRCNNConvFCHead'
     NUM_FC: 1
