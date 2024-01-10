@@ -130,17 +130,17 @@ for key, (image_root, json_file) in _CUSTOM_SPLITS_LVIS.items():
     )
 
 
-def get_lvis_22k_meta():
-    from .lvis_22k_categories import CATEGORIES
-    cat_ids = [k["id"] for k in CATEGORIES]
-    assert min(cat_ids) == 1 and max(cat_ids) == len(
-        cat_ids
-    ), "Category ids are not in [1, #categories], as expected"
-    # Ensure that the category list is sorted by id
-    lvis_categories = sorted(CATEGORIES, key=lambda x: x["id"])
-    thing_classes = [k["name"] for k in lvis_categories]
-    meta = {"thing_classes": thing_classes}
-    return meta
+# def get_lvis_22k_meta():
+#     from .lvis_22k_categories import CATEGORIES
+#     cat_ids = [k["id"] for k in CATEGORIES]
+#     assert min(cat_ids) == 1 and max(cat_ids) == len(
+#         cat_ids
+#     ), "Category ids are not in [1, #categories], as expected"
+#     # Ensure that the category list is sorted by id
+#     lvis_categories = sorted(CATEGORIES, key=lambda x: x["id"])
+#     thing_classes = [k["name"] for k in lvis_categories]
+#     meta = {"thing_classes": thing_classes}
+#     return meta
 
 # _CUSTOM_SPLITS_LVIS_22K = {
 #     "lvis_v1_train_22k": ("coco/", "lvis/lvis_v1_train_lvis-22k.json"),

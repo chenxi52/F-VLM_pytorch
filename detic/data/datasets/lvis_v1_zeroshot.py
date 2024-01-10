@@ -17,7 +17,6 @@ __all__ = ["custom_load_lvis_json", "custom_register_lvis_instances"]
 
 def custom_register_lvis_instances(name, metadata, json_file, image_root):
     """
-    metadata : a b
     """
     DatasetCatalog.register(name, lambda: custom_load_lvis_json(
         json_file, image_root, name))
@@ -34,6 +33,7 @@ def custom_load_lvis_json(json_file, image_root, dataset_name=None):
       convert neg_category_ids
       add pos_category_ids
     '''
+    from lvis import LVIS
 
     json_file = PathManager.get_local_path(json_file)
 
@@ -80,17 +80,17 @@ def custom_load_lvis_json(json_file, image_root, dataset_name=None):
         record["width"] = img_dict["width"]
         record["not_exhaustive_category_ids"] = img_dict.get(
             "not_exhaustive_category_ids", [])
-        record["neg_category_ids"] = img_dict.get("neg_category_ids", [])
-        # NOTE: modified by Xingyi: convert to 0-based
-        record["neg_category_ids"] = [
-            catid2contid[x] for x in record["neg_category_ids"]]
-        if 'pos_category_ids' in img_dict:
-            record['pos_category_ids'] = [
-                catid2contid[x] for x in img_dict.get("pos_category_ids", [])]
-        if 'captions' in img_dict:
-            record['captions'] = img_dict['captions']
-        if 'caption_features' in img_dict:
-            record['caption_features'] = img_dict['caption_features']
+        # record["neg_category_ids"] = img_dict.get("neg_category_ids", [])
+        # # NOTE: modified by Xingyi: convert to 0-based
+        # record["neg_category_ids"] = [
+        #     catid2contid[x] for x in record["neg_category_ids"]]
+        # if 'pos_category_ids' in img_dict:
+        #     record['pos_category_ids'] = [
+        #         catid2contid[x] for x in img_dict.get("pos_category_ids", [])]
+        # if 'captions' in img_dict:
+        #     record['captions'] = img_dict['captions']
+        # if 'caption_features' in img_dict:
+        #     record['caption_features'] = img_dict['caption_features']
         image_id = record["image_id"] = img_dict["id"]
 
         objs = []
@@ -118,8 +118,10 @@ def custom_load_lvis_json(json_file, image_root, dataset_name=None):
     return dataset_dicts
 
 _CUSTOM_SPLITS_LVIS = {
+    # "lvis_v1_train+coco": ("coco/", "lvis/lvis_v1_train+coco_mask.json"),
     "lvis_v1_zeroshot_train": ("coco/", "lvis/zero-shot/lvis_v1_train_seen.json"),
 }
+
 
 for key, (image_root, json_file) in _CUSTOM_SPLITS_LVIS.items():
     custom_register_lvis_instances(
@@ -130,6 +132,7 @@ for key, (image_root, json_file) in _CUSTOM_SPLITS_LVIS.items():
     )
 
 
+
 def get_contigous_ids_lvis(cat):
     # 直接输出 相对于1203类别的continuous id, 
     if cat == 'all':
@@ -137,7 +140,7 @@ def get_contigous_ids_lvis(cat):
     elif cat == 'seen':
         # 拿到所有的 seen id
         json_file =  "lvis/zero-shot/lvis_v1_train_seen.json"
-        json_file = os.path.join("datasets", json_file) if "://" not in json_file else json_file
+        json_file = os.path.join("datasets", json_file) 
         lvis_api = LVIS(json_file)
         catid2contid = {x['id']: i for i, x in enumerate(
             sorted(lvis_api.dataset['categories'], key=lambda x: x['id']))}
