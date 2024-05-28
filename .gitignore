@@ -82,3 +82,10 @@ mprofile_20231208110905.dat
 *.sh
 remove_lvis_rare.py
 
+pic/*
+box_to_seg.py
+cog.yaml
+test*.py
+test_maskAp.py
+vis*
+docs/*

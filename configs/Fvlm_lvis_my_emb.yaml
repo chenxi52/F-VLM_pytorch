@@ -1,8 +1,8 @@
 _BASE_: "Base/Base_Fvlm_lvis_1x.yaml"
 MODEL:
   BACKBONE:
-    TYPE: "RN50"
-  CLIP_TEXT_FEATS_PATH: "datasets/lvis/lvis_cls.pkl" #********
+    TYPE: "models/RN50.pt" #ckpt
+  CLIP_TEXT_FEATS_PATH: "/users/cx_xchen/DATASETS/lvis/lvis_cls.pkl" #********
   FPN: 
     NORM: "SyncBN" # 'SyncBN'   or ""
     ADD_PE: False
@@ -58,4 +58,7 @@ SOLVER:
 INPUT:
   CLIP_TRAIN_SIZE: 1024
   CUSTOM_AUG: ResizeLongLSJ  #!!!!
+TEST:
+  EVAL_PERIOD: 900000000 # change
+  IMS_PER_BATCH: 1 #every gpu has most 2 images  # change
 OUTPUT_DIR: './output/clipRpn/FVLM_Lvis'

@@ -7,18 +7,16 @@ from detectron2.utils.events import get_event_storage
 from detectron2.config import configurable
 from detectron2.structures import ImageList, Instances
 from detectron2.utils.visualizer import Visualizer
-from detectron2.layers import  ShapeSpec
 
 from detectron2.modeling.meta_arch.build import META_ARCH_REGISTRY
 from detectron2.modeling.meta_arch.rcnn import GeneralizedRCNN
 from detectron2.utils.visualizer import Visualizer
 from detectron2.data.detection_utils import convert_image_to_rgb
 from detectron2.modeling import build_backbone, build_proposal_generator, build_roi_heads
-from detic.modeling.sam import sam_model_registry
 import torch.nn.functional as F
 from detic.modeling.clip import clip
-from detic.modeling.sam.modeling import SAMVitDet
 from detic.prompt_engineering import get_prompt_templates
+from detic import constants
 from torch.cuda.amp import autocast
 import detectron2.utils.comm as comm
 import pickle
@@ -30,45 +28,43 @@ class ClipOpenDetector(GeneralizedRCNN):
     @configurable
     def __init__(
         self,
-        fp16=False,
         mask_thr_binary=0.5,
         do_postprocess=True,
+        clip_model=None,
         fpn_in_features=[],
         clip_train_size=1024,
-        sam_on = False,
         eval_ar= False,
         amp_enabled=True,
         **kwargs
     ):
-        self.fp16=fp16
         super().__init__(**kwargs)
         assert self.proposal_generator is not None
         
-        self.sam_on = sam_on
-        self.sam = None
         # if set here, the clip is loaded again?
+        self.clip = clip_model
         self.mask_thr_binary = mask_thr_binary
         self.do_postprocess = do_postprocess
 
         self.fpn_in_features = fpn_in_features
+        ####可以从这里保存 text features 、
+        # self.text_feats =  self.get_custom_text_feat(constants.COCO_SEEN_CLS)
+        # if comm.is_main_process():
+        #     with open('datasets/coco/coco_cls_seen.pkl', 'wb') as f:
+        #         pickle.dump(self.text_feats, f)
+        #     sys.exit()
+        ##########
+        for name, params in self.clip.named_parameters():
+            params.requires_grad = False
         self.clip_train_size = clip_train_size
         self.eval_ar = eval_ar
         self.amp_enabled = amp_enabled
-    
+
     @classmethod
     def from_config(cls, cfg):
         # roi_heads include box_heads, mask_heads
+        clip_model,  _ = clip.load(cfg.MODEL.BACKBONE.TYPE)
         # FPN backbone
-        if cfg.MODEL.BACKBONE.TYPE=='RN50':
-            output_shape = {'stem': ShapeSpec(channels=64, height=None, width=None, stride=4), 
-            'res2': ShapeSpec(channels=256, height=None, width=None, stride=4), 
-            'res3': ShapeSpec(channels=512, height=None, width=None, stride=8), 
-            'res4': ShapeSpec(channels=1024, height=None, width=None, stride=16), 
-            'res5': ShapeSpec(channels=2048, height=None, width=None, stride=32), 
-            'atten': ShapeSpec(channels=2048, height=None, width=None, stride=32)}
-        else:
-            assert NotImplementedError
-        backbone = build_backbone(cfg, output_shape)
+        backbone = build_backbone(cfg, clip_model.visual.output_shape)
         # HACK tiny_sam output_channel == FPN.out_channels = 256
         ret=({
             "backbone": backbone, 
@@ -78,13 +74,13 @@ class ClipOpenDetector(GeneralizedRCNN):
             "vis_period": cfg.VIS_PERIOD,
             "pixel_mean": cfg.MODEL.PIXEL_MEAN,
             "pixel_std": cfg.MODEL.PIXEL_STD,
-            'fp16': cfg.FP16,
+            "clip_model": clip_model,
             "do_postprocess": cfg.TEST.DO_POSTPROCESS,
             "clip_train_size":cfg.INPUT.CLIP_TRAIN_SIZE,
             "mask_thr_binary":cfg.TEST.MASK_THR_BINARY,
             'fpn_in_features': cfg.MODEL.FPN.IN_FEATURES,
             "eval_ar": cfg.EVAL_AR,
-            "amp_enabled": cfg.SOLVER.AMP.ENABLED,
+            "amp_enabled": cfg.SOLVER.AMP.ENABLED
         })
         return ret
     
@@ -105,27 +101,27 @@ class ClipOpenDetector(GeneralizedRCNN):
             
    
     def extract_feat(self, images):
-        # extrac feat from clip(multi-level feats) and sam;
         # to_imageList: padding by size_divisibility, 1024 by default
    
         clip_images = self.to_imageList(images)
-        sam_feat = sam_fpn_feats = None
-        # we set no_grad to clip and sam image extractor
-        if self.amp_enabled:
-            with autocast():
-                clip_features = self.clip.encode_image_feature(clip_images.tensor.half())
-                clip_fpn_features = self.backbone(clip_features)
+        # if self.amp_enabled:
+        #     with autocast():
+        clip_features = self.clip.encode_image_feature(clip_images.tensor)
+        clip_features = {k: v.float() for k, v in clip_features.items()}
+        clip_fpn_features = self.backbone(clip_features)
             
-        else:
-            clip_features = self.clip.encode_image_feature(clip_images.tensor.float())
-            clip_fpn_features = self.backbone(clip_features)
+        # else:
+        #     clip_features = self.clip.encode_image_feature(clip_images.tensor.float())
+        #     clip_features = {k: v.float() for k, v in clip_features.items()}
+        #     clip_fpn_features = self.backbone(clip_features)
+        #     clip_fpn_features = {k: v.float() for k, v in clip_fpn_features.items()}
          
-        return sam_feat, sam_fpn_feats, clip_features, clip_fpn_features, clip_images
+        return clip_features, clip_fpn_features, clip_images
     
 
     def forward(self, batched_inputs: List[Dict[str, torch.Tensor]]):
         images = [self._move_to_current_device(x["image"]) for x in batched_inputs]
-        sam_image_feats, sam_fpn_feats, clip_features, clip_fpn_features, clip_images = self.extract_feat(images)
+        clip_features, clip_fpn_features, clip_images = self.extract_feat(images)
         gt_instances = [x["instances"].to(self.device) for x in batched_inputs] if self.training else None
         proposals, proposal_losses = self.proposal_generator(
             clip_images, clip_fpn_features, gt_instances)
@@ -134,8 +130,7 @@ class ClipOpenDetector(GeneralizedRCNN):
             if storage.iter % self.vis_period == 0:
                 self.visualize_training(batched_inputs, proposals)
        
-        results, detector_losses = self.roi_heads(sam=self.sam, 
-                                            sam_features=[sam_image_feats, sam_fpn_feats],
+        results, detector_losses = self.roi_heads(
                                             clip_features=[clip_features['res5'], clip_fpn_features], 
                                             attnpool=self.clip.visual.attnpool, 
                                             proposals=proposals, 
@@ -186,7 +181,31 @@ class ClipOpenDetector(GeneralizedRCNN):
         return processed_results
     
 
+    @torch.no_grad()
+    def get_custom_text_feat(self, class_names):
+        def extract_mean_emb(text):
+            tokens = clip.tokenize(text).cuda()
+            if len(text) > 10000:
+                text_features = torch.cat([
+                    self.clip.encode_text(text[:len(text) // 2]),
+                    self.clip.encode_text(text[len(text) // 2:])],
+                    dim=0)
+            else:
+                text_features = self.clip.encode_text(tokens)
+            
+            text_features = torch.mean(text_features, 0, keepdims=True)
+            return text_features[0]
 
+        templates = get_prompt_templates()
+        clss_embeddings = []
+        for clss in class_names:
+            txts = [template.format(clss.replace('-other','').replace('-merged','').replace('-stuff','')) for template in templates]
+            clss_embeddings.append(extract_mean_emb(txts))
+        txts = ['background']
+        clss_embeddings.append(extract_mean_emb(txts))
+        text_emb = torch.stack(clss_embeddings, dim=0)
+        text_emb /= text_emb.norm(dim=-1, keepdim=True) 
+        return text_emb
     
     def visualize_training(self, batched_inputs, proposals, pg_name=''):
 

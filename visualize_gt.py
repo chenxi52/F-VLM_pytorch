@@ -3,18 +3,9 @@
 # Copyright (c) Facebook, Inc. and its affiliates.
 import logging
 import os
-import sys
-import re
-from collections import OrderedDict
 import torch
-from torch.nn.parallel import DistributedDataParallel
-import time
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack
 import torch.nn as nn
-import datetime
-from fvcore.common.timer import Timer
-import detectron2.utils.comm as comm
-from detectron2.checkpoint import DetectionCheckpointer, PeriodicCheckpointer
 from detic.custom_checkpointer import samCheckpointer
 from detectron2.config import get_cfg
 from detectron2.data import (
@@ -22,41 +13,21 @@ from detectron2.data import (
     build_detection_test_loader,
 )
 from detectron2.engine import default_argument_parser, default_setup, launch
-from detectron2.evaluation import (
-    inference_on_dataset,
-    print_csv_format,
-    LVISEvaluator,
-    COCOEvaluator,
-)
 from detectron2.modeling import build_model
-from detectron2.solver import build_lr_scheduler, build_optimizer
-from detectron2.utils.events import (
-    CommonMetricPrinter,
-    EventStorage,
-    JSONWriter,
-    TensorboardXWriter,
-)
-from detectron2.data.dataset_mapper import DatasetMapper
+
 from detectron2.data.build import build_detection_train_loader
-from detectron2.utils.logger import setup_logger
-from torch.cuda.amp import GradScaler
 from detectron2.structures import Instances, Boxes, BoxMode
-from detic.config import add_detic_config
+# from detic.config import add_detic_config
 from detic.data.custom_build_augmentation import build_custom_augmentation
-from detic.data.custom_dataset_dataloader import  build_custom_train_loader
-from detic.data.custom_dataset_mapper import CustomDatasetMapper, DetrDatasetMapper, SamDatasetMapper
-from detic.custom_solver import build_custom_optimizer, build_sam_optimizer
-from detic.evaluation.oideval import OIDEvaluator
-from detic.evaluation.custom_coco_eval import CustomCOCOEvaluator
-from detic.modeling.utils import reset_cls_test
+from detic.data.custom_dataset_mapper import SamDatasetMapper
 from detic.config import add_rsprompter_config
 logger = logging.getLogger("Visulizer")
-import numpy as np
 import cv2
 from detectron2.utils.visualizer import Visualizer
 from detectron2.evaluation.evaluator import inference_context
 from detic.data.custom_build_augmentation import build_custom_augmentation
-from detic.data.build import custom_build_detection_test_loader
+from detectron2.data import MetadataCatalog, build_detection_test_loader 
+conf_threshold =0.5
 
 def create_instances(predictions, image_size):
     # for train_dataset
@@ -66,20 +37,40 @@ def create_instances(predictions, image_size):
     ret.pred_masks = predictions.gt_masks.tensor[:, :image_size[0], :image_size[1]]
     return ret
 
+# def create_instances(predictions, image_size):
+#     ret = Instances(image_size)
+#     # this score is the box score?
+#     score = np.asarray([x["score"] for x in predictions])
+#     chosen = (score > args.conf_threshold).nonzero()[0]
+#     score = score[chosen]
+#     bbox = np.asarray([predictions[i]["bbox"] for i in chosen]).reshape(-1, 4)
+#     bbox = BoxMode.convert(bbox, BoxMode.XYWH_ABS, BoxMode.XYXY_ABS)
 
-def create_pred_instances(predictions, image_size, metadata):
+#     labels = np.asarray([dataset_id_map(predictions[i]["category_id"]) for i in chosen])
+
+#     ret.scores = score
+#     ret.pred_boxes = Boxes(bbox)
+#     ret.pred_classes = labels
+
+#     try:
+#         ret.pred_masks = [predictions[i]["segmentation"] for i in chosen]
+#     except KeyError:
+#         pass
+#     return ret
+
+def create_pred_instances(predictions, image_size):
     ret = Instances(image_size)
     score = predictions.scores.cpu().numpy()
-    bbox = predictions.pred_boxes.tensor.cpu().numpy()
-    # bbox = BoxMode.convert(bbox, BoxMode.XYWH_ABS, BoxMode.XYXY_ABS)
-    # labels = [metadata.thing_dataset_id_to_contiguous_id[predictions.pred_classes.cpu().numpy()[i]] for i in chosen]
-    masks = predictions.pred_masks.cpu().numpy()
+    chosen = (score > conf_threshold).nonzero()[0]
+    score = score[chosen]
+
+    bbox = predictions.pred_boxes.tensor.cpu().numpy()[chosen]
+    masks = predictions.pred_masks.cpu().numpy()[chosen]
     ret.scores = score
     ret.pred_boxes = Boxes(bbox)
     # NOTE: should change the _postprocess without interpolating to the ori_img_size
     ret.pred_masks = masks
-    ret.pred_classes = predictions.pred_classes.cpu().numpy()
-
+    ret.pred_classes = predictions.pred_classes.cpu().numpy()[chosen]
     return ret
 
 def do_train(cfg):
@@ -103,7 +94,7 @@ def setup(args):
     """
     cfg = get_cfg()
     add_rsprompter_config(cfg)
-    add_detic_config(cfg)
+    # add_detic_config(cfg)
     cfg.merge_from_file(args.config_file)
     cfg.merge_from_list(args.opts)
     if '/auto' in cfg.OUTPUT_DIR:
@@ -123,7 +114,7 @@ def do_test(cfg, model):
     # thing 可数
     MapperClass = SamDatasetMapper
     mapper = MapperClass(cfg, False, augmentations = build_custom_augmentation(cfg, False))
-    data_loader = custom_build_detection_test_loader(cfg, test_dataset, mapper=mapper)
+    data_loader = build_detection_test_loader(cfg, test_dataset, mapper=mapper)
     show_iter = 0
     with ExitStack() as stack:
         if isinstance(model, nn.Module):
@@ -138,9 +129,11 @@ def do_test(cfg, model):
                 resize_img = torch.nn.functional.interpolate(img_tensor, (data[ind]['height'],data[ind]['width']), mode='bilinear', align_corners=False)
                 resize_img = resize_img.permute(0,2,3,1).squeeze().numpy()
                 vis = Visualizer(resize_img, metadata)
-                pred_instance = outs[ind]['instances'].to('cpu')
+                pred_instance = outs[ind]['instances']
+                # outs = [outs[i]['instances'] for i in range(len(outs))]
+                pred_instance = create_pred_instances(pred_instance, resize_img.shape[:2])
                 vis_pred = vis.draw_instance_predictions(pred_instance).get_image()
-                cv2.imwrite(f'output/visualize/pred_test_{ind+show_iter*len(data)}.png', vis_pred[:,:,::-1])    
+                cv2.imwrite(f'pic/FVLM/pred_test_{ind+show_iter*len(data)}.png', vis_pred[:,:,::-1])    
                 ind+=1
             show_iter += 1
             if show_iter>=50:

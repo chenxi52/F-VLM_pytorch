@@ -6,7 +6,6 @@ import torch.nn.functional as F
 from torch import nn, Tensor
 import numpy as np
 from timm.models.layers import trunc_normal_
-# from detic.modeling.sam.modeling.prompt_encoder import PositionEmbeddingRandom
 def _get_activation_fn(activation):
     """Return an activation function given a string"""
     if activation == "relu":

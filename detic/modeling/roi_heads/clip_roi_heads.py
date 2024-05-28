@@ -7,7 +7,7 @@ from detectron2.modeling.roi_heads import select_foreground_proposals, ROIHeads
 from detectron2.modeling.poolers import ROIPooler
 from detectron2.structures import Instances, Boxes
 from detectron2.modeling.matcher import Matcher
-from detic.modeling.roi_heads import ClipRCNNOutputLayers, SamRCNNOutputLayers
+from .clip_fast_rcnn import ClipRCNNOutputLayers
 from torch import Tensor
 import math
 import inspect
@@ -36,7 +36,6 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         NOTE: this interface is experimental.
         Args:
             positional_encoding: added to FPN features
-            input_size: input size for sam image_encoder
         """
         super().__init__(**kwargs)
         for name, value in locals().items():
@@ -115,9 +114,7 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
 
     def forward( 
             self,
-            sam,
-            sam_features: [torch.Tensor, Dict[str, torch.Tensor]],
-            clip_features: [torch.Tensor, Dict[str, torch.Tensor]],
+            clip_features,
             attnpool: nn.Module,
             proposals: List[Instances],
             targets: Optional[List[Instances]] = None,
@@ -125,7 +122,6 @@ class samAnchorPromptRoiHeads(StandardROIHeads):
         """
             clip_features: output of image_encoder
             fpn_features: multi-level features output by FPN
-            sam_features: multi-level features output by samFpn
         Return: pred_instances
         """
         if self.training:

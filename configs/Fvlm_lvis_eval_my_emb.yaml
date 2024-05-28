@@ -1,7 +1,7 @@
 _BASE_: "Fvlm_lvis_my_emb.yaml"
 MODEL:
   BACKBONE:
-    TYPE: "RN50"
+    TYPE: "models/RN50.pt" 
   WEIGHTS: ""
   FPN:
     ADD_PE: False #!!!!!!

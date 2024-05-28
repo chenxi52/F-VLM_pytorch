@@ -32,7 +32,6 @@ from detectron2.utils.events import (
 from torch.cuda.amp import GradScaler
 from detic.data.custom_dataset_mapper import SamDatasetMapper
 from detic.data.custom_build_augmentation import build_custom_augmentation
-from detic.custom_checkpointer import samCheckpointer
 from detic.config import add_rsprompter_config
 from detectron2.utils.logger import setup_logger
 from detic.custom_solver import build_sam_optimizer
@@ -199,30 +198,30 @@ def freeze_module(x):
     FrozenBatchNorm2d.convert_frozen_batchnorm(x)
     return x
 
-@torch.no_grad()
-def get_custom_text_feat(clip_name, clip_model, class_names):
-    def extract_mean_emb(text):
-        tokens = clip.tokenize(text).cuda()
-        if len(text) > 10000:
-            text_features = torch.cat([
-                clip_model.encode_text(text[:len(text) // 2]),
-                clip_model.encode_text(text[len(text) // 2:])],
-                dim=0)
-        else:
-            text_features = clip_model.encode_text(tokens)
+# @torch.no_grad()
+# def get_custom_text_feat(clip_name, clip_model, class_names):
+#     def extract_mean_emb(text):
+#         tokens = clip.tokenize(text).cuda()
+#         if len(text) > 10000:
+#             text_features = torch.cat([
+#                 clip_model.encode_text(text[:len(text) // 2]),
+#                 clip_model.encode_text(text[len(text) // 2:])],
+#                 dim=0)
+#         else:
+#             text_features = clip_model.encode_text(tokens)
         
-        text_features = torch.mean(text_features, 0, keepdims=True)
-        return text_features[0]
+#         text_features = torch.mean(text_features, 0, keepdims=True)
+#         return text_features[0]
 
-    templates = get_prompt_templates()
-    clss_embeddings = []
-    for clss in class_names+['background']:
-        txts = [template.format(clss.replace('-other','').replace('-merged','').replace('-stuff','')) for template in templates]
-        clss_embeddings.append(extract_mean_emb(txts))
-    # background_embedding, _ = np.load(f'./datasets/{clip_name.replace("RN", "r")}_bg_empty_embed.npy', allow_pickle=True)
-    # clss_embeddings.append(torch.tensor(background_embedding).squeeze().to(clss_embeddings[0].device))
-    text_emb = torch.stack(clss_embeddings, dim=0)
-    return text_emb
+#     templates = get_prompt_templates()
+#     clss_embeddings = []
+#     for clss in class_names+['background']:
+#         txts = [template.format(clss.replace('-other','').replace('-merged','').replace('-stuff','')) for template in templates]
+#         clss_embeddings.append(extract_mean_emb(txts))
+#     # background_embedding, _ = np.load(f'./datasets/{clip_name.replace("RN", "r")}_bg_empty_embed.npy', allow_pickle=True)
+#     # clss_embeddings.append(torch.tensor(background_embedding).squeeze().to(clss_embeddings[0].device))
+#     text_emb = torch.stack(clss_embeddings, dim=0)
+#     return text_emb
 
 def main(args):
     cfg = setup(args)
@@ -231,11 +230,11 @@ def main(args):
         wandb.init(project='SamDetector', name=TIMESTAMP, config=cfg)
     #####
     model = build_model(cfg)
-    clip_model, _ = clip.load(cfg.MODEL.BACKBONE.TYPE)
-    if not args.eval_only:
-        model.train()
-    clip_model = freeze_module(clip_model)
-    model.clip = clip_model
+    # clip_model, _ = clip.load(cfg.MODEL.BACKBONE.TYPE)
+    # if not args.eval_only:
+    #     model.train()
+    # clip_model = freeze_module(clip_model)
+    # model.clip = clip_model
     
     ######### can not run with training
 

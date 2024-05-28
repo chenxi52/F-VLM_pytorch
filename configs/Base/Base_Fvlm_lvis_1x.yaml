@@ -3,7 +3,7 @@ MODEL:
   BACKBONE:
     SAM_TYPE: "vit_t"
     TYPE: "RN50"
-  CLIP_TEXT_FEATS_PATH: "datasets/lvis/lvis_base_cls.pkl" #********
+  CLIP_TEXT_FEATS_PATH: "/users/cx_xchen/DATASETS/lvis/lvis_base_cls.pkl" #********
   SAM_WEIGHTS: "mobile_sam.pt"
   SAM_PIXEL_MEAN: [123.675, 116.280, 103.530]
   SAM_PIXEL_STD: [58.395, 57.12, 57.375]

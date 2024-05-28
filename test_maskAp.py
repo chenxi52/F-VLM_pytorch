@@ -1,10 +1,5 @@
 #!/usr/bin/env python
 # Copyright (c) Facebook, Inc. and its affiliates.
-"""
-send the box to sam propmter and test the maskAp
-1. change prompter to sam prompter
-
-"""
 
 import logging
 import os
@@ -18,7 +13,7 @@ from detectron2.checkpoint import DetectionCheckpointer, PeriodicCheckpointer
 from detectron2.config import get_cfg
 from detectron2.data import MetadataCatalog, dataset_mapper
 
-from detic.data.build import custom_build_detection_test_loader, custom_build_detection_train_loader
+from detectron2.data import MetadataCatalog, build_detection_test_loader 
 from detectron2.data.build import get_detection_dataset_dicts, build_detection_test_loader, build_detection_train_loader, _train_loader_from_config
 
 from detectron2.engine import default_argument_parser, default_setup, default_writers, launch
@@ -62,7 +57,7 @@ def do_test(cfg, model):
         mapper = None if cfg.INPUT.TEST_INPUT_TYPE == 'default' \
             else SamDatasetMapper(
                 cfg, False, augmentations=build_custom_augmentation(cfg, False))
-        data_loader = custom_build_detection_test_loader(cfg, dataset_name, mapper=mapper)
+        data_loader = build_detection_test_loader(cfg, dataset_name, mapper=mapper)
         #####
         output_folder = os.path.join(
             cfg.OUTPUT_DIR, "inference_{}".format(dataset_name))
@@ -221,10 +216,6 @@ def main(args):
         )
         return do_test(cfg, model)
 
-    ##### freeze prompter params
-    for key, params in model.sam.prompt_encoder.named_parameters():
-        params.requires_grad = False
-    ########
 
     distributed = comm.get_world_size() > 1
     if distributed:

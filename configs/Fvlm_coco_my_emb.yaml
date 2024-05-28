@@ -1,8 +1,8 @@
 _BASE_: "Base/Base_Fvlm_coco_1x.yaml"
 MODEL:
   BACKBONE:
-    TYPE: "RN50"
-  CLIP_TEXT_FEATS_PATH: "datasets/coco/coco_cls.pkl"
+    TYPE: "models/RN50.pt"
+  CLIP_TEXT_FEATS_PATH: "/users/cx_xchen/DATASETS/coco/coco_cls.pkl"
   FPN: 
     NORM: "SyncBN" # 'SyncBN'  or ""
     ADD_PE: False

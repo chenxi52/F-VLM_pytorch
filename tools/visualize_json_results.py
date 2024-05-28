@@ -116,15 +116,15 @@ _PREDEFINED_SPLITS_COCO = {
     "coco_zeroshot_train_oriorder": ("coco/train2017", "coco/zero-shot/instances_train2017_seen_2_oriorder.json", 'all'),
     
 }
-
+_root = os.getenv("DETECTRON2_DATASETS", "datasets")
 
 
 for key, (image_root, json_file, cat) in _PREDEFINED_SPLITS_COCO.items():
     register_coco_instances(
         key,
         _get_metadata(cat),
-        os.path.join("datasets", json_file) if "://" not in json_file else json_file,
-        os.path.join("datasets", image_root),
+        os.path.join(_root, json_file) if "://" not in json_file else json_file,
+        os.path.join(_root, image_root),
     )
 
 
@@ -157,7 +157,7 @@ if __name__ == "__main__":
     parser.add_argument("--input", required=True, help="JSON file produced by the model")
     parser.add_argument("--output", required=True, help="output directory")
     parser.add_argument("--dataset", help="name of the dataset", default="coco_generalized_zeroshot_val")
-    parser.add_argument("--conf-threshold", default=0.2, type=float, help="confidence threshold")
+    parser.add_argument("--conf-threshold", default=0, type=float, help="confidence threshold")
     args = parser.parse_args()
 
     logger = setup_logger()

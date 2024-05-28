@@ -132,8 +132,3 @@ def inference_context(model, frozen):
     model.eval()
     yield
     model.train(training_mode)
-    if frozen:
-        if isinstance(model, torch.nn.parallel.DistributedDataParallel):
-            model.module.sam.eval()
-        else:
-            model.sam.eval()

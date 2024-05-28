@@ -1,6 +1,6 @@
 from detectron2.modeling.backbone.build import BACKBONE_REGISTRY
 from detectron2.layers import Conv2d, ShapeSpec
-from ...layers.custom_batchnorm import get_norm
+from ..layers.custom_batchnorm import get_norm
 from detic.modeling.clip import clip
 from detectron2.modeling.backbone.fpn import LastLevelMaxPool, FPN
 from typing import Dict

@@ -12,7 +12,7 @@ from lvis import LVIS
 
 from detectron2.data.datasets.lvis_v1_categories import LVIS_CATEGORIES as LVIS_V1_CATEGORIES
 logger = logging.getLogger(__name__)
-
+detectron_datasets = os.environ.get('DETECTRON2_DATASETS')
 __all__ = ["custom_load_lvis_json", "custom_register_lvis_instances"]
 
 def custom_register_lvis_instances(name, metadata, json_file, image_root):
@@ -127,11 +127,9 @@ for key, (image_root, json_file) in _CUSTOM_SPLITS_LVIS.items():
     custom_register_lvis_instances(
         key,
         get_lvis_instances_meta(key),
-        os.path.join("datasets", json_file) if "://" not in json_file else json_file,
-        os.path.join("datasets", image_root),
+        os.path.join(detectron_datasets, json_file) if "://" not in json_file else json_file,
+        os.path.join(detectron_datasets, image_root),
     )
-
-
 
 def get_contigous_ids_lvis(cat):
     # 直接输出 相对于1203类别的continuous id, 
@@ -140,7 +138,7 @@ def get_contigous_ids_lvis(cat):
     elif cat == 'seen':
         # 拿到所有的 seen id
         json_file =  "lvis/zero-shot/lvis_v1_train_seen.json"
-        json_file = os.path.join("datasets", json_file) 
+        json_file = os.path.join(detectron_datasets, json_file) 
         lvis_api = LVIS(json_file)
         catid2contid = {x['id']: i for i, x in enumerate(
             sorted(lvis_api.dataset['categories'], key=lambda x: x['id']))}

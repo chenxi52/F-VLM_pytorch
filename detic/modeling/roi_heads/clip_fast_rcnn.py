@@ -14,12 +14,12 @@ import numpy as np
 import pickle
 from detectron2.modeling.poolers import ROIPooler
 import fvcore.nn.weight_init as weight_init
-from detic.data.datasets.coco_zeroshot import get_contigous_ids
-from detic.data.datasets.lvis_v1_zeroshot import get_contigous_ids_lvis
+from ...data.datasets.coco_zeroshot import get_contigous_ids
+from ...data.datasets.lvis_v1_zeroshot import get_contigous_ids_lvis
 import torch.nn.functional as F
 from detectron2.utils.events import get_event_storage
 
-__all__ = ["SamRCNNOutputLayers"]
+__all__ = ["ClipRCNNOutputLayers"]
 logger = logging.getLogger(__name__)
 
 class ClipRCNNOutputLayers(FastRCNNOutputLayers):
@@ -134,7 +134,7 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
     def get_logits(self, img_feats, text_feats):
         img_feats = img_feats/img_feats.norm(dim=1, keepdim=True)
         text_feats = text_feats/text_feats.norm(dim=1, keepdim=True)
-        logits = img_feats @ (text_feats.t().to(img_feats.device)).to(torch.float32)
+        logits = img_feats @ (text_feats.t().to(device=img_feats.device, dtype=img_feats.dtype))
         return logits
 
     def losses(self, predictions, proposals):
@@ -308,7 +308,7 @@ class ClipRCNNOutputLayers(FastRCNNOutputLayers):
         vlm_box_features = self.test_pooler([clip_feats], proposal_boxes)
 
         # vlm pooler layer: clip attenpool
-        vlm_box_features = attenpool(vlm_box_features)
+        vlm_box_features = attenpool(vlm_box_features.half())
  
         logits_scale = 1/0.01
         vlm_scores = logits_scale * self.get_logits(vlm_box_features, self.text_feats)

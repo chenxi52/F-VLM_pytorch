@@ -15,8 +15,6 @@ from detectron2.utils.file_io import PathManager
 from detectron2.utils.logger import setup_logger
 from detectron2.utils.visualizer import Visualizer
 from detectron2.evaluation import COCOEvaluator, print_csv_format
-from detic.modeling.sam.build_sam import sam_model_registry
-from detic.modeling.sam.predictor import SamPredictor
 import detectron2.utils.comm as comm
 from torch.nn.parallel import DistributedDataParallel
 from detectron2.engine import launch
