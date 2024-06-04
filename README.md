@@ -1,5 +1,5 @@
 
-# Open-Vocabulary segmentation
+# F-VLM
 运行配置基本都在config-file
 
 ## dataset 以及 环境 准备
